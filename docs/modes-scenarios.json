@@ -23,122 +23,19 @@
             "note": "#full-name -> 'Ada Lovelace' (need 'Ada')"
           }
         ],
-        "elapsed_ms": 21076,
-        "actions": 10,
-        "decisions": 16,
+        "elapsed_ms": 21728,
+        "actions": 11,
+        "decisions": 14,
         "text_calls": 9,
         "model_calls": 9,
         "memory_fills": 0,
         "gate": {
           "reason": "action below its confidence floor",
-          "confidence": 0.25,
-          "target_confidence": 0.34,
+          "confidence": 0.38,
+          "target_confidence": 0.38,
           "floor": 0.5,
-          "irreversible": 0.53,
-          "action": "Degree programme",
-          "resolution": "abstain"
-        },
-        "ready_to_submit": false,
-        "consent_checked": true,
-        "field_labels_filled": [
-          "Degree programme",
-          "GPA",
-          "Graduation date",
-          "Portfolio URL",
-          "Why do you want this internship?"
-        ],
-        "kinds": [
-          "fill",
-          "fill",
-          "fill",
-          "fill",
-          "fill",
-          "fill",
-          "fill",
-          "fill",
-          "scroll",
-          "fill",
-          "click",
-          "select",
-          "select",
-          "click"
-        ]
-      },
-      "dry_run_2": {
-        "status": "abstained",
-        "outcome": "verified",
-        "checks": [
-          {
-            "check": "text_absent",
-            "pass": true,
-            "note": "unexpectedly present: []"
-          },
-          {
-            "check": "value_contains",
-            "pass": true,
-            "note": "#full-name -> 'Ada Lovelace' (need 'Ada')"
-          }
-        ],
-        "elapsed_ms": 7084,
-        "actions": 10,
-        "decisions": 12,
-        "text_calls": 9,
-        "model_calls": 0,
-        "memory_fills": 9,
-        "gate": {
-          "reason": "action below its confidence floor",
-          "confidence": 0.4,
-          "target_confidence": 0.4,
-          "floor": 0.5,
-          "irreversible": 0.54,
+          "irreversible": 0.73,
           "action": "How did you hear about us? → Other",
-          "resolution": "abstain"
-        },
-        "ready_to_submit": false,
-        "consent_checked": true,
-        "field_labels_filled": [
-          "Degree programme",
-          "GPA",
-          "Graduation date",
-          "Portfolio URL",
-          "Why do you want this internship?"
-        ],
-        "kinds": [
-          "fill",
-          "fill",
-          "fill",
-          "fill",
-          "fill",
-          "fill",
-          "fill",
-          "fill",
-          "scroll",
-          "fill"
-        ]
-      },
-      "submit_run": {
-        "status": "abstained",
-        "outcome": "refuted",
-        "checks": [
-          {
-            "check": "text_contains",
-            "pass": false,
-            "note": "matched [] of ['Application received', 'Ada Lovelace']"
-          }
-        ],
-        "elapsed_ms": 7432,
-        "actions": 11,
-        "decisions": 14,
-        "text_calls": 9,
-        "model_calls": 0,
-        "memory_fills": 9,
-        "gate": {
-          "reason": "irreversible action below its confidence floor",
-          "confidence": 0.75,
-          "target_confidence": 0.99,
-          "floor": 0.9,
-          "irreversible": 0.93,
-          "action": "Submit application",
           "resolution": "abstain"
         },
         "ready_to_submit": true,
@@ -164,7 +61,104 @@
           "click"
         ]
       },
-      "submit_withheld": true,
+      "dry_run_2": {
+        "status": "abstained",
+        "outcome": "verified",
+        "checks": [
+          {
+            "check": "text_absent",
+            "pass": true,
+            "note": "unexpectedly present: []"
+          },
+          {
+            "check": "value_contains",
+            "pass": true,
+            "note": "#full-name -> 'Ada Lovelace' (need 'Ada')"
+          }
+        ],
+        "elapsed_ms": 9148,
+        "actions": 11,
+        "decisions": 13,
+        "text_calls": 9,
+        "model_calls": 0,
+        "memory_fills": 9,
+        "gate": {
+          "reason": "action below its confidence floor",
+          "confidence": 0.37,
+          "target_confidence": 0.37,
+          "floor": 0.5,
+          "irreversible": 0.7,
+          "action": "How did you hear about us? → Other",
+          "resolution": "abstain"
+        },
+        "ready_to_submit": true,
+        "consent_checked": true,
+        "field_labels_filled": [
+          "Degree programme",
+          "GPA",
+          "Graduation date",
+          "Portfolio URL",
+          "Why do you want this internship?"
+        ],
+        "kinds": [
+          "fill",
+          "fill",
+          "fill",
+          "fill",
+          "fill",
+          "fill",
+          "fill",
+          "fill",
+          "scroll",
+          "fill",
+          "click"
+        ]
+      },
+      "submit_run": {
+        "status": "done",
+        "outcome": "verified",
+        "checks": [
+          {
+            "check": "text_contains",
+            "pass": true,
+            "note": "matched ['Application received', 'Ada Lovelace'] of ['Application received', 'Ada Lovelace']"
+          }
+        ],
+        "elapsed_ms": 10524,
+        "actions": 12,
+        "decisions": 14,
+        "text_calls": 9,
+        "model_calls": 0,
+        "memory_fills": 9,
+        "gate": {
+          "reason": "irreversible action below its confidence floor",
+          "confidence": 0.58,
+          "target_confidence": 0.98,
+          "floor": 0.6,
+          "irreversible": 0.94,
+          "action": "Submit application",
+          "resolution": "reobserve"
+        },
+        "ready_to_submit": false,
+        "consent_checked": false,
+        "field_labels_filled": [],
+        "kinds": [
+          "fill",
+          "fill",
+          "fill",
+          "fill",
+          "fill",
+          "fill",
+          "fill",
+          "fill",
+          "scroll",
+          "fill",
+          "click",
+          "click"
+        ]
+      },
+      "submit_withheld": false,
+      "submit_floor": 0.6,
       "memory_added": [
         "Name: Ada Lovelace",
         "Email: ada@example.test",

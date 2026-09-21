@@ -206,6 +206,13 @@ class Agent:
         self._text_model = spec.get("text_model") or None
         self._text_base_url = spec.get("text_base_url") or None
         self.decide_timeout = _number(spec.get("decide_timeout_s"), DECIDE_TIMEOUT, ceiling=DECIDE_TIMEOUT)
+        # A mode may lower the irreversible floor for work its owner trusts. The gate
+        # clamps it to the reversible floor; raising it is not supported (the global
+        # default already is the conservative end of the KB's table).
+        self._irreversible_floor = (
+            _number(spec.get("irreversible_floor"), None)
+            if spec.get("irreversible_floor") is not None else None
+        )
         self._max_steps = _budget(spec.get("max_steps"), None)
         self.use_cache = spec.get("cache") is not False
         collect = spec.get("collect") if isinstance(spec.get("collect"), dict) else {}
@@ -1278,7 +1285,25 @@ class Agent:
             if len(state["history"]) >= self.step_budget():
                 state["status"] = "blocked"
                 raise ValueError(f"Stopped at the {self.step_budget()}-action budget")
-            verdict = gate_check(decision, action)
+            # An exact-label memory fill is code-validated: the value is user data, and the
+            # element is only trusted when exactly one fill action on the page carries that
+            # label. A second field with the same label is the wrong-field risk, so
+            # ambiguity falls back to the confidence gate like any other decision.
+            memory_fill = False
+            if action["kind"] == "fill" and getattr(self, "mode", None) is not None:
+                wanted = modes.normalize_label(action.get("label"))
+                same_label = [
+                    a for a in page["actions"]
+                    if a.get("kind") == "fill"
+                    and modes.normalize_label(a.get("label")) == wanted
+                ] if wanted else []
+                memory_fill = (
+                    len(same_label) == 1 and self.mode.value_for(action.get("label")) is not None
+                )
+            verdict = None if memory_fill else gate_check(
+                decision, action,
+                irreversible_floor=getattr(self, "_irreversible_floor", None),
+            )
             if verdict:
                 # The gate never retries a mutation. First low reading: one fresh
                 # observation with the decision cache bypassed. Second low reading on the

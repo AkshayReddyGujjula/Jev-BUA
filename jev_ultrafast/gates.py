@@ -41,8 +41,13 @@ IRREVERSIBLE_MIN = _threshold("JEV_GATE_IRREVERSIBLE", 0.9)
 IRREVERSIBLE_NOUL = _threshold("JEV_IRREVERSIBLE_THRESHOLD", 0.5)
 
 
-def check(decision, action):
-    """None when the action may execute, else the gate verdict (a dict for evidence)."""
+def check(decision, action, irreversible_floor=None):
+    """None when the action may execute, else the gate verdict (a dict for evidence).
+
+    `irreversible_floor` is a mode's own floor for committable actions. A mode may lower it
+    for work the operator trusts (never below the reversible floor); lowering it is a
+    deliberate, user-authored choice recorded in the mode file, not a model decision.
+    """
     if action.get("kind") not in GATED_KINDS:
         return None
     confidence = decision.get("confidence")
@@ -66,6 +71,11 @@ def check(decision, action):
         and (action.get("role") or "").lower() not in REVERSIBLE_ROLES
     )
     floor = IRREVERSIBLE_MIN if high_stakes else REVERSIBLE_MIN
+    if high_stakes and irreversible_floor is not None:
+        try:
+            floor = min(IRREVERSIBLE_MIN, max(REVERSIBLE_MIN, float(irreversible_floor)))
+        except (TypeError, ValueError):
+            floor = IRREVERSIBLE_MIN
     if confidence >= floor:
         return None
     return {

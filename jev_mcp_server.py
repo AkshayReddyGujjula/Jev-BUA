@@ -47,6 +47,10 @@ EVIDENCE_DIR = os.environ.get("JEV_EVIDENCE_DIR", str(ROOT / "artifacts" / "evid
 # Where replay plans live: identity-level step descriptors of a completed run, served only
 # to the exact url+goal that recorded them. `JEV_REPLAY_DIR=0` disables replay.
 REPLAY_DIR = os.environ.get("JEV_REPLAY_DIR", str(ROOT / "artifacts" / "replay"))
+# A wedged page or daemon must not wedge the client: measured once as a 16-minute hang on a
+# browser_state call against x.com. Every tool call runs under this wall-clock deadline;
+# an abandoned call drops the warm session. <= 0 disables the guard.
+CALL_TIMEOUT_S = float(os.environ.get("JEV_MCP_CALL_TIMEOUT_S", "120"))
 
 
 def _evidence_dir():
@@ -512,6 +516,56 @@ def send(payload):
     sys.stdout.flush()
 
 
+def _close_quietly(browser):
+    try:
+        browser.close()
+    except Exception:
+        pass
+
+
+def _abandon_warm():
+    """Forget the warm browser without blocking on the one a stuck call may still hold."""
+    browser, _WARM["browser"] = _WARM["browser"], None
+    _WARM["mode"] = _WARM["url"] = None
+    if browser is not None:
+        threading.Thread(target=_close_quietly, args=(browser,), daemon=True).start()
+
+
+def _bounded(handler, arguments, timeout=None):
+    """Run a tool handler under a wall-clock deadline.
+
+    The worker is a daemon thread, so an abandoned call can never block process exit. On
+    timeout the warm session is dropped rather than shared with a call that never returned,
+    and the caller gets a structured error telling it the run is stalled.
+    """
+    limit = CALL_TIMEOUT_S if timeout is None else float(timeout)
+    if limit <= 0:
+        return handler(arguments)
+    outcome = {}
+
+    def run():
+        try:
+            outcome["value"] = handler(arguments)
+        except Exception as error:      # re-raised on the caller's thread below
+            outcome["error"] = error
+
+    worker = threading.Thread(target=run, daemon=True, name="jev-mcp-tool")
+    worker.start()
+    worker.join(limit)
+    if worker.is_alive():
+        _abandon_warm()
+        return {
+            "error": (
+                f"tool call exceeded {limit:g}s and was abandoned; the page never answered. "
+                "Treat the run as stalled and do not retry it."
+            ),
+            "abandoned": True,
+        }
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
 def handle(request):
     method = request.get("method")
     rid = request.get("id")
@@ -544,7 +598,7 @@ def handle(request):
             return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602,
                                                            "message": f"Unknown tool: {name}"}}
         try:
-            result = handler(params.get("arguments") or {})
+            result = _bounded(handler, params.get("arguments") or {})
         except Exception as error:
             traceback.print_exc(file=sys.stderr)
             return {"jsonrpc": "2.0", "id": rid, "result": {

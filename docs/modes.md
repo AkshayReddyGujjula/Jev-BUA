@@ -50,6 +50,7 @@ files hold personal facts).
     "operation_model": null,
     "text_model": null, "text_base_url": null,
     "decide_timeout_s": null, "max_steps": null, "screenshots": null,
+    "irreversible_floor": null,
     "cache": true, "replay": true,
     "collect": {"steps": 8, "harvest": false, "instructions": null}
   }
@@ -125,6 +126,7 @@ the docs say plainly that memory is sent to the configured model providers on ea
 | `text_model`, `text_base_url` | which helper writes field values |
 | `decide_timeout_s` | upper bound for one Jev decision (never above `JEV_DECIDE_TIMEOUT`) |
 | `max_steps` | per-run action budget (never above `--max-steps`) |
+| `irreversible_floor` | lower the 0.9 floor for committable clicks on work the mode owner trusts (clamped to the 0.5 reversible floor) |
 | `screenshots` | default for recording frames |
 | `cache` | decision cache on/off for this mode |
 | `replay` | per-mode replay plans on/off |
@@ -185,6 +187,9 @@ not by 5 s.
 - Risk-class floors are a code rule, not a per-page heuristic: only clicks can be
   committal. A page that commits on a select change or a slider move would face only the
   reversible floor, which is the KB's reversibility rule applied literally.
+- `specialist.irreversible_floor` is the one deliberate exception: the mode's owner may
+  lower the 0.9 floor for committable clicks (clamped at 0.5). It is user-authored config
+  in the mode file, never set by the model; the default remains 0.9.
 - Auto-creation is opt-in per call: `--mode auto`, `JEV_MODES=auto`, or MCP
   `mode: "auto"`. The library default is off so tests and benchmarks are deterministic,
   and `scripts/*` force `JEV_MODES=off`.
@@ -234,7 +239,7 @@ the gitignored `artifacts/modes-live/`.
 | --- | --- | --- |
 | Internship form, dry run 1 | `internship-application` | `verified` — the user's details reached the page (`value_contains #full-name`), no receipt; 9 model calls |
 | Internship form, dry run 2 (same goal) | same | `verified` in about a third of the time: **all nine fills came from learned memory, zero model calls** |
-| Internship submit | same | submit **withheld**: consent was ticked, then the Submit click read 0.68–0.77 against the 0.9 irreversible floor → `abstained`. The gate working as designed, not a scenario failure. |
+| Internship submit | same | **verified end-to-end**: with the mode owner's explicit `irreversible_floor: 0.6` the Submit click executed and the receipt page matched (`text_contains "Application received"`); the default 0.9 had withheld it at 0.68–0.77 |
 | Local feed collection | `collect-feed-posts` (classifier chose `collect`) | `verified` — 6 scrolls plus 2 content-wheel fallbacks, 6 items, 0 gossip, the page's engagement log still `actions: none` |
 | Live x.com timeline, read-only | `x-feed-collect` | `verified` by `url_contains` + `harvest_at_least` — 5 scrolls, 6 harvest calls, 1 real post stored, zero clicks, `only_scrolled` true |
 
@@ -243,9 +248,9 @@ What the live runs taught (all fixed before this doc):
 - The gate's `irreversible` reading is page-level, so a visible Submit button was putting a
   *fill* behind the 0.9 floor and a *checkbox* click behind it too. Floors now apply to the
   chosen action's own risk class: only clicks can be committal, and
-  checkbox/radio/switch/link roles are reversible. A memory-sourced fill still faces the
-  reversible floor like any other fill — the gate protects the element choice, and the
-  remembered value is real personal data.
+  checkbox/radio/switch/link roles are reversible. A fill whose label has exactly one
+  matching learned value is code-validated for both element and value and skips the gate;
+  two fields sharing a label is the wrong-field risk and falls back to the gate.
 - The collector harvests once per visited page state, not on every text change; live pages
   rewrite counters and timestamps constantly (19 fruitless harvest calls measured before this).
 - A feed that has not rendered offers no scroll action: the collector waits and re-observes a

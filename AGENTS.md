@@ -64,8 +64,9 @@ and a tab and the failure mode is *silently wrong pages*.
   showed the field accepted the value, and never for sensitive labels, seek controls or replays.
 - The confidence gate's `irreversible` reading is page-level, so floors apply to the chosen
   action's own risk class: only clicks can be committal; checkbox/radio/switch/link clicks and
-  fills/selects/sliders are reversible. A memory-sourced fill still faces the reversible
-  floor — the gate protects the element choice, not just the value.
+  fills/selects/sliders are reversible. An *unambiguous* exact-label memory fill is
+  code-validated for both element and value and skips the gate; two fields sharing a label
+  fall back to the gate (the wrong-field risk).
 - The collector is scroll-only by construction. Harvest once per visited page state, never on
   ambient text churn; wait for unrendered feeds; fall back to scrolling the element under the
   viewport centre for inner scrollers. Keep `harvest_at_least` paired with a page check.
@@ -76,6 +77,9 @@ and a tab and the failure mode is *silently wrong pages*.
   `artifacts/modes-live/`; the committed summary is `docs/modes-scenarios.json`.
 - `opencode-instructions.md` is an external reviewer's channel: never edit or commit it (it is
   gitignored), and address findings in code and docs.
-- A wedged page or daemon can hang an MCP tool call for minutes; `browser_do` takes
-  `max_seconds`, the other tools do not. If a call runs past ~60 s, stop and report the hang
-  rather than retrying it; the page never answered.
+- A mode may lower the irreversible floor (`specialist.irreversible_floor`, clamped at 0.5)
+  for committable clicks on work its owner trusts; it is user config in `mode.json`, never
+  model-set. The default 0.9 stays.
+- A wedged page or daemon can hang an MCP tool call; every call is abandoned after
+  `JEV_MCP_CALL_TIMEOUT_S` (default 120 s) with an `abandoned` error and the warm session is
+  dropped. Treat an abandoned call as stalled and do not retry it.

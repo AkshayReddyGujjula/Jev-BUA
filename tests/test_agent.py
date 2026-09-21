@@ -990,6 +990,19 @@ def test_page_level_irreversibility_does_not_raise_a_fill_floor(runner, monkeypa
     runner.state["browser"].act.assert_called_once()
 
 
+def test_a_mode_may_lower_the_irreversible_floor():
+    from jev_ultrafast import gates
+
+    click = {"kind": "click", "label": "Submit", "role": "button"}
+    decision = {"confidence": 0.75, "irreversible": 0.9}
+    assert gates.check(decision, click) is not None                       # global 0.9
+    assert gates.check(decision, click, irreversible_floor=0.7) is None   # user choice
+    verdict = gates.check({"confidence": 0.6, "irreversible": 0.9}, click, irreversible_floor=0.7)
+    assert verdict is not None and verdict["floor"] == 0.7
+    clamped = gates.check({"confidence": 0.4, "irreversible": 0.9}, click, irreversible_floor=0.1)
+    assert clamped["floor"] == 0.5                    # never below the reversible floor
+
+
 def test_reversible_roles_do_not_inherit_a_submit_buttons_risk():
     from jev_ultrafast import gates
 

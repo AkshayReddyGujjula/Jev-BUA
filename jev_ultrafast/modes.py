@@ -571,6 +571,7 @@ def create(root, decision, goal=""):
             "decide_timeout_s": None,
             "max_steps": None,
             "screenshots": None,
+            "irreversible_floor": None,
             "cache": True,
             "replay": strategy != "collect",
             "collect": {"steps": 8, "harvest": strategy == "collect", "instructions": None},

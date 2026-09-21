@@ -402,6 +402,7 @@ def make_agent(page_state, *, mode=None, browser=None):
     agent._harvest_enabled = bool(collect.get("harvest")) and agent._strategy == "collect"
     agent._harvest_instructions = None
     agent._collect_limit = int(collect.get("steps") or 4)
+    agent._irreversible_floor = (mode.specialist.get("irreversible_floor") if mode else None)
     agent.replay_dir = None
     agent.replay_plan = None
     agent.values = {}
@@ -490,11 +491,73 @@ def test_learned_value_is_typed_without_a_model_call(monkeypatch, root):
     assert agent.browser.acted[-1]["text"] == "Ada Lovelace"
 
 
-def test_memory_fill_still_faces_the_reversible_floor(monkeypatch, root):
-    """The gate protects the element choice even when the value comes from memory."""
+def test_agent_uses_the_modes_irreversible_floor(root, monkeypatch):
+    mode = internship_mode(root)
+    mode.data.setdefault("specialist", {})["irreversible_floor"] = 0.6
+    submit = page(actions=[
+        SCROLL,
+        {"id": "e9", "kind": "click", "label": "Submit application", "role": "button", "node": 2},
+    ])
+    agent = make_agent(submit, mode=mode)
+    agent.state["decision"] = decision("e9", operation="CLICK", confidence=0.65, irreversible=0.92)
+    state = agent.command("act", {"fingerprint": agent.state["page"]["fingerprint"]})
+    assert state.get("gate") is None
+    assert agent.browser.acted and agent.browser.acted[-1]["action"]["id"] == "e9"
+
+
+def test_default_floor_still_withholds_the_same_submit(root):
+    mode = internship_mode(root)                     # no floor override: global 0.9
+    submit = page(actions=[
+        SCROLL,
+        {"id": "e9", "kind": "click", "label": "Submit application", "role": "button", "node": 2},
+    ])
+    agent = make_agent(submit, mode=mode)
+    agent.state["decision"] = decision("e9", operation="CLICK", confidence=0.65, irreversible=0.92)
+    state = agent.command("act", {"fingerprint": agent.state["page"]["fingerprint"]})
+    assert state["gate"]["floor"] == 0.9
+    assert not agent.browser.acted
+
+
+def test_mcp_tool_calls_are_bounded_by_a_deadline():
+    import time as time_module
+
+    import jev_mcp_server
+
+    assert jev_mcp_server._bounded(lambda args: {"ok": args}, {"x": 1}, timeout=1) == {"ok": {"x": 1}}
+    started = time_module.monotonic()
+    result = jev_mcp_server._bounded(lambda args: time_module.sleep(5), {}, timeout=0.2)
+    assert result["abandoned"] is True
+    assert time_module.monotonic() - started < 3
+
+    def boom(args):
+        raise ValueError("nope")
+
+    with pytest.raises(ValueError):
+        jev_mcp_server._bounded(boom, {}, timeout=1)
+
+
+def test_an_unambiguous_memory_fill_skips_the_confidence_gate(monkeypatch, root):
+    """Both element (unique exact label) and value (user memory) are code-validated."""
     mode = internship_mode(root)
     mode.learn("Full name", "Ada Lovelace")
     agent = make_agent(page(), mode=mode)
+    agent.state["decision"] = decision(confidence=0.1)
+    agent.command("act", {"fingerprint": agent.state["page"]["fingerprint"]})
+    assert agent.browser.acted[-1]["text"] == "Ada Lovelace"
+    assert agent.state["text_calls"][-1]["model"] == "mode-memory"
+
+
+def test_an_ambiguous_memory_fill_still_faces_the_gate(monkeypatch, root):
+    """Two fields with the same label are exactly the wrong-field risk: gate them."""
+    mode = internship_mode(root)
+    mode.learn("Email", "ada@example.test")
+    ambiguous = page(actions=[
+        SCROLL,
+        {"id": "e1", "kind": "fill", "label": "Email", "role": "textbox", "value": "", "node": 1},
+        {"id": "e2", "kind": "fill", "label": "Email (required)", "role": "textbox",
+         "value": "", "node": 2},
+    ])
+    agent = make_agent(ambiguous, mode=mode)
     agent.state["decision"] = decision(confidence=0.1)
     state = agent.command("act", {"fingerprint": agent.state["page"]["fingerprint"]})
     assert state["gate"]["resolution"] == "reobserve"

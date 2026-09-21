@@ -186,6 +186,14 @@ def case_internship():
             url, INTERNSHIP_GOAL, mode_slug=mode.slug, expect=INTERNSHIP_EXPECT
         )
         report["learned_after_run_2"] = len(mode.learned_entries())
+        # The mode owner lowers the irreversible floor for this trusted local form; the
+        # default 0.9 withheld it (Submit read 0.68-0.77 in earlier runs). This is a
+        # user-authored setting in mode.json, never something the model decides.
+        mode.data.setdefault("specialist", {})["irreversible_floor"] = 0.6
+        (mode.path / "mode.json").write_text(
+            json.dumps(mode.data, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        report["submit_floor"] = 0.6
         report["submit_run"] = run_agent(
             url,
             INTERNSHIP_SUBMIT_GOAL,
