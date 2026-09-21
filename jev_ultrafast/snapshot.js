@@ -22,7 +22,7 @@
       e.getAttribute('title') || e.getAttribute('placeholder') || '';
   };
   const roles=['button','link','checkbox','radio','switch','tab','menuitem','menuitemradio',
-    'option','gridcell','combobox','textbox','searchbox','spinbutton'];
+    'option','gridcell','combobox','textbox','searchbox','spinbutton','slider'];
   const selector='a[href],button,input,textarea,select,summary,[contenteditable="true"],'+
     roles.map(role=>'[role="'+role+'"]').join(',');
   const role = e => {
@@ -65,6 +65,14 @@
       if (value!==null) base[key]=value;
     }
     if (['checkbox','radio'].includes(e.type)) base.checked=String(e.checked);
+    if (rname==='slider') {
+      const min=Number(e.getAttribute('aria-valuemin') ?? 0);
+      const max=Number(e.getAttribute('aria-valuemax') ?? 100);
+      const now=Number(e.getAttribute('aria-valuenow') ?? min);
+      actions.push({...base, kind:'seek', value:String(now), min, max,
+        label:base.label+' ['+min+'-'+max+']'});
+      continue;
+    }
     if (e.tagName==='SELECT') {
       for (const o of e.options) if (!o.selected && !o.disabled && !o.closest('optgroup[disabled]'))
         actions.push({...base,kind:'select',value:o.value,
@@ -102,6 +110,18 @@
   if (scrollY+innerHeight<height-2) actions.push({id:'scroll_down',kind:'scroll',label:'Scroll down',delta:560});
   if (scrollY>0) actions.push({id:'scroll_up',kind:'scroll',label:'Scroll up',delta:-560});
   actions.push({id:'wait',kind:'wait',label:'Wait for the page to update'});
+  const keys=[{id:'key_escape',key:'Escape',code:'Escape',vk:27,label:'Press Escape'},
+    {id:'key_enter',key:'Enter',code:'Enter',vk:13,label:'Press Enter'}];
+  if (document.querySelector('video')) keys.push(
+    {id:'key_fullscreen',key:'f',code:'KeyF',vk:70,label:'Toggle fullscreen (F)'},
+    {id:'key_captions',key:'c',code:'KeyC',vk:67,label:'Toggle captions (C)'},
+    {id:'key_play',key:'k',code:'KeyK',vk:75,label:'Play or pause (K)'},
+    {id:'key_mute',key:'m',code:'KeyM',vk:77,label:'Mute (M)'},
+    {id:'key_speed_up',key:'>',code:'Period',vk:190,shift:true,label:'Increase playback speed (Shift+.)'},
+    {id:'key_speed_down',key:'<',code:'Comma',vk:188,shift:true,label:'Decrease playback speed (Shift+,)'},
+    {id:'key_seek_forward',key:'l',code:'KeyL',vk:76,label:'Seek forward 10 seconds (L)'},
+    {id:'key_seek_backward',key:'j',code:'KeyJ',vk:74,label:'Seek backward 10 seconds (J)'});
+  for (const k of keys) actions.push({...k, kind:'key'});
   return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,
     scroll:{y:scrollY,height},actions,marker,page_key,guards,omitted_actions};
 })()

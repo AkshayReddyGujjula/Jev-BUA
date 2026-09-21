@@ -2,38 +2,206 @@
 
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 from browser_harness.admin import ensure_daemon
-from browser_harness.helpers import cdp
+from browser_harness.helpers import activate_tab, cdp
 
 # Atomically read visible content and controls, preserving actual DOM node identity.
-READ_STATE = Path(__file__).with_name("snapshot.js").read_text()
+READ_STATE = Path(__file__).with_name("snapshot.js").read_text(encoding="utf-8")
 MARKER = f"(() => {{ const state={READ_STATE}; return state?.marker ?? null; }})()"
+
+TAB_MODES = ("foreground", "background", "active")
+INTERNAL_URL_PREFIXES = ("chrome://", "chrome-untrusted://", "devtools://", "chrome-extension://", "about:")
+
+# How long Browser construction waits for document.readyState === "complete" after a
+# navigation. The original 15 s deadline made every page with a hung subresource (an
+# analytics beacon, a stalled image, a long-poll) a 15 s hang BEFORE the loop's own
+# anti-loop deadline had even started - measured at 20.5 s end-to-end. settle() and
+# fresh() already handle a page that is still loading, so this only has to cover the
+# common case.
+NAV_TIMEOUT = float(os.environ.get("JEV_NAV_TIMEOUT", "4"))
+# How long to wait for a tab opened by the last action to appear. 4 s was disproportionate
+# to the 5 s no-progress deadline it sits inside.
+FOLLOW_TAB_TIMEOUT = float(os.environ.get("JEV_FOLLOW_TAB_TIMEOUT", "1.5"))
+# Screens one caller-directed scan may traverse before handing back to the model.
+SCAN_MAX_SCREENS = int(os.environ.get("JEV_SCAN_MAX_SCREENS", "200"))
+# Consecutive unproductive scrolls before a scan calls the list exhausted. One is not enough:
+# a page that is still settling, or a lazy-load that has not landed yet, looks exactly like the
+# end of a list for a single step. Measured - the first scan of a run reliably exited after two
+# screens on a page that then yielded the target five screens later. Matches the agent's own
+# barren-scroll guard so the two agree on what "exhausted" means.
+SCAN_BARREN_LIMIT = int(os.environ.get("JEV_SCAN_BARREN_LIMIT", "3"))
+
+# How long a single caller-directed scan may run before handing back to the model.
+SCAN_MAX_S = float(os.environ.get("JEV_SCAN_MAX_SECONDS", "120"))
+
+
+def target_visible(page, target):
+    """True when `target` (case-insensitive) already appears in a clickable label or the text."""
+    needle = (target or "").strip().lower()
+    if not needle:
+        return False
+    labels = " ".join((a.get("label") or "") for a in page.get("actions") or []).lower()
+    return needle in labels or needle in (page.get("text") or "").lower()
+
 
 class StalePage(ValueError):
     """A decision no longer refers to the observed page."""
 
 
+def _visible_page_target():
+    """The user's currently visible Chrome tab as (targetId, sessionId), or None.
+
+    Only the visible tab of a window reports document.visibilityState == "visible";
+    a visible tab that also has focus wins when several windows are open.
+    One probe session per candidate is detached again; only the chosen one is kept.
+    """
+    best = None
+    for info in cdp("Target.getTargets")["targetInfos"]:
+        if info.get("type") != "page" or info.get("url", "").startswith(INTERNAL_URL_PREFIXES):
+            continue
+        session = cdp("Target.attachToTarget", targetId=info["targetId"], flatten=True)["sessionId"]
+        try:
+            value = cdp(
+                "Runtime.evaluate",
+                session_id=session,
+                expression="[document.visibilityState, document.hasFocus()]",
+                returnByValue=True,
+            )["result"].get("value")
+        except Exception:
+            value = None
+        visible = bool(value and value[0] == "visible")
+        if visible and value[1]:
+            if best:
+                cdp("Target.detachFromTarget", sessionId=best[1])
+            return info["targetId"], session
+        if visible and best is None:
+            best = (info["targetId"], session)
+            continue
+        cdp("Target.detachFromTarget", sessionId=session)
+    return best
+
+
 class Browser:
     def __init__(self, url):
         ensure_daemon()
-        self.target = cdp("Target.createTarget", url="about:blank", background=True)["targetId"]
-        self.session = cdp("Target.attachToTarget", targetId=self.target, flatten=True)["sessionId"]
-        self.call("Emulation.setDeviceMetricsOverride", width=1120, height=780, deviceScaleFactor=1, mobile=False)
-        # Keep rAF/menus rendering in an owned background tab, without activating the user's Chrome tab.
+        self.mode = os.environ.get("JEV_TAB_MODE", "foreground").strip().lower()
+        if self.mode not in TAB_MODES:
+            raise ValueError(f"JEV_TAB_MODE must be one of {TAB_MODES}, got {self.mode!r}")
+        self.owns_target = self.mode != "active"
+        if self.mode == "active":
+            found = _visible_page_target()
+            if not found:
+                raise RuntimeError(
+                    "No visible Chrome tab found for JEV_TAB_MODE=active; open a page or use foreground mode."
+                )
+            self.target, self.session = found
+        else:
+            background = self.mode == "background"
+            self.target = cdp("Target.createTarget", url="about:blank", background=background)["targetId"]
+            self.session = cdp("Target.attachToTarget", targetId=self.target, flatten=True)["sessionId"]
+            if not background:
+                activate_tab(self.target)
+            if background:
+                # Emulated metrics keep hidden snapshots consistent; visible tabs use the real window size.
+                self.call(
+                    "Emulation.setDeviceMetricsOverride",
+                    width=1120, height=780, deviceScaleFactor=1, mobile=False,
+                )
+        self._known_targets = {t["targetId"] for t in self._page_targets()}
+        self.owned_targets = [self.target] if self.owns_target else []
+        # Keep rAF/menus rendering even when the tab is not the visible one.
         self.call("Emulation.setFocusEmulationEnabled", enabled=True)
+        if url:
+            self.navigate(url)
+
+    def navigate(self, url):
+        """Point this tab at `url` and wait for the document, the same way __init__ does.
+
+        Used by a warm session: the tab is reused, but every call starts from a freshly
+        navigated document so no state leaks between verification runs.
+        """
+        if not url:
+            return
         self.call("Page.navigate", url=url)
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + NAV_TIMEOUT
         while time.monotonic() < deadline:
             if self.evaluate("document.readyState") == "complete":
                 break
             time.sleep(0.02)
+        self.last_url = url
+        if not any(t["targetId"] == self.target for t in self._page_targets()):
+            # Chrome 153 replaces the target on navigation: adopt the replacement before the first read.
+            self.reattach()
 
     def call(self, method, **params):
-        return cdp(method, session_id=self.session, **params)
+        try:
+            return cdp(method, session_id=self.session, **params)
+        except RuntimeError as error:
+            if not self._session_lost(error) or not self.reattach():
+                raise
+            return cdp(method, session_id=self.session, **params)
+
+    def screenshot(self, quality=60):
+        return self.call("Page.captureScreenshot", format="jpeg", quality=quality)["data"]
+
+    @staticmethod
+    def _session_lost(error):
+        return "session with given id" in str(error).lower()
+
+    def reattach(self):
+        """Re-attach after a dropped CDP session, adopting the replacement target when
+        Chrome re-creates it on navigation. Fails only when no usable page target exists.
+
+        Adoption is deliberately narrow. The previous fallback was `real[-1]` - whichever
+        page happened to be last in the target list - which in a shared browser silently
+        moved an instance onto ANOTHER instance's tab, and the run then drove a page it did
+        not own (observed as non-deterministic parallel checks: a worker ending on a URL no
+        check ever visits, reached through history that was not its own). An instance now
+        re-attaches only to a target it can attribute to itself, and returns False when the
+        candidate set is ambiguous, so the caller sees an error instead of the wrong page.
+        """
+        pages = self._page_targets()
+        ids = {t["targetId"] for t in pages}
+        owned = {t["targetId"]: t for t in pages if t["targetId"] in set(self.owned_targets)}
+        target = self.target if self.target in ids else None
+
+        if target is None:
+            known_url = getattr(self, "last_url", "")
+            matches = [t for t in pages if known_url and t.get("url") == known_url]
+            if len(matches) == 1:
+                target = matches[0]["targetId"]
+            elif len(owned) == 1:
+                target = next(iter(owned))
+            elif not self.owns_target:
+                # Active mode: the user's visible tab is ours to re-find.
+                found = _visible_page_target()
+                if not found:
+                    return False
+                target = found[0]
+            else:
+                # Ambiguous. Do not guess - a wrong adoption is far worse than a failure.
+                return False
+
+        if target != self.target:
+            if self.owns_target and target not in self.owned_targets:
+                self.owned_targets.append(target)
+            self._known_targets.add(target)
+            self.target = target
+        self.session = cdp("Target.attachToTarget", targetId=target, flatten=True)["sessionId"]
+        return True
+
+    def _browser_operation(self, request):
+        try:
+            return browser_operation(request)
+        except RuntimeError as error:
+            if not self._session_lost(error) or not self.reattach():
+                raise
+            return browser_operation({**request, "session": self.session})
 
     def evaluate(self, expression):
         response = self.call("Runtime.evaluate", expression=expression, returnByValue=True)
@@ -41,7 +209,129 @@ class Browser:
             raise StalePage("Document changed during evaluation")
         return response.get("result", {}).get("value")
 
-    def observe(self, screenshot=True):
+    SETTLE_SIGNATURE = (
+        "(document.readyState==='complete'?1:0)+':'+"
+        "((document.body?document.body.innerText.length:0)+':'+"
+        "document.querySelectorAll('a,button,input,select,textarea').length)"
+    )
+
+    # A rendering frame is ~16.7 ms. Two equal samples must span at least SETTLE_EVIDENCE
+    # before the page counts as settled: a shorter window can straddle a pause mid-load
+    # and return while the page is still mutating (a wasted observation). 50 ms is still
+    # ~5x under the old flat 250 ms sleep, which made 255 ms the floor for EVERY read.
+    SETTLE_INTERVAL = 0.02
+    SETTLE_EVIDENCE = 0.05
+    SETTLE_INTERVAL_MAX = 0.15
+    SETTLE_BACKOFF = 1.9
+
+    def settle(self, timeout=1.0, interval=None, deadline=None):
+        """Wait until two consecutive DOM fingerprints match (page stopped rendering), capped.
+
+        An already-idle page settles in roughly 50-100 ms; the previous flat 250 ms sleep
+        made 255 ms the floor for every observation. A page that is genuinely still changing
+        pays the wait, and the interval backs off so a slow loader is not polled at full rate.
+
+        `deadline` is an absolute monotonic time the wait must not cross. Callers inside a
+        run pass the anti-loop deadline, so an observation started near it cannot push the
+        stop past the guarantee by a full settle window.
+
+        What the readyState term does and does not buy: a HARD navigation flips readyState
+        loading -> complete at most twice per document, which forces a re-sample and stops a
+        half-loaded page being mistaken for a settled one. It does NOT detect a soft
+        (pushState) route change, which leaves readyState complete on both sides - that case
+        is caught by the freshness marker in fresh()/act(), which is the guard that actually
+        protects an action. Signature equality here is an optimisation; fresh() is the safety
+        property.
+
+        Transient protocol errors are treated as "not yet settled" and bounded by the
+        deadline rather than propagated: sampling more often widens the window in which a
+        navigation tears down the execution context.
+        """
+        end = time.monotonic() + timeout
+        if deadline is not None:
+            end = min(end, deadline)
+        wait = interval or self.SETTLE_INTERVAL
+        previous = None
+        stable_since = None
+        while True:
+            try:
+                current = self.evaluate(self.SETTLE_SIGNATURE)
+            except (StalePage, RuntimeError):
+                current = None
+            now = time.monotonic()
+            if current is not None and current == previous:
+                if stable_since is not None and (now - stable_since) >= self.SETTLE_EVIDENCE:
+                    return
+            else:
+                stable_since = now
+            previous = current
+            if now >= end:
+                return
+            time.sleep(wait)
+            wait = min(wait * self.SETTLE_BACKOFF, self.SETTLE_INTERVAL_MAX)
+
+    def _page_targets(self):
+        return [t for t in cdp("Target.getTargets")["targetInfos"] if t.get("type") == "page"]
+
+    def follow_new_tab(self, timeout=None):
+        """Adopt a page target opened by the last action, if one appeared and looks like a real page."""
+        if os.environ.get("JEV_FOLLOW_TABS", "1") == "0":
+            return False
+        deadline = time.monotonic() + (timeout or FOLLOW_TAB_TIMEOUT)
+        while True:
+            newcomers = [t for t in self._page_targets() if t["targetId"] not in self._known_targets]
+            real = [t for t in newcomers if not t.get("url", "").startswith(INTERNAL_URL_PREFIXES)]
+            if real:
+                target = real[0]["targetId"]
+                self.session = cdp("Target.attachToTarget", targetId=target, flatten=True)["sessionId"]
+                self.target = target
+                self._known_targets.add(target)
+                if self.owns_target:
+                    self.owned_targets.append(target)
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.25)
+
+    def scan(self, action, target, page, max_screens=None, deadline=None):
+        """Scroll until `target` appears. Returns (page, screens, found).
+
+        A caller-supplied target turns a scan into deterministic work: once the model has
+        said "the target is not visible", scrolling further needs no new decision. Every
+        screen is still OBSERVED, which is the whole reason this is safe - a batch of blind
+        scrolls would jump past the target and the model would never see it.
+
+        Stops on: the target appearing, the list offering no further scroll, several consecutive
+        scrolls that reveal nothing new, the screen bound, or `deadline`.
+        """
+        needle = (target or "").strip().lower()
+        seen = {(a.get("label") or "") for a in page.get("actions") or []}
+        screens = 0
+        barren = 0
+        found = target_visible(page, needle)
+        while not found and screens < (max_screens or SCAN_MAX_SCREENS):
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+            current = next((a for a in page["actions"] if a["id"] == action["id"]), None)
+            if current is None:
+                break                      # no scroll offered: end of the list
+            self.act(current, page)
+            page = self.observe(screenshot=False)
+            screens += 1
+            if target_visible(page, needle):
+                found = True
+                break
+            labels = {(a.get("label") or "") for a in page.get("actions") or []}
+            if labels - seen:
+                barren = 0
+            else:
+                barren += 1
+                if barren >= SCAN_BARREN_LIMIT:
+                    break                  # nothing new for several steps: genuinely exhausted
+            seen |= labels
+        return page, screens, found
+
+    def observe(self, screenshot=True, deadline=None):
         if getattr(self, "after_input", None):
             action, self.after_input = self.after_input, None
             # This is read-only and happens after execution was logged, even if navigation interrupts it.
@@ -74,18 +364,25 @@ class Browser:
                 )
             except RuntimeError:
                 pass
+        self.settle(deadline=deadline)
         for attempt in range(10):
             try:
-                return browser_operation(
+                page = self._browser_operation(
                     {"operation": "observe", "session": self.session, "screenshot": screenshot}
                 )
+                self.last_url = page.get("url", getattr(self, "last_url", ""))
+                return page
             except StalePage:
-                if attempt == 9:
+                if attempt == 9 or (
+                    deadline is not None and attempt >= 2 and time.monotonic() > deadline
+                ):
+                    # Past the run's deadline: a short retry budget, so the stop is not
+                    # waiting on a long loop of reads.
                     raise
                 time.sleep(0.02)
         raise StalePage("Page did not settle")
 
-    def fresh(self, page, action=None):
+    def _fresh(self, page, action=None):
         if action is not None and action["kind"] in {"click", "select"}:
             node = action["node"]
             if type(node) is not int:
@@ -97,19 +394,32 @@ class Browser:
             return current == [page["page_key"], page["guards"].get(str(node))]
         return self.evaluate(MARKER) == page["marker"]
 
+    def fresh(self, page, action=None):
+        try:
+            return self._fresh(page, action)
+        except RuntimeError as error:
+            if not self._session_lost(error) or not self.reattach():
+                raise
+            return self._fresh(page, action)
+
     def act(self, action, page, text=None):
         if not self.fresh(page, action):
             raise StalePage("Page changed since this decision. Observe again.")
         if action["kind"] == "wait":
             time.sleep(0.1)
-        result = browser_operation({"operation": "act", "session": self.session, "action": action, "text": text})
-        self.after_input = action if action["kind"] != "wait" else None
+        result = self._browser_operation({"operation": "act", "session": self.session, "action": action, "text": text})
+        self.after_input = action if action["kind"] not in {"wait", "back", "key", "click_at"} else None
         return result
 
     def close(self):
-        if self.target:
-            cdp("Target.closeTarget", targetId=self.target)
-            self.target = None
+        targets, self.owned_targets = self.owned_targets, []
+        if os.environ.get("JEV_KEEP_TAB") != "1":
+            for target in targets:
+                try:
+                    cdp("Target.closeTarget", targetId=target)
+                except Exception:
+                    pass
+        self.target = None
 
 
 def fingerprint(state):
@@ -135,8 +445,63 @@ def browser_operation(request):
     if operation == "act":
         action = request["action"]
         kind = action["kind"]
-        if kind == "scroll":
-            call("Input.dispatchMouseEvent", type="mouseWheel", x=550, y=650, deltaX=0, deltaY=action["delta"])
+        if kind == "back":
+            history = call("Page.getNavigationHistory")
+            index = history.get("currentIndex", 0)
+            entries = history.get("entries") or []
+            if index <= 0:
+                raise RuntimeError("No browser history to go back to")
+            call("Page.navigateToHistoryEntry", entryId=entries[index - 1]["id"])
+        elif kind == "scroll":
+            viewport = evaluate("({x: Math.floor(innerWidth / 2), y: Math.floor(innerHeight / 2)})") or {}
+            call(
+                "Input.dispatchMouseEvent",
+                type="mouseWheel",
+                x=viewport.get("x", 550),
+                y=viewport.get("y", 650),
+                deltaX=0,
+                deltaY=action["delta"],
+            )
+        elif kind == "key":
+            event = {
+                "key": action["key"],
+                "code": action.get("code", ""),
+                "modifiers": 8 if action.get("shift") else 0,
+                "windowsVirtualKeyCode": action.get("vk", 0),
+                "nativeVirtualKeyCode": action.get("vk", 0),
+            }
+            if len(action["key"]) == 1:
+                event["text"] = action["key"]
+            call("Input.dispatchKeyEvent", type="keyDown", **event)
+            call("Input.dispatchKeyEvent", type="keyUp", **event)
+        elif kind == "click_at":
+            for event in ("mousePressed", "mouseReleased"):
+                call(
+                    "Input.dispatchMouseEvent",
+                    type=event, x=int(action["x"]), y=int(action["y"]), button="left", clickCount=1,
+                )
+        elif kind == "seek":
+            payload = json.dumps({"node": action.get("node"), "value": str(request.get("text"))})
+            target = evaluate(
+                "(action => {"
+                "  const e=window.__jevFast?.nodes.get(action.node);"
+                "  if (!e?.isConnected) return null;"
+                "  const r=e.getBoundingClientRect();"
+                "  if (!r.width || !r.height) return null;"
+                "  const min=Number(e.getAttribute('aria-valuemin') ?? 0);"
+                "  const max=Number(e.getAttribute('aria-valuemax') ?? 100);"
+                "  const v=Number(action.value);"
+                "  if (!Number.isFinite(v)) return null;"
+                "  const ratio=max>min ? (Math.min(max,Math.max(min,v))-min)/(max-min) : 0.5;"
+                "  const x=r.x+r.width*ratio, y=r.y+r.height/2;"
+                "  if (x<0 || y<0 || x>=innerWidth || y>=innerHeight) return null;"
+                "  return {x,y};"
+                "})(" + payload + ")"
+            )
+            if target is None:
+                raise RuntimeError("Seek target is not actionable")
+            for event in ("mousePressed", "mouseReleased"):
+                call("Input.dispatchMouseEvent", type=event, x=target["x"], y=target["y"], button="left", clickCount=1)
         elif kind != "wait":
             if type(action["node"]) is not int:
                 raise ValueError("Invalid observed node")

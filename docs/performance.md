@@ -19,6 +19,25 @@ The optimized runtime was faster in all three pairs. Median task time was **25.0
 
 The original arm is the frozen source from `68c077bf79caca4e817b8e8a5854b2efa0c81ff6`. Both arms use Mercury so the runtime comparison does not conflate a helper-model change with code changes. Per-run source hashes, model settings, token counts, helper costs, browser version, protocol counts, and verification results are in the measurement JSON.
 
+## v2 re-baseline status (2026-09-21)
+
+The v2 layer (code-owned outcomes, confidence gates, escape hatches, decision cache, descriptor replay) has **not** been measured against the original arm. The published task date, Sunday, September 20, 2026, is now in the past, and Google's date picker no longer offers it: both attempted matched runs ended blocked/stalled after the calendar offered only September 21 onward (`artifacts/benchmark-flights-v2.json`). Replaying the recorded calendar decision through Jev with and without the new `irreversible` question and escape candidates returns the same answer, so that failure is the task's stale date, not the v2 changes. The example now takes `JEV_FLIGHTS_DATE` for live re-runs.
+
+What v2 **was** measured on:
+
+| Check | Result |
+| --- | --- |
+| Google Flights, Zurich → London, October 20, 2026, same goal shape | `verified`, 27.930 s, 21 actions, 0 skipped; the search URL's `tfs` encodes `2026-10-20` |
+| Local trap closure (`scripts/verify_stall.py`) | every trap terminates; worst recorded stall window 5.0 s against the 5 s limit with a 1 s in-flight allowance (loading traps stop at 4.5–4.6 s); artifact is real, see `artifacts/verify_stall.json` |
+| Parallel checks self-test (`--serve-traps`) | 5/5 verified, 3.2 s wall / 12.2 s serial (warm second run) |
+| Local fixture smoke | `verified`, 3.2–4.0 s, 6 actions, 0–1 skipped, 8–9 decisions |
+
+The safety layer is visible in the loop: a reversible action below its confidence floor (0.5; 0.9 when Jev marks it irreversible) is never executed, is routed around, and one code-owned reveal scroll may be used when refusals exhaust the visible options. The cost of that safety is extra decisions while the model is uncertain.
+
+Replay, measured on the local fixture: the recording run made 9 decisions; the replay run executed 4 of its 5 recorded steps without model calls, handed back to Jev when the offscreen result card did not reproduce, finished at 6 decisions, and still verified. Replay is a fast path, not a guarantee.
+
+The current text-helper configuration is `deepseek-v4.1-flash` (README); the Mercury latencies quoted below belong to the recording's configuration.
+
 ## Where the time went
 
 The original loop invalidated decisions on every DOM mutation, including animations. It also read the accessibility tree repeatedly and resolved hundreds of DOM nodes. The new snapshot reads common HTML/ARIA controls in one browser call. Click guards compare the selected target and nearby context, plus document/form state. Current geometry and hit-testing still run before input.

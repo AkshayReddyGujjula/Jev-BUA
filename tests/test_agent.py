@@ -1,8 +1,10 @@
 """Offline contracts for a dynamic operation/target policy. No paid APIs."""
 
 import json
+import sys
 import time
 from copy import deepcopy
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -77,7 +79,7 @@ def test_one_index_per_node_with_operation_specific_targets():
 def test_all_heads_are_one_request_and_only_matching_head_executes(monkeypatch):
     calls = []
 
-    def post(_url, _key, body):
+    def post(_url, _key, body, **_kwargs):
         calls.append(body)
         return {
             "model": "test",
@@ -93,11 +95,63 @@ def test_all_heads_are_one_request_and_only_matching_head_executes(monkeypatch):
     d = model.choose(page(), "Find a book", [])
     assert len(calls) == 1
     assert d["operation"] == "TYPE_TEXT" and d["target"] == "1" and d["choice"] == "e1"
-    assert set(calls[0]["questions"]) == {"operation", "click_target", "type_text_target"}
+    assert set(calls[0]["questions"]) == {
+        "operation", "click_target", "type_text_target", "goal_done", "stuck", "irreversible",
+    }
+
+
+def _target_sequences(body):
+    """The candidate labels per target head, in the order Jev is shown them.
+
+    The index prefix is stripped on purpose: indices are positional and necessarily differ when
+    the same page is enumerated in a different order, so comparing them would test nothing.
+    """
+    def bare(text):
+        return text.split("] ", 1)[1] if "] " in text else text
+
+    return {
+        name: [bare(q["criteria"][i]["element"]) for i in q["criteria"]]
+        for name, q in body["questions"].items()
+        if name.endswith("_target")
+    }
+
+
+def test_candidate_order_does_not_depend_on_enumeration_order(monkeypatch):
+    """Jev-style decisions are order-sensitive, so candidate order must be an input we control.
+
+    Enumeration order is whatever the DOM walk happened to produce, so without sorting, the same
+    page is presented differently between runs and can reach a different answer. Fails without
+    the sort because the forward and reversed action lists produce opposite criteria orders.
+    """
+    seen = []
+
+    def post(_url, _key, body, **_kwargs):
+        ops = list(body["questions"]["operation"]["criteria"])
+        answers = {"operation": choice(ops, ops[0])}
+        for name, question in body["questions"].items():
+            if name.endswith("_target"):
+                ids = list(question["criteria"])
+                answers[name] = {
+                    "choice": ids[0],
+                    "confidence": 1.0,
+                    "probabilities": {i: float(i == ids[0]) for i in ids},
+                }
+        seen.append(_target_sequences(body))
+        return {"model": "test", "answers": answers}
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", post)
+
+    actions = page()["actions"]
+    model.choose({**page(), "actions": list(actions)}, "Find a book", [])
+    model.choose({**page(), "actions": list(reversed(actions))}, "Find a book", [])
+
+    assert len(seen) == 2
+    assert seen[0] == seen[1], "candidate order changed when the page was enumerated differently"
 
 
 def test_click_cannot_consume_a_text_target(monkeypatch):
-    def post(_url, _key, body):
+    def post(_url, _key, body, **_kwargs):
         return {
             "model": "test",
             "answers": {
@@ -120,7 +174,7 @@ def test_target_head_receives_control_state_and_full_next_step_rules(monkeypatch
         "role": "checkbox", "checked": "true", "selected": False,
     })
 
-    def post(_url, _key, body):
+    def post(_url, _key, body, **_kwargs):
         questions = body["questions"]
         target = questions["click_target"]
         assert target["criteria"]["1"]["checked"] == "true"
@@ -162,9 +216,15 @@ def runner():
     a = loop.Agent.__new__(loop.Agent)
     a.screenshots = False
     a.pending_text = None
+    a.values = {}
+    a.find = ""
     p = page()
     a.state = {
-        "browser": Mock(fresh=Mock(return_value=True), observe=Mock(return_value=p)),
+        "browser": Mock(
+            fresh=Mock(return_value=True),
+            observe=Mock(return_value=p),
+            follow_new_tab=Mock(return_value=False),
+        ),
         "page": p,
         "decision": decision(),
         "goal": "Find a book",
@@ -174,6 +234,10 @@ def runner():
         "started_at": time.perf_counter(),
         "record": False,
         "text_calls": [],
+        "progress_at": time.monotonic(),
+        "stall_rounds": 0,
+        "recent_fingerprints": [loop.progress_key(p)],
+        "stall": None,
     }
     return a
 
@@ -278,8 +342,11 @@ def test_fingerprint_tracks_values_and_identity_not_screenshots():
 
 @pytest.mark.parametrize("changed", ["Departure", "Where from?", "Where to?", "year"])
 def test_flight_verification_rejects_wrong_trip(changed):
+    from datetime import date
+
     from examples.flights import verify
 
+    day = date(2026, 9, 20)
     actual = {
         "url": "https://www.google.com/travel/flights/search?tfs=example",
         "text": "Track prices from Zürich to London departing 2026-09-20",
@@ -294,12 +361,12 @@ def test_flight_verification_rejects_wrong_trip(changed):
             ]
         ],
     }
-    assert verify(actual)["passed"]
+    assert verify(actual, day)["passed"]
     if changed == "year":
         actual["text"] = actual["text"].replace("2026", "2027")
     else:
         next(a for a in actual["actions"] if a["label"] == changed)["value"] = "wrong"
-    assert not verify(actual)["passed"]
+    assert not verify(actual, day)["passed"]
 
 
 @pytest.mark.parametrize(
@@ -312,9 +379,884 @@ def test_text_helper_rejects_invalid_values(monkeypatch, content):
         model.field_text({"goal": "Find a flight"})
 
 
+def test_seek_and_key_actions_are_first_class():
+    actions = page()["actions"] + [
+        {"id": "e9", "kind": "seek", "label": "Video position [0-120]", "node": 40, "role": "slider", "value": "3"},
+        {"id": "key_fullscreen", "kind": "key", "key": "f", "code": "KeyF", "vk": 70, "label": "Toggle fullscreen (F)"},
+    ]
+    elements, targets, controls = model.action_space(actions)
+    assert targets["SEEK"]["3"]["id"] == "e9"
+    assert elements[2]["operations"] == ["SEEK"]
+    assert "KEY_FULLSCREEN" in controls
+
+
+def test_key_action_dispatches_key_down_and_up(monkeypatch):
+    import jev_ultrafast.browser as browser
+
+    cdp = Mock(return_value={})
+    monkeypatch.setattr(browser, "cdp", cdp)
+    result = browser.browser_operation({"operation": "act", "session": "s", "action": {
+        "id": "key_f", "kind": "key", "key": "f", "code": "KeyF", "vk": 70,
+    }})
+    assert result == {"executed": "key_f"}
+    assert cdp.call_count == 2
+    assert cdp.call_args_list[0].args[0] == "Input.dispatchKeyEvent"
+
+
+def test_dead_actions_escalate_before_blocking(runner, monkeypatch):
+    runner.state["history"] = [
+        {"step": i, "choice": f"x{i}", "kind": "click", "outcome": "no visible change"} for i in (1, 2)
+    ]
+    runner.state["browser"].screenshot = Mock(return_value="img")
+    monkeypatch.setattr(loop, "propose_action", lambda *args, **kwargs: {
+        "action": {"kind": "key", "key": "f", "code": "KeyF", "vk": 70, "label": "Recovery key f"},
+        "label": "Recovery: press f", "latency_ms": 5, "reason": "stuck",
+    })
+    runner.state["decision"] = decision("e3")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["status"] == "ready"
+    assert runner.state["history"][-1]["kind"] == "escalation"
+    assert runner.state["escalations"] == 1
+
+
+def test_dead_actions_block_when_escalations_exhausted(runner, monkeypatch):
+    runner.state["history"] = [
+        {"step": i, "choice": f"x{i}", "kind": "click", "outcome": "no visible change"} for i in (1, 2)
+    ]
+    runner.state["escalations"] = 2
+    runner.state["decision"] = decision("e3")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["status"] == "blocked"
+
+
+def test_reattach_adopts_a_replaced_target(monkeypatch):
+    import jev_ultrafast.browser as browser
+
+    b = browser.Browser.__new__(browser.Browser)
+    b.target = "old"
+    b.session = "dead"
+    b.owns_target = True
+    b.owned_targets = ["old"]
+    b._known_targets = {"old"}
+    b.last_url = "https://example.test/"
+    monkeypatch.setattr(b, "_page_targets", lambda: [
+        {"targetId": "x", "url": "chrome://newtab"},
+        {"targetId": "new", "url": "https://example.test/"},
+    ])
+    attach = Mock(return_value={"sessionId": "fresh"})
+    monkeypatch.setattr(browser, "cdp", attach)
+    assert b.reattach() is True
+    assert b.target == "new" and b.session == "fresh"
+    assert "new" in b.owned_targets and "new" in b._known_targets
+
+
+def test_reattach_fails_without_a_real_page(monkeypatch):
+    import jev_ultrafast.browser as browser
+
+    b = browser.Browser.__new__(browser.Browser)
+    b.target = "old"
+    b.session = "dead"
+    b.owns_target = True
+    b.owned_targets = ["old"]
+    b._known_targets = {"old"}
+    b.last_url = "https://example.test/"
+    monkeypatch.setattr(b, "_page_targets", lambda: [{"targetId": "x", "url": "chrome://newtab"}])
+    monkeypatch.setattr(browser, "cdp", Mock())
+    assert b.reattach() is False
+
+
+def test_call_heals_a_dropped_session(monkeypatch):
+    import jev_ultrafast.browser as browser
+
+    b = browser.Browser.__new__(browser.Browser)
+    b.session = "dead"
+    sessions = []
+
+    def fake_cdp(method, session_id=None, **params):
+        sessions.append(session_id)
+        if session_id == "dead":
+            raise RuntimeError("{'code': -32001, 'message': 'Session with given id not found.'}")
+        return {"ok": True}
+
+    monkeypatch.setattr(browser, "cdp", fake_cdp)
+    monkeypatch.setattr(b, "reattach", lambda: setattr(b, "session", "fresh") or True)
+    assert b.call("Runtime.evaluate", expression="1") == {"ok": True}
+    assert sessions == ["dead", "fresh"]
+
+
+def test_run_task_retries_once_on_session_errors(monkeypatch):
+    import run_task
+
+    calls = {"n": 0}
+
+    def fake_run_once(args):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("{'code': -32001, 'message': 'Session with given id not found.'}")
+        return [], None, 0
+
+    restarts = []
+    monkeypatch.setattr(run_task, "run_once", fake_run_once)
+    monkeypatch.setattr(run_task, "restart_daemon", lambda: restarts.append(True))
+    monkeypatch.setattr(sys, "argv", ["run_task.py", "--goal", "g", "--url", "https://example.test/"])
+    assert run_task.main() == 0
+    assert calls["n"] == 2 and restarts
+
+
 def test_navigation_during_prediction_reobserves_without_action(runner):
     runner.state["browser"].fresh.side_effect = StalePage("Document navigating")
     runner.command("tick")
     assert runner.state["status"] == "ready"
     assert runner.state["decision"] is None
     runner.state["browser"].act.assert_not_called()
+
+
+def test_next_best_switches_to_the_next_operation():
+    decision_value = {
+        "choice": "e1",
+        "operation": "TYPE_TEXT",
+        "operation_probabilities": {"TYPE_TEXT": 0.6, "CLICK": 0.4},
+        "candidate_map": {"TYPE_TEXT": {"1": "e1"}, "CLICK": {"1": "e2", "2": "e3"}},
+        "raw_answers": {
+            "type_text_target": {"probabilities": {"1": 1.0}},
+            "click_target": {"probabilities": {"1": 0.3, "2": 0.7}},
+        },
+    }
+    assert loop.next_best(decision_value, {"e1"}) == {"choice": "e3", "operation": "CLICK", "target": "2"}
+
+
+def test_next_best_can_fall_back_to_back():
+    decision_value = {
+        "choice": "e1",
+        "operation_probabilities": {"TYPE_TEXT": 0.5, "BACK": 0.5},
+        "candidate_map": {"TYPE_TEXT": {"1": "e1"}, "BACK": {"BACK": "BACK"}},
+        "raw_answers": {"type_text_target": {"probabilities": {"1": 1.0}}},
+    }
+    assert loop.next_best(decision_value, {"e1"}) == {"choice": "BACK", "operation": "BACK", "target": None}
+
+
+def test_next_best_returns_none_when_everything_is_excluded():
+    decision_value = {
+        "operation_probabilities": {"TYPE_TEXT": 1.0, "DONE": 0.0},
+        "candidate_map": {"TYPE_TEXT": {"1": "e1"}},
+        "raw_answers": {"type_text_target": {"probabilities": {"1": 1.0}}},
+    }
+    assert loop.next_best(decision_value, {"e1", "DONE"}) is None
+
+
+@pytest.mark.parametrize(
+    "before,after,error,expected",
+    [
+        ({"url": "a"}, {"url": "b"}, None, "navigated"),
+        (
+            {"url": "a", "title": "x", "text": "", "scroll": {"y": 0}},
+            {"url": "a", "title": "x", "text": "", "scroll": {"y": 0}},
+            None,
+            "no visible change",
+        ),
+        (
+            {"url": "a", "title": "x", "text": "", "scroll": {"y": 0}},
+            {"url": "a", "title": "x", "text": "", "scroll": {"y": 100}},
+            None,
+            "scrolled",
+        ),
+        ({"url": "a"}, {"url": "a"}, "boom", "action failed"),
+    ],
+)
+def test_action_outcome_classification(before, after, error, expected):
+    assert loop.action_outcome(before, after, error) == expected
+
+
+def test_repeated_no_effect_action_switches_to_next_best(runner, monkeypatch):
+    runner.state["history"] = [{"step": 1, "choice": "e1", "kind": "click", "outcome": "no visible change"}]
+    decision_value = {
+        "choice": "e1",
+        "operation": "TYPE_TEXT",
+        "target": "1",
+        "confidence": 1.0,
+        "probability": 0.6,
+        "probabilities": {"e1": 0.6},
+        "operation_probabilities": {"TYPE_TEXT": 0.6, "CLICK": 0.4},
+        "candidate_map": {"TYPE_TEXT": {"1": "e1"}, "CLICK": {"1": "e2", "2": "e3"}},
+        "raw_answers": {
+            "type_text_target": {"probabilities": {"1": 1.0}},
+            "click_target": {"probabilities": {"1": 0.3, "2": 0.7}},
+        },
+        "usage": {},
+        "latency_ms": 10,
+    }
+    monkeypatch.setattr(loop, "choose", lambda *args, **kwargs: dict(decision_value))
+    runner.command("predict")
+    assert runner.state["decision"]["choice"] == "e3"
+    assert runner.state["decision"]["recovery"]
+    assert runner.state["recoveries"] == 1
+
+
+def test_goal_watcher_stops_the_tick_loop(runner, monkeypatch):
+    runner.state["history"] = [{"step": 1, "choice": "e1", "kind": "click", "outcome": "page changed"}]
+    monkeypatch.setattr(loop, "choose", lambda *args, **kwargs: {
+        "choice": "e1", "operation": "TYPE_TEXT", "target": "1", "confidence": 1.0,
+        "probability": 0.6, "probabilities": {}, "operation_probabilities": {}, "candidate_map": {},
+        "raw_answers": {}, "usage": {}, "latency_ms": 1, "goal_done": 0.95, "stuck": 0.0,
+    })
+    runner.command("tick")
+    assert runner.state["status"] == "done"
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_goal_watcher_stops_without_acting(runner, monkeypatch):
+    runner.state["history"] = [{"step": 1, "choice": "e1", "kind": "click", "outcome": "page changed"}]
+    monkeypatch.setattr(loop, "choose", lambda *args, **kwargs: {
+        "choice": "e1", "operation": "TYPE_TEXT", "target": "1", "confidence": 1.0,
+        "probability": 0.6, "probabilities": {}, "operation_probabilities": {}, "candidate_map": {},
+        "raw_answers": {}, "usage": {}, "latency_ms": 1, "goal_done": 0.92, "stuck": 0.0,
+    })
+    runner.command("predict")
+    assert runner.state["status"] == "done" and runner.state["decision"] is None
+
+
+# --- the anti-loop deadline: the loop must never take another lap on its own -----------
+
+
+def test_new_page_state_is_progress_and_a_repeat_is_not(runner):
+    page = runner.state["page"]
+    before = runner.state["progress_at"]
+    assert runner.note_progress(page) is False          # seeded in the fixture, so already seen
+    assert runner.state["progress_at"] == before        # a repeat must not hold the clock open
+    assert runner.state["stall_rounds"] == 1
+    unseen = {**page, "url": "https://example.test/a-state-we-have-not-seen"}
+    assert runner.note_progress(unseen) is True
+    assert runner.state["progress_at"] >= before
+    assert runner.state["stall_rounds"] == 0
+
+
+def test_stall_deadline_stops_the_loop_without_calling_the_model(runner, monkeypatch):
+    choose = Mock(side_effect=AssertionError("a stalled run must not ask for another decision"))
+    monkeypatch.setattr(loop, "choose", choose)
+    runner.state["progress_at"] = time.monotonic() - 30.0
+    state = runner.command("predict", {})
+    assert state["status"] == "stalled"
+    assert state["stall"]["seconds_without_progress"] >= 5.0
+    assert state["stall"]["limit_s"] == loop.STALL_LIMIT_S
+    choose.assert_not_called()
+
+
+def test_stall_deadline_outranks_a_pending_mutation(runner):
+    """The last gate before browser input: an expired deadline must win over the decision."""
+    runner.state["progress_at"] = time.monotonic() - 30.0
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state["status"] == "stalled"
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_an_oscillating_page_cannot_hold_the_clock_open(runner, monkeypatch):
+    """Alternating between two states is a loop even though every action changes the page."""
+    first = runner.state["page"]
+    second = {**first, "fingerprint": "the-other-state"}
+    runner.state["recent_fingerprints"] = [first["fingerprint"], second["fingerprint"]]
+    runner.state["progress_at"] = time.monotonic() - 30.0
+    for _ in range(6):
+        runner.note_progress(second)
+        runner.note_progress(first)
+    assert runner.stalled() is True
+
+
+def test_stall_status_is_terminal_for_the_run_loop(runner):
+    assert "stalled" in loop.TERMINAL_STATUS
+    runner.state["status"] = "stalled"
+    assert runner.state["status"] in loop.TERMINAL_STATUS
+
+
+# --- caller-supplied values: skip the 1.2-3.3 s text round trip ------------------------
+
+
+def test_supplied_value_skips_the_text_model(runner, monkeypatch):
+    helper = Mock(side_effect=AssertionError("text model must not be called when a value is supplied"))
+    monkeypatch.setattr(loop, "field_text", helper)
+    runner.values = {"search": "Python programming language"}
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    helper.assert_not_called()
+    assert state["history"][-1]["text"] == "Python programming language"
+    assert state["text_calls"][-1]["model"] == "supplied"
+    assert state["text_calls"][-1]["latency_ms"] == 0
+
+
+def test_absent_supplied_value_still_uses_the_text_model(runner, monkeypatch):
+    helper = Mock(return_value=("book", {"model": "test", "latency_ms": 10}))
+    monkeypatch.setattr(loop, "field_text", helper)
+    runner.values = {"some other field": "unused"}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert helper.call_count == 1
+
+
+@pytest.mark.parametrize("value", ["", "   ", "x" * 2001])
+def test_supplied_value_is_validated_like_the_model_path(runner, value):
+    runner.values = {"search": value}
+    with pytest.raises(ValueError, match="1-2000 characters"):
+        runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+
+
+@pytest.mark.parametrize("value", ["half", "", "1e999"])
+def test_supplied_seek_value_must_be_a_finite_number(runner, value):
+    runner.values = {"volume slider": value}
+    action = {"id": "s1", "kind": "seek", "label": "Volume slider", "node": 30}
+    with pytest.raises(ValueError):
+        runner.supplied_text(action)
+
+
+def test_supplied_seek_value_accepts_a_number(runner):
+    runner.values = {"volume slider": "42"}
+    action = {"id": "s1", "kind": "seek", "label": "Volume slider", "node": 30}
+    assert runner.supplied_text(action) == "42"
+
+
+def test_supplied_value_matches_a_label_substring(runner):
+    runner.values = {"email": "ada@example.com"}
+    assert runner.supplied_text({"kind": "fill", "label": "Email address"}) == "ada@example.com"
+    assert runner.supplied_text({"kind": "fill", "label": "Password"}) is None
+
+
+# --- ambient page churn must not hold the stall clock open -----------------------------
+
+
+def test_ambient_text_churn_is_not_progress(runner):
+    """A ticking clock or rotating ad must not look like forward progress.
+
+    Regression for a measured trap: a page whose only change was a fixed-width counter
+    reset the clock on every read, ran 61 decisions with zero progress, and the deadline
+    never fired once.
+    """
+    page = runner.state["page"]
+    runner.state["recent_fingerprints"] = [loop.progress_key(page)]
+    runner.state["progress_at"] = time.monotonic() - 30.0
+    for tick in range(20):
+        churned = {**page, "text": f"Elapsed {tick}s", "fingerprint": f"fp-{tick}"}
+        assert runner.note_progress(churned) is False
+    assert runner.stalled() is True
+
+
+def test_a_moving_clock_alone_never_reaches_the_round_backstop_by_resetting_it(runner):
+    page = runner.state["page"]
+    runner.state["recent_fingerprints"] = [loop.progress_key(page)]
+    for tick in range(loop.STALL_MAX_ROUNDS * 3):
+        runner.note_progress({**page, "text": f"tick {tick}"})
+    assert runner.state["stall_rounds"] >= loop.STALL_MAX_ROUNDS
+    assert runner.stalled() is True
+
+
+def test_typed_value_counts_as_progress(runner):
+    """Control values are included in the progress key on purpose, so filling a field counts."""
+    page = runner.state["page"]
+    runner.state["recent_fingerprints"] = [loop.progress_key(page)]
+    runner.state["progress_at"] = time.monotonic() - 30.0
+    typed = {
+        **page,
+        "actions": [{**page["actions"][0], "value": "laptops"}] + page["actions"][1:],
+    }
+    assert runner.note_progress(typed) is True
+    assert runner.stalled() is False
+
+
+def test_navigation_counts_as_progress(runner):
+    page = runner.state["page"]
+    runner.state["recent_fingerprints"] = [loop.progress_key(page)]
+    runner.state["progress_at"] = time.monotonic() - 30.0
+    assert runner.note_progress({**page, "url": "https://example.test/results"}) is True
+    assert runner.stalled() is False
+
+
+def test_round_backstop_fires_even_with_a_fresh_clock(runner):
+    runner.state["stall_rounds"] = loop.STALL_MAX_ROUNDS
+    runner.state["progress_at"] = time.monotonic()
+    assert runner.stalled() is True
+    runner.state["stall_rounds"] = loop.STALL_MAX_ROUNDS - 1
+    assert runner.stalled() is False
+
+
+def test_stop_stalled_records_which_bound_fired(runner):
+    runner.state["stall_rounds"] = loop.STALL_MAX_ROUNDS
+    state = runner._stop_stalled()
+    assert state["stall"]["reason"] == "repeated decisions with no progress"
+    assert state["stall"]["round_limit"] == loop.STALL_MAX_ROUNDS
+    runner.state["stall_rounds"] = 0
+    runner.state["progress_at"] = time.monotonic() - 30.0
+    state = runner._stop_stalled()
+    assert state["stall"]["reason"] == "no progress inside the deadline"
+
+
+# --- scrolling: legitimate work is not a loop ------------------------------------------
+
+
+def scroll_page(page, extra_labels=()):
+    return {
+        **page,
+        "actions": page["actions"]
+        + [{"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560}]
+        + [
+            {"id": f"v{i}", "kind": "click", "label": label, "role": "link", "node": 200 + i}
+            for i, label in enumerate(extra_labels)
+        ],
+    }
+
+
+def test_a_deep_productive_scan_is_never_cut_off(runner):
+    """Scanning a long list keeps finding new items, so it is the task, not a loop.
+
+    A human scrolls a long list for minutes to find one item. An earlier version capped the
+    streak at 10 scrolls, which in a long list would have forced a click on whatever came
+    next - a fast wrong answer instead of a slow right one.
+    """
+    runner.state["page"] = scroll_page(runner.state["page"])
+    for step in range(40):
+        view = scroll_page(runner.state["page"], [f"Video {step}"])
+        runner.state["browser"].observe.return_value = view
+        runner.state["decision"] = {**decision("scroll_down"), "operation": "SCROLL_DOWN"}
+        runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+        assert runner.state["barren_scrolls"] == 0
+    assert runner.state.get("scroll_recoveries") is None      # the guard never fired
+
+
+def test_scrolling_that_reveals_nothing_is_the_loop(runner):
+    """The loop is a scroll that shows nothing new - that is what gets cut off."""
+    view = scroll_page(runner.state["page"])
+    runner.state["page"] = view
+    # A real page always offers the scroll control, so it is already known on the first
+    # scroll. Without this the control's own label counted as freshly revealed content.
+    runner.state["seen_labels"] = [a["label"] for a in view["actions"] if a.get("label")]
+    runner.state["browser"].observe.return_value = view
+    for _ in range(loop.BARREN_SCROLL_LIMIT):
+        runner.state["decision"] = {**decision("scroll_down"), "operation": "SCROLL_DOWN"}
+        runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["barren_scrolls"] >= loop.BARREN_SCROLL_LIMIT
+
+
+def test_a_non_scroll_action_clears_the_barren_streak(runner):
+    page = scroll_page(runner.state["page"])
+    runner.state["page"] = page
+    runner.state["barren_scrolls"] = loop.BARREN_SCROLL_LIMIT - 1
+    runner.state["browser"].observe.return_value = page
+    runner.state["decision"] = decision("e3")           # a click, not a scroll
+    runner.command("act", {"fingerprint": page["fingerprint"]})
+    assert runner.state["barren_scrolls"] == 0
+
+
+# --- v2: code-owned outcomes, risk gates, escape hatches, decision cache ---------------
+
+
+def test_outcome_precedence():
+    from jev_ultrafast import outcomes
+
+    assert outcomes.resolve("blocked", checks=[{"check": "x", "pass": True}]) == "verified"
+    assert outcomes.resolve("done", checks=[{"check": "x", "pass": False}]) == "refuted"
+    assert outcomes.resolve("done") == "unknown"
+    assert outcomes.resolve("abstained") == "abstained"
+    assert outcomes.resolve("stalled") == "budget_exhausted"
+    assert outcomes.resolve("done", checks=[]) == "unknown"
+
+
+def test_done_with_a_failing_readback_is_refuted(runner):
+    runner.expect = {"text_contains": ["Thank you"]}
+    runner.state["browser"].evaluate = Mock(return_value="Nothing here")
+    runner.state["status"] = "done"
+    runner._finalize()
+    assert runner.state["outcome"] == "refuted"
+    assert runner.state["checks"][0]["pass"] is False
+
+
+def test_a_passing_readback_verifies_even_a_blocked_run(runner):
+    """Evidence outranks the agent's own opinion: the page is what it is."""
+    runner.expect = {"text_contains": ["Done"]}
+    runner.state["browser"].evaluate = Mock(return_value="Done")
+    runner.state["status"] = "blocked"
+    runner._finalize()
+    assert runner.state["outcome"] == "verified"
+
+
+def test_a_run_without_an_expectation_is_never_verified(runner):
+    runner.state["status"] = "done"
+    runner._finalize()
+    assert runner.state["outcome"] == "unknown"
+
+
+@pytest.mark.parametrize("confidence,irreversible,gated", [
+    (0.9, 0.0, False),
+    (0.7, 0.0, False),          # reversible floor is 0.5
+    (0.4, 0.0, True),
+    (0.7, 0.9, True),           # irreversible floor is 0.9
+    (0.95, 0.9, False),
+])
+def test_confidence_gate_floors(confidence, irreversible, gated):
+    from jev_ultrafast import gates
+
+    verdict = gates.check(
+        {"confidence": confidence, "irreversible": irreversible},
+        {"kind": "click", "label": "Pay"},
+    )
+    assert (verdict is not None) is gated
+    assert gates.check({"confidence": 0.1, "irreversible": 1.0},
+                       {"kind": "scroll", "label": "Scroll down"}) is None
+
+
+def test_low_confidence_mutation_reobserves_then_skips(runner):
+    runner.state["decision"] = {**decision(), "confidence": 0.2}
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state["status"] == "ready"
+    assert state["gate"]["resolution"] == "reobserve"
+    assert state["skip_cache_once"] is True
+    runner.state["browser"].act.assert_not_called()
+    runner.state["decision"] = {**decision(), "confidence": 0.2}
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state["status"] == "ready"
+    assert state["gate"]["resolution"] == "skipped"
+    assert state["history"][-1]["error"].startswith("skipped")
+    assert state["history"][-1]["outcome"] == "action failed"
+    assert state.get("outcome") is None      # a skip is not terminal
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_second_low_confidence_irreversible_reading_abstains(runner):
+    runner.state["decision"] = {**decision(), "confidence": 0.7, "irreversible": 0.95}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["gate"]["resolution"] == "reobserve"
+    runner.state["decision"] = {**decision(), "confidence": 0.7, "irreversible": 0.95}
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state["status"] == "abstained"
+    assert state["gate"]["resolution"] == "abstain"
+    assert state["outcome"] == "abstained"
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_a_refusal_reveals_content_below_the_fold(runner):
+    page = runner.state["page"]
+    page["actions"].append({"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560})
+    runner.state["decision"] = {**decision("e3"), "confidence": 0.2}
+    runner.command("act", {"fingerprint": page["fingerprint"]})
+    assert runner.state["gate"]["resolution"] == "reobserve"
+    runner.state["decision"] = {**decision("e3"), "confidence": 0.2}
+    state = runner.command("act", {"fingerprint": page["fingerprint"]})
+    assert state["status"] == "ready"
+    assert runner.state["history"][-1]["kind"] == "scroll"
+    assert "reveal" in runner.state["history"][-1]["recovery"]
+    assert runner.state["browser"].act.call_count == 1
+
+
+def test_a_skipped_choice_is_routed_around(runner, monkeypatch):
+    """A refused choice must not come back on the same page: the loop moves to the next-best."""
+    runner.state["skipped"] = {runner.state["page"]["fingerprint"]: ["e1"]}
+    decision_value = {
+        "choice": "e1",
+        "operation": "TYPE_TEXT",
+        "target": "1",
+        "confidence": 0.3,
+        "probability": 0.3,
+        "probabilities": {},
+        "operation_probabilities": {"TYPE_TEXT": 0.5, "CLICK": 0.5},
+        "candidate_map": {"TYPE_TEXT": {"1": "e1"}, "CLICK": {"1": "e2", "2": "e3"}},
+        "raw_answers": {
+            "type_text_target": {"probabilities": {"1": 1.0}},
+            "click_target": {"probabilities": {"1": 0.3, "2": 0.7}},
+        },
+        "usage": {}, "latency_ms": 1, "goal_done": 0.0, "stuck": 0.0,
+    }
+    monkeypatch.setattr(loop, "choose", lambda *args, **kwargs: dict(decision_value))
+    runner.command("predict")
+    assert runner.state["decision"]["choice"] == "e3"
+    assert "skipped" in runner.state["decision"]["recovery"]
+
+
+def test_irreversible_action_gates_above_the_reversible_floor(runner):
+    runner.state["decision"] = {**decision(), "confidence": 0.7, "irreversible": 0.95}
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state["gate"]["reason"].startswith("irreversible")
+    assert state["gate"]["floor"] == 0.9
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_reobserve_is_a_read_not_a_mutation(runner):
+    runner.state["decision"] = {
+        **decision(), "choice": "REOBSERVE", "operation": "REOBSERVE", "target": None,
+    }
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state["status"] == "ready"
+    assert state["reobserves"] == 1
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_reobserve_is_offered_once_per_page_state(runner, monkeypatch):
+    seen = {}
+
+    def fake_choose(*args, **kwargs):
+        seen.update(kwargs)
+        return {**decision(), "goal_done": 0.0, "stuck": 0.0}
+
+    monkeypatch.setattr(loop, "choose", fake_choose)
+    runner.state.pop("reobserved", None)
+    runner.command("predict")
+    assert seen["allow_reobserve"] is True
+    runner.state["reobserved"] = {runner.state["page"]["fingerprint"]: True}
+    runner.command("predict")
+    assert seen["allow_reobserve"] is False
+
+
+def test_abstain_ends_the_run_honestly(runner):
+    runner.state["decision"] = {
+        **decision(), "choice": "ABSTAIN", "operation": "ABSTAIN", "target": None,
+    }
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state["status"] == "abstained"
+    assert state["outcome"] == "abstained"
+    runner.state["browser"].act.assert_not_called()
+
+
+def _complete_answer(body, operation, target=None):
+    answers = {
+        "operation": choice(body["questions"]["operation"]["criteria"], operation),
+    }
+    for name in body["questions"]:
+        if name.endswith("_target"):
+            ids = list(body["questions"][name]["criteria"])
+            answers[name] = choice(ids, ids[0])
+    if target and operation.lower() + "_target" in answers:
+        answers[operation.lower() + "_target"] = choice([target], target)
+    return {"model": "test-model", "answers": answers, "usage": {"input_tokens": 7}}
+
+
+def test_escape_hatches_are_offered_and_bounded(monkeypatch):
+    seen = []
+
+    def post(_url, _key, body, **_kwargs):
+        seen.append(set(body["questions"]["operation"]["criteria"]))
+        return _complete_answer(body, "TYPE_TEXT", target="1")
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", post)
+    model.choose(page(), "Find a book", [])
+    model.choose(page(), "Find a book", [], allow_reobserve=False)
+    assert {"REOBSERVE", "ABSTAIN"} <= seen[0]
+    assert "REOBSERVE" not in seen[1] and "ABSTAIN" in seen[1]
+
+
+def test_cache_hit_skips_the_model_call(monkeypatch, tmp_path):
+    calls = []
+
+    def post(_url, _key, body, **_kwargs):
+        calls.append(body)
+        return _complete_answer(body, "TYPE_TEXT", target="1")
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setenv("JEV_CACHE", "1")
+    monkeypatch.setenv("JEV_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(model, "post_json", post)
+
+    first = model.choose(page(), "Find a book", [])
+    second = model.choose(page(), "Find a book", [])
+    assert len(calls) == 1
+    assert first["cached"] is False and first["model"] == "test-model"
+    assert second["cached"] is True and second["choice"] == first["choice"]
+
+
+def test_cache_bypass_is_a_real_second_reading(monkeypatch, tmp_path):
+    calls = []
+
+    def post(_url, _key, body, **_kwargs):
+        calls.append(body)
+        return _complete_answer(body, "TYPE_TEXT", target="1")
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setenv("JEV_CACHE", "1")
+    monkeypatch.setenv("JEV_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(model, "post_json", post)
+
+    model.choose(page(), "Find a book", [])
+    second = model.choose(page(), "Find a book", [], use_cache=False)
+    assert len(calls) == 2 and second["cached"] is False
+
+
+def test_changed_state_is_a_cache_miss(monkeypatch, tmp_path):
+    calls = []
+
+    def post(_url, _key, body, **_kwargs):
+        calls.append(body)
+        return _complete_answer(body, "TYPE_TEXT", target="1")
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setenv("JEV_CACHE", "1")
+    monkeypatch.setenv("JEV_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(model, "post_json", post)
+
+    model.choose(page(), "Find a book", [])
+    changed = {**page(), "url": "https://example.test/results"}
+    model.choose(changed, "Find a book", [])
+    assert len(calls) == 2
+
+
+def test_failure_classification_is_free_without_a_key(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    assert model.classify_failure(page(), "Find a book", []) is None
+
+
+def test_failure_classification_parses_a_bounded_choice(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", lambda *_args, **_kwargs: {
+        "model": "test",
+        "answers": {"failure_class": choice(list(model.FAILURE_CRITERIA), "hard_wall")},
+    })
+    result = model.classify_failure(page(), "Find a book", [])
+    assert result["class"] == "hard_wall" and result["confidence"] == 1.0
+
+
+def test_evidence_records_decisions_and_outcomes(tmp_path):
+    from jev_ultrafast.evidence import Evidence
+
+    evidence = Evidence(tmp_path, "run-1", goal="Find a book")
+    evidence.record("decision", choice="e1", confidence=0.9)
+    evidence.close()
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / "run-1.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [line["kind"] for line in lines] == ["run_start", "decision"]
+    assert lines[0]["goal"] == "Find a book"
+    assert lines[1]["choice"] == "e1" and lines[1]["at_ms"] >= 0
+
+
+def test_evidence_is_optional_and_never_breaks_a_run(runner):
+    runner.state["status"] = "done"
+    runner._finalize()                       # no evidence writer, no expectation
+    assert runner.state["outcome"] == "unknown"
+
+
+def test_evidence_records_through_the_act_path(runner, tmp_path):
+    """Regression: the evidence event name and an action's `kind` field must not collide."""
+    from jev_ultrafast.evidence import Evidence
+
+    runner.evidence = Evidence(tmp_path, "run-1", goal="Find a book")
+    runner.state["decision"] = {**decision("e3"), "operation": "CLICK"}
+    runner.state["browser"].observe.return_value = {
+        **runner.state["page"], "url": "https://example.test/next",
+    }
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    runner.evidence.close()
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / "run-1.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    execution = next(line for line in lines if line["kind"] == "execution")
+    assert execution["action_kind"] == "click"
+
+
+# --- v2: descriptor replay -------------------------------------------------------------
+
+
+def _replay_state(steps):
+    return {"available": True, "steps": len(steps), "used": 0, "completed": False,
+            "stopped": None, "recorded": None}
+
+
+def test_replay_plan_roundtrip_is_bound_to_url_and_goal(tmp_path):
+    from jev_ultrafast import replay
+
+    steps = [{"kind": "click", "label": "Go", "role": "button", "operation": "CLICK"}]
+    path = replay.record(tmp_path, "https://example.test/", "Find a book", steps, verified=True)
+    assert path.exists()
+    assert replay.load(tmp_path, "https://example.test/", "Find a book")["steps"] == steps
+    assert replay.load(tmp_path, "https://example.test/", "Find a movie") is None
+    assert replay.load(tmp_path, "https://other.test/", "Find a book") is None
+
+
+def test_replay_matching_is_unique_or_a_miss():
+    from jev_ultrafast import replay
+
+    actions = [
+        {"id": "a", "kind": "click", "label": "Go", "role": "button"},
+        {"id": "b", "kind": "click", "label": "  GO ", "role": "link"},
+        {"id": "c", "kind": "fill", "label": "Go"},
+    ]
+    assert replay.match_step({"kind": "click", "label": "Go"}, actions) is None
+    assert replay.match_step({"kind": "click", "label": "Go", "role": "link"}, actions)["id"] == "b"
+    assert replay.match_step({"kind": "click", "label": "Nope"}, actions) is None
+    assert replay.match_step({"kind": "fill", "label": "Go"}, actions)["id"] == "c"
+
+
+def test_replay_executes_a_recorded_step_without_the_model(runner, monkeypatch):
+    monkeypatch.setattr(loop, "choose", Mock(side_effect=AssertionError("no model call during replay")))
+    runner.replay_plan = {
+        "steps": [{"kind": "click", "label": "Go", "role": "button", "operation": "CLICK"}]
+    }
+    runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
+    runner.state["decision"] = None
+    runner.state["status"] = "ready"
+    runner.state["browser"].observe.return_value = {
+        **runner.state["page"], "url": "https://example.test/results",
+    }
+    state = runner.command("tick")
+    assert state["status"] == "ready"
+    assert state["replay"]["used"] == 1
+    assert state["history"][-1]["choice"] == "e3"
+    runner.state["browser"].act.assert_called_once()
+
+
+def test_replay_never_repeats_an_irreversible_step(runner):
+    runner.replay_plan = {
+        "steps": [{"kind": "click", "label": "Pay", "operation": "CLICK", "irreversible": 0.95}]
+    }
+    runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
+    runner.state["decision"] = None
+    assert runner._replay_step() is False
+    assert runner.state["replay"]["stopped"].startswith("irreversible")
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_replay_stops_when_a_step_no_longer_matches(runner):
+    runner.replay_plan = {
+        "steps": [{"kind": "click", "label": "Gone", "operation": "CLICK"}]
+    }
+    runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
+    runner.state["decision"] = None
+    assert runner._replay_step() is False
+    assert "does not match" in runner.state["replay"]["stopped"]
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_replay_stops_when_a_step_has_no_effect(runner):
+    runner.replay_plan = {
+        "steps": [{"kind": "click", "label": "Go", "operation": "CLICK"}]
+    }
+    runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
+    runner.state["decision"] = None
+    assert runner._replay_step() is True
+    assert "no visible effect" in runner.state["replay"]["stopped"]
+    assert runner.state["replay"]["used"] == 0
+
+
+def test_executed_steps_become_descriptors(runner):
+    runner.state["descriptors"] = []
+    runner.state["decision"] = {**decision("e3"), "operation": "CLICK"}
+    runner.state["browser"].observe.return_value = {
+        **runner.state["page"], "url": "https://example.test/next",
+    }
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    descriptor = runner.state["descriptors"][-1]
+    assert descriptor["kind"] == "click"
+    assert descriptor["label"] == "Go"
+    assert descriptor["outcome"] == "navigated"
+
+
+def test_completed_run_records_a_replay_plan(runner, tmp_path):
+    runner.replay_dir = tmp_path
+    runner.state["replay"] = _replay_state([])
+    runner.state["status"] = "done"
+    runner.state["descriptors"] = [{"kind": "click", "label": "Go", "operation": "CLICK"}]
+    runner._finalize()
+    recorded = runner.state["replay"]["recorded"]
+    assert recorded and Path(recorded).exists()
+
+
+def test_a_replay_run_does_not_rerecord_a_plan(runner, tmp_path):
+    runner.replay_dir = tmp_path
+    runner.state["replay"] = {**_replay_state([]), "used": 3}
+    runner.state["status"] = "done"
+    runner.state["descriptors"] = [{"kind": "click", "label": "Go", "operation": "CLICK"}]
+    runner._finalize()
+    assert runner.state["replay"]["recorded"] is None
+    assert not list(tmp_path.glob("*.json"))

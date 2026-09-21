@@ -3,24 +3,48 @@
 import argparse
 import base64
 import json
+import os
+from datetime import date
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from jev_ultrafast import Agent
 
 URL = "https://www.google.com/travel/flights?hl=en"
-GOALS = (
-    "Find one-way flights from Zurich to London on September 20, 2026, for one adult in economy. "
-    "Stop when matching flight options are visible. Do not select or book a flight."
-)
+# The date the published 7.073 s run used. It is now in the past, and Google's date
+# picker will not offer it, so live re-runs must set JEV_FLIGHTS_DATE to a future date:
+#   JEV_FLIGHTS_DATE=2026-10-20 uv run --env-file .env python examples/flights.py
+DEFAULT_DATE = "2026-09-20"
 
 
-def verify(page):
+def flight_date():
+    try:
+        return date.fromisoformat(os.environ.get("JEV_FLIGHTS_DATE", DEFAULT_DATE))
+    except ValueError:
+        return date.fromisoformat(DEFAULT_DATE)
+
+
+def goal_for(day):
+    return (
+        f"Find one-way flights from Zurich to London on {day.strftime('%B')} {day.day}, "
+        f"{day.year}, for one adult in economy. Stop when matching flight options are visible. "
+        "Do not select or book a flight."
+    )
+
+
+GOALS = goal_for(flight_date())
+
+
+def verify(page, day=None):
     """Independent checks on the resulting page, not the model's DONE answer."""
+    day = day or flight_date()
+    iso = day.isoformat()
+    short = f"{day.strftime('%a')}, {day.strftime('%b')} {day.day}"
+    long_day = f"{day.strftime('%A, %B')} {day.day}"
     parsed = urlparse(page["url"])
     encoded = parse_qs(parsed.query).get("tfs", [""])[0]
     try:
-        date_in_url = b"2026-09-20" in base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        date_in_url = iso.encode() in base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
     except ValueError:
         date_in_url = False
     actions = page["actions"]
@@ -31,9 +55,9 @@ def verify(page):
         "one_way": values.get("Change ticket type. One way") == "One way",
         "origin": values.get("Where from?") == "Zürich",
         "destination": values.get("Where to?") == "London",
-        "date": values.get("Departure") == "Sun, Sep 20",
-        "year": date_in_url or "departing 2026-09-20" in page["text"],
-        "results": bool(flights) and all("Sunday, September 20" in f for f in flights),
+        "date": values.get("Departure") == short,
+        "year": date_in_url or f"departing {iso}" in page["text"],
+        "results": bool(flights) and all(long_day in f for f in flights),
     }
     return {"passed": all(checks.values()), "checks": checks, "visible_flights": flights}
 

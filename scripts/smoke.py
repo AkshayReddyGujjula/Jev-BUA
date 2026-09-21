@@ -2,11 +2,17 @@
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from jev_ultrafast import Agent
 from jev_ultrafast.demo import load_environment
+
+# Real page labels can contain characters the Windows console codec cannot encode (a
+# "Destination → Lisbon" label is enough). Printing must never abort a live run.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 GOALS = (
     "Use the destination search and filters to find Design stays in Lisbon with Free cancellation, "
@@ -28,7 +34,8 @@ def main():
             for state in agent.run():
                 history = state["history"]
                 print(
-                    state["elapsed_ms"], "ms", len(history), "actions",
+                    state["elapsed_ms"], "ms", sum(1 for h in history if not h.get("skipped")),
+                    "actions", sum(1 for h in history if h.get("skipped")), "skipped",
                     history[-1]["action"] if history else "", flush=True,
                 )
                 (output / "state.json").write_text(json.dumps(state, indent=2))
@@ -47,7 +54,8 @@ def main():
             "ms": state["elapsed_ms"],
             "verified": True,
             "decisions": len(state["decisions"]),
-            "actions": len(state["history"]),
+            "actions": sum(1 for h in state["history"] if not h.get("skipped")),
+            "skipped": sum(1 for h in state["history"] if h.get("skipped")),
         }
         print(json.dumps(result, indent=2))
         (output / "summary.json").write_text(json.dumps(result, indent=2))

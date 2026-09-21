@@ -28,7 +28,7 @@ Every observation produces a new element table:
 ...
 ```
 
-The operations are `CLICK`, `TYPE_TEXT`, `SELECT`, `SCROLL_UP`, `SCROLL_DOWN`, `WAIT`, `DONE`, and `BLOCKED`. Only supported operations and targets are offered.
+The operations are `CLICK`, `TYPE_TEXT`, `SELECT`, `SCROLL_UP`, `SCROLL_DOWN`, `WAIT`, `REOBSERVE`, `ABSTAIN`, `DONE`, and `BLOCKED`. Only supported operations and targets are offered, and `REOBSERVE` is withdrawn after its per-run budget.
 
 ```text
                       one TypeSafe request
@@ -65,7 +65,7 @@ Open **http://127.0.0.1:8766** and click **Start demo → Run automatically**. T
 
 Chrome connects through [Browser Harness](https://github.com/browser-use/browser-harness), installed by `uv sync`. Run `uv run browser-harness --doctor` if it needs connecting. Allow remote debugging in Chrome when prompted.
 
-`TEXT_MODEL_API_KEY` is an OpenRouter key in the example configuration. The current demo uses `inception/mercury-2.5` with reasoning disabled. Gemini, GLM, and DeepSeek can also use the OpenAI-compatible text helper; configure the appropriate model, endpoint, and reasoning setting.
+`TEXT_MODEL_API_KEY` is the key for the text helper. The current configuration runs `deepseek-v4.1-flash` through the OpenAI-compatible OpenCode Go endpoint with reasoning disabled (`TEXT_MODEL`, `TEXT_MODEL_BASE_URL`, `TEXT_MODEL_REASONING` in `.env`). Gemini, GLM, DeepSeek and other OpenAI-compatible providers work too; configure the model, endpoint, and reasoning setting together. The 7.073 s recording used `inception/mercury-2.5`, so its helper latencies are historical rather than a property of the current configuration.
 
 ## Use the library
 
@@ -104,6 +104,22 @@ uv run --env-file .env python examples/run.py \
 
 Every executed target is resolved from an observed node. The executor rechecks page freshness and click occlusion. Model output never becomes selectors, coordinates, shell commands, or executable JavaScript. Text-helper output must parse as a small JSON object before typing.
 
+## Verified outcomes, not opinions
+
+`status` is what the agent did: `done`, `blocked`, `stalled`, or `abstained`. `outcome` is the code-owned verdict, resolved from an independent readback:
+
+| outcome | meaning |
+| --- | --- |
+| `verified` | an `expect` assertion ran against the real page and matched |
+| `refuted` | a readback ran and did not match |
+| `unknown` | nothing to verify against — a `DONE` choice alone is not proof |
+| `abstained` | a risk gate refused to act |
+| `budget_exhausted` | the anti-loop deadline or a step/time budget fired |
+
+Pass `expect` (`url_contains`, `url_matches`, `title_contains`, `text_contains`, `text_absent`, `selector_count`) to `browser_do`, `run_task.py --expect` or `Agent(expect=...)` to get a verdict. Without one, a completed run reports `unknown`, never `verified`.
+
+Three v2 properties go with it: a low-confidence mutation is re-observed once and then refused rather than executed (per-risk confidence floors, with an `irreversible` question riding the same request); repeated decisions are served from a disk cache keyed on the entire request; and a run can write append-only JSONL evidence — offered candidates, raw answers, confidences, the answering model, executions, outcome.
+
 ## Small enough to read
 
 | File | Job |
@@ -113,13 +129,18 @@ Every executed target is resolved from an observed node. The executor rechecks p
 | [browser.py](jev_ultrafast/browser.py) | Browser connection, current geometry, execution |
 | [model.py](jev_ultrafast/model.py) | Dynamic operation/target heads and text generation |
 | [questions.py](jev_ultrafast/questions.py) | Model instructions |
+| [outcomes.py](jev_ultrafast/outcomes.py) | Code-owned outcome vocabulary |
+| [assertions.py](jev_ultrafast/assertions.py) | Readback assertions and page facts |
+| [gates.py](jev_ultrafast/gates.py) | Per-risk confidence gates |
+| [cache.py](jev_ultrafast/cache.py) | Decision cache keyed on the full request |
+| [evidence.py](jev_ultrafast/evidence.py) | Append-only run evidence |
 | [demo.py](jev_ultrafast/demo.py) | Local inspector |
 
 ## Evidence and limits
 
 The current video is a **7,073 ms** Google Flights run. Timing starts after initial page observation and includes model calls, generated text, browser work, stale decisions, and loading waits. A fresh independent check verifies the one-way setting, Zürich, London, September 20, 2026, and visible flight options. The video plays at 1×, with no opening hold and a 0.5-second final hold.
 
-In six alternating runs with identical models and settings, both versions passed **3/3**. Median task time went from **9.450 s → 7.092 s**, a **25% reduction**; median browser protocol calls went from **1,092 → 101**. This is three repeats of one task on one browser profile, not a general reliability benchmark.
+In six alternating runs with identical models and settings, both versions passed **3/3**. Median task time went from **9.450 s → 7.092 s**, a **25% reduction**; median browser protocol calls went from **1,092 → 101**. This is three repeats of one task on one browser profile, not a general reliability benchmark. Both figures predate the v2 outcome/gate layer, and the recorded task date (Sunday, September 20, 2026) has since passed, so the matched comparison cannot be re-run as published; [performance.md](docs/performance.md) documents what was re-measured instead.
 
 The same policy opened the requested Wikipedia article in **2.798 s** and passed a local hotel search/filter task in **1.896 s**. Runs, failures, source hashes, and measurement boundaries are in [performance.md](docs/performance.md).
 

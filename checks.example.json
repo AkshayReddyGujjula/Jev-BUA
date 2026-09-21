@@ -1,0 +1,55 @@
+{
+  "base_url": "http://127.0.0.1:8791",
+  "defaults": { "max_seconds": 40, "tab": "background" },
+  "checks": [
+    {
+      "name": "search returns results for the supplied query",
+      "path": "/trap?mode=form",
+      "goal": "Search the catalogue for laptops and open the results.",
+      "values": { "Search the catalogue": "laptops" },
+      "expect": {
+        "url_contains": "mode=results",
+        "text_contains": ["laptops"],
+        "text_absent": ["Not found"]
+      }
+    },
+    {
+      "name": "second query is independent of the first",
+      "path": "/trap?mode=form",
+      "goal": "Search the catalogue for monitors and open the results.",
+      "values": { "Search the catalogue": "monitors" },
+      "expect": {
+        "url_contains": "q=monitors",
+        "text_contains": ["monitors"]
+      }
+    },
+    {
+      "name": "third query is independent of the others",
+      "path": "/trap?mode=form",
+      "goal": "Search the catalogue for keyboards and open the results.",
+      "values": { "Search the catalogue": "keyboards" },
+      "expect": {
+        "url_contains": "q=keyboards",
+        "text_contains": ["keyboards"]
+      }
+    },
+    {
+      "name": "fourth query is independent of the others",
+      "path": "/trap?mode=form",
+      "goal": "Search the catalogue for headphones and open the results.",
+      "values": { "Search the catalogue": "headphones" },
+      "expect": {
+        "url_contains": "q=headphones",
+        "text_contains": ["headphones"]
+      }
+    },
+    {
+      "name": "an inert control never falsely confirms (stall path)",
+      "path": "/trap?mode=dead",
+      "goal": "Click Confirm changes and reach the confirmation screen.",
+      "expect": {
+        "text_absent": ["Your changes were saved", "Saved"]
+      }
+    }
+  ]
+}

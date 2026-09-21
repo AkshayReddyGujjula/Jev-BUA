@@ -28,6 +28,10 @@ The audit also found that treating every INPUT as editable misclassified checkbo
 
 ## Boundaries
 
-Sixty browser actions and 120 decision requests bound a run. Up to 250 action candidates are retained; truncated candidates cannot be selected. The service stays loopback-only, serializes inspector actions, and checks Host, Origin, and a local request token. Credentials remain server-side. Tabs share the existing Chrome profile.
+A configurable step cap (500 actions by default) and a 5 s no-progress deadline bound a run; the CLI and MCP server add wall-clock budgets. Up to 250 action candidates are retained; truncated candidates cannot be selected. The service stays loopback-only, serializes inspector actions, and checks Host, Origin, and a local request token. Credentials remain server-side. Tabs share the existing Chrome profile.
 
 The policy is generic, but two websites do not establish broad reliability. Name resolution covers common labels, ARIA references, and text; it is not the browser's full accessibility algorithm. Shadow roots, frames, canvas, uploads, nested scrolling, pop-ups, and complex keyboard interactions can block progress. A valid action can still be wrong. Independent checks, rather than the model's DONE choice, determine whether the demonstrated task succeeded.
+
+## Code-owned outcomes
+
+Every terminal state resolves an `outcome` from an independent readback: `verified`, `refuted`, `unknown`, `abstained`, or `budget_exhausted`. A `DONE` choice is cross-checked (`goal_done > 0.85`) and then checked against caller-supplied assertions; without assertions the outcome is `unknown`, never `verified`. A low-confidence mutation is re-observed once and then refused rather than executed (per-risk confidence floors, with an `irreversible` Noul asked in the same request). Because a decision is a pure function of its entire request, identical requests can be served from a disk cache; the key includes candidate order, page state and recent actions, so any mutation changes it. Runs may write append-only JSONL evidence: offered candidates, raw answers, confidences, the model that answered, executions, and the outcome.

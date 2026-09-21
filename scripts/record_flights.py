@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+import os
 import sys
 import threading
 import time
@@ -10,9 +11,17 @@ from pathlib import Path
 
 from browser_harness.helpers import drain_events
 
+# Action labels can contain characters the Windows console codec cannot encode; printing
+# must never abort a recorded run.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from examples.flights import GOALS, URL, verify  # noqa: E402
 from jev_ultrafast import Agent  # noqa: E402
+
+# A recording must show the real decision path, not a replayed cached answer.
+os.environ.setdefault("JEV_CACHE", "0")
 
 folder = Path(sys.argv[1] if len(sys.argv) > 1 else "artifacts/flights/recorded")
 folder.mkdir(parents=True, exist_ok=False)
@@ -67,6 +76,11 @@ finally:
     state["verification"] = verify(state["final_page"])
     state["source_hashes"] = source_hashes
     state["recording_errors"] = errors
+    state["configuration"] = {
+        key: os.environ.get(key)
+        for key in ("TYPESAFE_MODEL", "TEXT_MODEL", "TEXT_MODEL_BASE_URL",
+                    "TEXT_MODEL_REASONING", "JEV_CACHE")
+    }
     (folder / "state.json").write_text(json.dumps(state, indent=2))
     (folder / "session.json").write_text(json.dumps({"target": agent.browser.target, "session": agent.browser.session}))
 print(json.dumps(state["verification"], indent=2))

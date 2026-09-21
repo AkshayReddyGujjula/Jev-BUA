@@ -9,10 +9,18 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+# Action labels can contain characters the Windows console codec cannot encode; printing
+# must never abort a measured run.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--source", default=".")
 parser.add_argument("--output", required=True)
 args = parser.parse_args()
+# A benchmark must measure the real decision path, not a cached answer: with the cache on,
+# a repeated measurement would report fewer requests and no model latency.
+os.environ.setdefault("JEV_CACHE", "0")
 source = Path(args.source).resolve()
 sys.path.insert(0, str(source))
 from jev_ultrafast import Agent  # noqa: E402
@@ -61,7 +69,8 @@ finally:
     state["task_hash"] = hashlib.sha256(json.dumps([URL, GOALS]).encode()).hexdigest()
     state["configuration"] = {
         key: os.environ.get(key)
-        for key in ("TYPESAFE_MODEL", "TEXT_MODEL", "TEXT_MODEL_BASE_URL", "TEXT_MODEL_REASONING")
+        for key in ("TYPESAFE_MODEL", "TEXT_MODEL", "TEXT_MODEL_BASE_URL",
+                    "TEXT_MODEL_REASONING", "JEV_CACHE")
     }
     state["browser_version"] = agent.browser.call("Browser.getVersion")["product"]
     state["final_page"] = final

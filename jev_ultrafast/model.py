@@ -4,22 +4,74 @@ import json
 import math
 import os
 import time
+import uuid
 
 import httpx
 
-from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
+from . import cache
+from .questions import (
+    ABSTAIN,
+    FAILURE_CLASS,
+    GOAL_DONE,
+    IRREVERSIBLE,
+    NEXT_ACTION,
+    REOBSERVE,
+    STUCK,
+    TARGET,
+    TEXT_VALUE,
+)
 
 CLIENT = httpx.Client(http2=True, timeout=25)
 
+# The decision call also sits inside the anti-loop deadline, so it is bounded too: with
+# the shared 25 s client timeout one slow decision could overshoot a 5 s guarantee five
+# times over. A decision that cannot be made inside the remaining budget is not made.
+DECIDE_TIMEOUT = float(os.environ.get("JEV_DECIDE_TIMEOUT", "3"))
 
-def post_json(url, key, body):
+# The text helper is called inside the loop's anti-loop deadline (JEV_STALL_SECONDS,
+# default 5 s). Its measured tail reaches 22 s, which would blow that guarantee four
+# times over, so this call is bounded well below the deadline. A text call that cannot
+# answer in time is a failed action, not a stalled run.
+TEXT_TIMEOUT = float(os.environ.get("JEV_TEXT_TIMEOUT", "4"))
+
+# Stable per-process id for OpenCode Go's routing header; harmless for other providers.
+TEXT_SESSION = os.environ.get("JEV_TEXT_SESSION") or uuid.uuid4().hex
+
+
+def post_json(url, key, body, headers=None, timeout=None):
+    """POST with a TOTAL time budget, not a per-attempt one.
+
+    `timeout` used to bound each of up to three attempts, so a call given 3 s could occupy
+    10.2 s (three ~2.9 s attempts plus backoff sleeps) - measured. Every caller that sized
+    this against a remaining deadline was therefore wrong by more than 3x. The budget now
+    covers the whole call, including retries.
+    """
+    budget = float(timeout or 25.0)
+    deadline = time.monotonic() + budget
     for attempt in range(3):
+        left = deadline - time.monotonic()
+        if left <= 0.05:
+            raise RuntimeError(f"Model call exceeded its {budget:g}s budget; no action executed.")
         try:
-            response = CLIENT.post(url, json=body, headers={"Authorization": f"Bearer {key}"})
+            response = CLIENT.post(
+                url,
+                json=body,
+                headers={"Authorization": f"Bearer {key}", **(headers or {})},
+                timeout=min(left, budget),
+            )
+        except httpx.TimeoutException:
+            raise RuntimeError(
+                f"Model call exceeded its {budget:g}s budget; no action executed."
+            ) from None
         except httpx.HTTPError:
             raise RuntimeError("Model connection failed; no action executed.") from None
         if response.status_code in {429, 529, 503} and attempt < 2:
-            time.sleep(0.5 * 2**attempt)
+            backoff = 0.5 * 2**attempt
+            if time.monotonic() + backoff >= deadline:
+                raise RuntimeError(
+                    f"Model unavailable within its {budget:g}s budget; no action executed."
+                )
+            time.sleep(backoff)
             continue
         if response.is_error:
             raise RuntimeError(f"Model provider returned HTTP {response.status_code}; no action executed.")
@@ -27,28 +79,47 @@ def post_json(url, key, body):
     raise RuntimeError("Model unavailable")
 
 
+def noul(answer):
+    """A Noul answer's probability; 0.0 when absent or malformed."""
+    try:
+        value = float(answer["noul"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+    return value if math.isfinite(value) and 0 <= value <= 1 else 0.0
+
+
 def validate_choice(answer, ids):
+    """The contract check. Still all-or-nothing, but the failure says what was wrong."""
+    problems = []
     try:
         probabilities = answer["probabilities"]
         numbers = [*probabilities.values(), answer["confidence"]]
-        valid = (
-            answer["choice"] in ids
-            and set(probabilities) == set(ids)
-            and all(type(n) in (int, float) and math.isfinite(n) and 0 <= n <= 1 for n in numbers)
-            and abs(sum(probabilities.values()) - 1) < 0.02
-            and probabilities[answer["choice"]] >= max(probabilities.values()) - 1e-6
+        choice = answer["choice"]
+        if choice not in ids:
+            problems.append("chosen id was not offered")
+        if set(probabilities) != set(ids):
+            problems.append(f"probability keys differ by {len(set(probabilities) ^ set(ids))}")
+        if not all(type(n) in (int, float) and math.isfinite(n) and 0 <= n <= 1 for n in numbers):
+            problems.append("a probability or confidence is out of range")
+        total = sum(v for v in probabilities.values() if type(v) in (int, float))
+        if abs(total - 1) >= 0.02:
+            problems.append(f"probabilities sum to {total:.3f}")
+        best = max(
+            (v for v in probabilities.values() if type(v) in (int, float)), default=None
         )
-    except (KeyError, TypeError, ValueError):
-        valid = False
-    if not valid:
-        raise ValueError("Invalid TypeSafe response; no action executed.")
+        if best is None or probabilities.get(choice) is None or probabilities[choice] < best - 1e-6:
+            problems.append("chosen id is not the argmax")
+    except (KeyError, TypeError, ValueError) as exc:
+        problems.append(f"malformed answer ({type(exc).__name__})")
+    if problems:
+        raise ValueError(f"Invalid TypeSafe response ({'; '.join(problems)}); no action executed.")
     return answer
 
 
 def action_space(actions):
     """One index per observed element; each operation has its own valid target choices."""
     elements, indices, targets, controls = [], {}, {}, {}
-    operations = {"click": "CLICK", "fill": "TYPE_TEXT", "select": "SELECT"}
+    operations = {"click": "CLICK", "fill": "TYPE_TEXT", "select": "SELECT", "seek": "SEEK"}
     for action in actions:
         kind = action["kind"]
         if kind not in operations:
@@ -78,20 +149,55 @@ def action_space(actions):
     return elements, targets, controls
 
 
-def choose(state, goal, history):
+def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=True):
     elements, targets, controls = action_space(state["actions"])
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
         "SELECT": "Select an observed dropdown value.",
+        "SEEK": "Move a slider (for example a video timeline) to a value supplied from the goal.",
     }
     operations = {key: labels[key] for key in targets}
     operations.update({key: value["label"] for key, value in controls.items()})
-    operations.update(DONE="Every requirement is visibly satisfied.", BLOCKED="No supported operation can progress.")
+    operations.update(
+        BACK="Go back to the previous page in the browser history.",
+        DONE="Every requirement is visibly satisfied.",
+        BLOCKED="No supported operation can progress.",
+        # Escape hatches, mandatory in the CUA bounded-chooser contract: without a
+        # "none of the above" a softmax always names a winner, and a low-confidence
+        # click looks exactly like a confident one.
+        REOBSERVE=REOBSERVE,
+        ABSTAIN=ABSTAIN,
+    )
+    if not allow_reobserve:
+        # The loop's own re-observe budget is spent, so the option is not offered.
+        operations.pop("REOBSERVE", None)
+    # Stable candidate order. Jev-style decisions are sensitive to the ORDER candidates are
+    # presented in - an independent reimplementation reports a different answer on 119 of 139
+    # Choice tasks depending on order. Enumeration order is not something we control: it is
+    # whatever order the DOM walk happened to produce, so the same page could reach different
+    # answers between runs. Sorting by the candidate's own text removes that input instead of
+    # hoping the model ignores it.
+    operations = dict(sorted(operations.items()))
     questions = {
-        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
+        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}},
+        "goal_done": {"type": "noul", "instructions": {"goal": goal, "rules": GOAL_DONE}},
+        "stuck": {"type": "noul", "instructions": {"goal": goal, "rules": STUCK}},
+        # Rides the same request: no extra round trip for the risk gate.
+        "irreversible": {"type": "noul", "instructions": {"goal": goal, "rules": IRREVERSIBLE}},
     }
     for operation, candidates in targets.items():
+        # Same reasoning as `operations` above: order the candidates by their own text so the
+        # question does not change shape between two views of the same page.
+        ordered = sorted(
+            candidates.items(),
+            key=lambda item: (
+                item[1].get("label") or "",
+                item[1].get("role") or "",
+                str(item[1].get("current_value", item[1].get("value", "")) or ""),
+                item[0],
+            ),
+        )
         questions[operation.lower() + "_target"] = {
             "type": "choice",
             "criteria": {
@@ -100,7 +206,7 @@ def choose(state, goal, history):
                     "current_value": a.get("current_value", a.get("value", "")),
                     **{k: a[k] for k in ("role", "checked", "selected", "expanded") if k in a},
                 }
-                for index, a in candidates.items()
+                for index, a in ordered
             },
             "instructions": {"goal": goal, "operation": operation, "rules": [NEXT_ACTION, TARGET]},
         }
@@ -109,43 +215,102 @@ def choose(state, goal, history):
         "state": {
             "page": {k: state[k] for k in ("url", "title", "text")},
             "elements": elements,
+            # `recovery` is included so the model can see WHY an action was substituted.
+            # Without it a guard could silently redirect the loop and the model had no way
+            # to learn the list was exhausted and change strategy (search instead of scan).
             "recent_actions": [
-                {k: h.get(k) for k in ("action", "kind", "text", "page_changed")} for h in history[-10:]
+                {k: h.get(k) for k in
+                 ("action", "kind", "text", "outcome", "page_changed", "recovery", "scan")}
+                for h in history[-10:]
             ],
         },
         "questions": questions,
     }
     started = time.perf_counter()
-    result = post_json("https://api.typesafe.ai/v1/systemone", os.environ["TYPESAFE_API_KEY"], body)
-    operation_answer = validate_choice(result["answers"].get("operation", {}), operations)
+    key = cache.key_for(body)
+    result = None
+    stored = cache.load(key) if use_cache else None
+    if stored is not None and not _cached_heads_valid(stored, operations, targets):
+        # A poisoned entry must not make the same state fail until its TTL expires.
+        cache.delete(key)
+        stored = None
+    if stored is not None:
+        result = stored
+    else:
+        result = post_json(
+            "https://api.typesafe.ai/v1/systemone",
+            os.environ["TYPESAFE_API_KEY"],
+            body,
+            timeout=min(timeout or DECIDE_TIMEOUT, DECIDE_TIMEOUT),
+        )
+    try:
+        operation_answer = validate_choice(result["answers"].get("operation", {}), operations)
+    except ValueError as error:
+        raise ValueError(f"{error} [operation head]") from None
     operation = operation_answer["choice"]
     target = None
     target_answer = None
     probabilities = {}
     if operation in targets:
         # Unused target heads cannot cause an action. Validate the head selected by the operation.
-        target_answer = validate_choice(result["answers"].get(operation.lower() + "_target", {}), targets[operation])
+        try:
+            target_answer = validate_choice(
+                result["answers"].get(operation.lower() + "_target", {}), targets[operation]
+            )
+        except ValueError as error:
+            raise ValueError(f"{error} [{operation.lower()}_target head]") from None
         target = target_answer["choice"]
         choice = targets[operation][target]["id"]
         probabilities = {a["id"]: target_answer["probabilities"][index] for index, a in targets[operation].items()}
     else:
         choice = controls[operation]["id"] if operation in controls else operation
         probabilities[choice] = operation_answer["probabilities"][operation]
-    return {
+    candidate_map = {
+        name: {index: action["id"] for index, action in candidates.items()}
+        for name, candidates in targets.items()
+    }
+    candidate_map.update({name: {name: action["id"]} for name, action in controls.items()})
+    candidate_map["BACK"] = {"BACK": "BACK"}
+    decision = {
         "choice": choice,
         "operation": operation,
         "target": target,
         "confidence": operation_answer["confidence"],
+        "probability": probabilities.get(choice, 0.0),
         "probabilities": probabilities,
         "operation_probabilities": operation_answer["probabilities"],
         "target_probabilities": target_answer["probabilities"] if target_answer else {},
         "target_confidence": target_answer["confidence"] if target_answer else None,
+        "goal_done": noul(result["answers"].get("goal_done", {})),
+        "stuck": noul(result["answers"].get("stuck", {})),
+        # The risk gate's input, asked in this same request.
+        "irreversible": noul(result["answers"].get("irreversible", {})),
+        "candidate_map": candidate_map,
         "raw_answers": result["answers"],
-        "model": result["model"],
-        "usage": result.get("usage", {}),
+        "model": result.get("model"),
+        # A cache hit spent no tokens, so it reports no usage; `cached` says why.
+        "usage": result.get("usage", {}) if stored is None else {},
         "latency_ms": round((time.perf_counter() - started) * 1000),
+        "cached": stored is not None,
+        "cache_key": key,
         "request": body,
     }
+    if stored is None:
+        # Store only after every head this decision can execute has validated.
+        cache.store(key, result)
+    return decision
+
+
+def _cached_heads_valid(result, operations, targets):
+    """Re-validate the heads a cached entry could execute, with the same rules as live."""
+    try:
+        answer = result["answers"]
+        operation = validate_choice(answer.get("operation", {}), operations)["choice"]
+        if operation in targets:
+            validate_choice(answer.get(operation.lower() + "_target", {}), targets[operation])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return True
 
 
 def field_context(goal, action, page, history):
@@ -157,7 +322,7 @@ def field_context(goal, action, page, history):
     }
 
 
-def field_text(context):
+def field_text(context, timeout=None):
     key = os.environ.get("TEXT_MODEL_API_KEY")
     if not key:
         raise ValueError("TYPE_TEXT needs TEXT_MODEL_API_KEY; no text is hardcoded or guessed by the executor.")
@@ -183,6 +348,8 @@ def field_text(context):
                 },
             ],
         },
+        headers={"x-opencode-session": TEXT_SESSION, "User-Agent": "jev-ultrafast/0.1"},
+        timeout=min(timeout or TEXT_TIMEOUT, TEXT_TIMEOUT),
     )
     try:
         output = json.loads(result["choices"][0]["message"]["content"])
@@ -195,4 +362,57 @@ def field_text(context):
         "model": model,
         "latency_ms": round((time.perf_counter() - started) * 1000),
         "usage": result.get("usage", {}),
+    }
+
+
+FAILURE_CRITERIA = {
+    "recoverable": "A different offered action or target can still progress toward the goal.",
+    "still_loading": "The page is still loading, settling, or waiting on data; more time may change it.",
+    "hard_wall": "No offered action can progress: sign-in wall, bot check, error page, or exhausted options.",
+}
+
+
+def classify_failure(state, goal, history, timeout=None):
+    """Classify a dead streak as one bounded choice. None when it cannot answer.
+
+    Only called after repeated no-progress actions, so a healthy run never pays for it.
+    Any failure to answer returns None and leaves the caller's existing recovery in charge.
+    """
+    key = os.environ.get("TYPESAFE_API_KEY")
+    if not key:
+        return None
+    body = {
+        "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
+        "state": {
+            "page": {k: state.get(k) for k in ("url", "title", "text")},
+            "recent_actions": [
+                {k: h.get(k) for k in ("action", "kind", "text", "outcome", "page_changed", "recovery")}
+                for h in history[-6:]
+            ],
+        },
+        "questions": {
+            "failure_class": {
+                "type": "choice",
+                "criteria": FAILURE_CRITERIA,
+                "instructions": {"goal": goal, "rules": FAILURE_CLASS},
+            }
+        },
+    }
+    started = time.perf_counter()
+    try:
+        result = post_json(
+            "https://api.typesafe.ai/v1/systemone",
+            key,
+            body,
+            timeout=min(timeout or DECIDE_TIMEOUT, DECIDE_TIMEOUT),
+        )
+        answer = validate_choice(result["answers"].get("failure_class", {}), FAILURE_CRITERIA)
+    except Exception:
+        return None
+    return {
+        "class": answer["choice"],
+        "confidence": answer["confidence"],
+        "probabilities": answer["probabilities"],
+        "model": result.get("model"),
+        "latency_ms": round((time.perf_counter() - started) * 1000),
     }
