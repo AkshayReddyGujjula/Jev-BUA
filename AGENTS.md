@@ -27,7 +27,7 @@ This repo is the browser engine other agents drive. Three ways in, pick by what 
   (`fresh: true` forces a new one); every run can write JSONL evidence under `artifacts/evidence/`
   (`JEV_EVIDENCE_DIR=0` disables it). Start the server directly with
   `.venv\Scripts\python.exe jev_mcp_server.py` if an agent needs it explained.
-- **CLI, one task:** `uv run --env-file .env python run_task.py --goal "<goal>" --url <url> --tab background [--values '<json>'] [--expect '<json>']`
+- **CLI, one task:** `uv run --env-file .env python run_task.py --goal "<goal>" --url <url> --tab background [--values '<json>'] [--expect '<json>'] [--mode auto|<slug>]`
 - **CLI, parallel app testing:** write a check file and run
   `uv run --env-file .env python scripts/run_checks.py checks.json --workers 6`
   (up to 10). Assertions in `expect` are read off the real page and are the verdict — not the agent's
@@ -50,3 +50,29 @@ without needing a target app.
 
 One browser per instance matters: give every agent or worker its own `BU_NAME`, or they share a daemon
 and a tab and the failure mode is *silently wrong pages*.
+
+## Modes: lessons for future agents
+
+- Modes are task-class folders (`JEV_MODES_DIR`, default `~/.jev-ultrafast/modes`): `mode.json`,
+  human-editable `AGENTS.md` memory, `learned/` shards, `harvest/`, `replay/`. Auto-creation is
+  opt-in (`--mode auto`, `JEV_MODES=auto`, MCP `mode: "auto"`) and only for a durable task class;
+  benchmark scripts force `JEV_MODES=off`.
+- Never put goal text into a mode's `AGENTS.md`; `mode.json` keeps `created_from` only. Memory is
+  sent to model providers — never store credentials, and keep the sensitive-label denylist in
+  `jev_ultrafast/modes.py` ahead of anything new you learn.
+- Learned values are typed only on an exact normalized label match, only when a fresh readback
+  showed the field accepted the value, and never for sensitive labels, seek controls or replays.
+- The confidence gate's `irreversible` reading is page-level, so floors apply to the chosen
+  action's own risk class: only clicks can be committal; checkbox/radio/switch/link clicks and
+  fills/selects/sliders are reversible. A fill backed by exact memory skips the gate — it is user
+  data, not a model guess.
+- The collector is scroll-only by construction. Harvest once per visited page state, never on
+  ambient text churn; wait for unrendered feeds; fall back to scrolling the element under the
+  viewport centre for inner scrollers. Keep `harvest_at_least` paired with a page check.
+- Off-loop model calls need their own timeout ceiling (`JEV_CLASSIFY_TIMEOUT`); the in-loop helper
+  budget (4 s) silently disabled mode creation on long goals.
+- Live scenarios: `uv run --env-file .env python scripts/modes_live.py --case internship|feed|x`.
+  Fixtures `/apply` and `/feed` live in `scripts/trap_server.py`; evidence in the gitignored
+  `artifacts/modes-live/`; the committed summary is `docs/modes-scenarios.json`.
+- `opencode-instructions.md` is an external reviewer's channel: never edit or commit it (it is
+  gitignored), and address findings in code and docs.

@@ -915,10 +915,10 @@ def test_low_confidence_mutation_reobserves_then_skips(runner):
 
 
 def test_second_low_confidence_irreversible_reading_abstains(runner):
-    runner.state["decision"] = {**decision(), "confidence": 0.7, "irreversible": 0.95}
+    runner.state["decision"] = {**decision("e3"), "confidence": 0.7, "irreversible": 0.95}
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert runner.state["gate"]["resolution"] == "reobserve"
-    runner.state["decision"] = {**decision(), "confidence": 0.7, "irreversible": 0.95}
+    runner.state["decision"] = {**decision("e3"), "confidence": 0.7, "irreversible": 0.95}
     state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert state["status"] == "abstained"
     assert state["gate"]["resolution"] == "abstain"
@@ -965,11 +965,41 @@ def test_a_skipped_choice_is_routed_around(runner, monkeypatch):
 
 
 def test_irreversible_action_gates_above_the_reversible_floor(runner):
-    runner.state["decision"] = {**decision(), "confidence": 0.7, "irreversible": 0.95}
+    runner.state["decision"] = {**decision("e3"), "confidence": 0.7, "irreversible": 0.95}
     state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert state["gate"]["reason"].startswith("irreversible")
     assert state["gate"]["floor"] == 0.9
     runner.state["browser"].act.assert_not_called()
+
+
+def test_page_level_irreversibility_does_not_raise_a_fill_floor(runner, monkeypatch):
+    """A visible Submit button must not put a text field behind the 0.9 floor."""
+    from jev_ultrafast import gates
+
+    assert gates.check({"confidence": 0.84, "irreversible": 0.9},
+                       {"kind": "fill", "label": "Full name"}) is None
+    assert gates.check({"confidence": 0.84, "irreversible": 0.9},
+                       {"kind": "select", "label": "Ticket type"}) is None
+    assert gates.check({"confidence": 0.84, "irreversible": 0.9},
+                       {"kind": "click", "label": "Submit"}) is not None
+    monkeypatch.setattr(loop, "field_text",
+                        lambda *args, **kwargs: ("Ada", {"model": "m", "latency_ms": 1}))
+    runner.state["decision"] = {**decision("e1"), "confidence": 0.84, "irreversible": 0.83}
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state.get("gate") is None
+    runner.state["browser"].act.assert_called_once()
+
+
+def test_reversible_roles_do_not_inherit_a_submit_buttons_risk():
+    from jev_ultrafast import gates
+
+    assert gates.check({"confidence": 0.7, "irreversible": 0.9},
+                       {"kind": "click", "label": "I confirm", "role": "checkbox"}) is None
+    assert gates.check({"confidence": 0.7, "irreversible": 0.9},
+                       {"kind": "click", "label": "Read more", "role": "link"}) is None
+    verdict = gates.check({"confidence": 0.7, "irreversible": 0.9},
+                          {"kind": "click", "label": "Submit", "role": "button"})
+    assert verdict is not None and verdict["floor"] == 0.9
 
 
 def test_reobserve_is_a_read_not_a_mutation(runner):

@@ -141,10 +141,11 @@ step. Each tick:
 1. stops if the anti-loop deadline passed, the step cap is reached, or
    `BARREN_SCROLL_LIMIT` (3) consecutive scrolls produced no new page state (feed
    exhausted);
-2. harvests the current page at most once per fingerprint, when enabled:
-   the text model receives the visible page text (6,000 chars), the mode's interests
+2. harvests the current page at most once per visited page state (the collector's own step
+   counter, never ambient text churn), when enabled:
+   the text model receives the visible page text (2,500 chars), the mode's interests
    memory and picking instructions, and must return strict JSON
-   `{"items": [{"title", "note"}]}` (1-10 items). Invalid output stores nothing; a title is
+   `{"items": [{"title", "note"}]}` (1-5 items). Invalid output stores nothing; a title is
    stored only if it also appears verbatim in the page text this run observed;
 3. scrolls down using the page's own offered scroll action. **The collector never clicks
    anything** — no likes, reposts, or follows — and that is a code property, not a rule
@@ -157,10 +158,12 @@ verdict still comes from the same code-owned readback. `expect` gains
 artifact check rather than a live-page readback — pair it with a page check when the
 verdict must stand on the page alone.
 
-Collector bounds: `steps` (default 8), three barren scrolls, one harvest per fingerprint,
-harvest calls bounded by the remaining anti-loop room like every other model call. A feed
-that stops producing new state stops the run; the 5-second guarantee is measured against
-page progress, so total collector wall time is bounded by the run budget, not by 5 s.
+Collector bounds: `steps` (default 8), three barren scrolls, one harvest per page state,
+harvest calls bounded by the remaining anti-loop room like every other model call, and a
+bounded render wait plus a content-wheel fallback for feeds whose scroller is not the
+document. A feed that stops producing new state stops the run; the 5-second guarantee is
+measured against page progress, so total collector wall time is bounded by the run budget,
+not by 5 s.
 
 ## Safety rules
 
@@ -213,6 +216,34 @@ Live:
   gates the run behind sign-in, that is reported as blocked and the deterministic local
   feed fixture proves the collector instead.
 - Regressions: full offline suite, smoke, parallel checks, trap verifier.
+
+## Live results (2026-09-21)
+
+Trimmed evidence: [modes-scenarios.json](modes-scenarios.json); full JSONL evidence stays in
+the gitignored `artifacts/modes-live/`.
+
+| Scenario | Mode (auto-created) | Result |
+| --- | --- | --- |
+| Internship form, dry run 1 | `internship-application` | `verified` — the user's details reached the page (`value_contains #full-name`), no receipt |
+| Internship form, dry run 2 (same goal) | same | `verified`, in about half the time: 6 of 7 fills came from learned memory with no text call |
+| Internship submit | same | submit **withheld**: consent was ticked, then Jev read the Submit click at 0.68–0.77 against the 0.9 irreversible floor → `abstained`. The gate working as designed, not a scenario failure. |
+| Local feed collection | `save-interesting-posts` (classifier chose `collect`) | `verified` — 4 scrolls, 4 harvest calls, 4 items, 0 gossip, the page's engagement log still `actions: none` |
+| Live x.com timeline, read-only | `x-timeline-curation` | `verified` — 5 scrolls, 6 harvest calls, 2 real posts stored, zero clicks, `only_scrolled` true |
+
+What the live runs taught (all fixed before this doc):
+
+- The gate's `irreversible` reading is page-level, so a visible Submit button was putting a
+  *fill* behind the 0.9 floor and a *checkbox* click behind it too. Floors now apply to the
+  chosen action's own risk class: only clicks can be committal, and
+  checkbox/radio/switch/link roles are reversible. A fill whose value comes from mode memory
+  skips the gate entirely — the value is deterministic user data, not a model guess.
+- The collector harvests once per visited page state, not on every text change; live pages
+  rewrite counters and timestamps constantly (19 fruitless harvest calls measured before this).
+- A feed that has not rendered offers no scroll action: the collector waits and re-observes a
+  bounded number of times. A feed whose scroller is an inner element gets a code-owned content
+  scroll (scroll the element under the viewport centre) — still only a scroll.
+- The classifier runs off the loop deadline and needs its own ceiling; at the helper's 4 s
+  budget a slow classification silently disabled mode creation.
 
 ## Non-goals
 

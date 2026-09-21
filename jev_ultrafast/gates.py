@@ -18,6 +18,15 @@ import os
 
 # Kinds that change the page. WAIT, SCROLL, BACK and key presses are reversible by nature.
 GATED_KINDS = {"click", "fill", "select", "seek"}
+# Only a click can commit, pay, send or delete. A fill, a select or a slider is reversible
+# by nature, so the page-level `irreversible` reading - which rates the most consequential
+# OFFERED action, e.g. a Submit button that merely happens to be visible - must not raise
+# their floor. (Measured live: filling "Full name" on a page offering Submit was refused
+# under the 0.9 irreversible floor before this split.)
+COMMITTABLE_KINDS = {"click"}
+# A click on one of these roles is a reversible control, not a commit, even when the page
+# also offers a Submit button: a consent checkbox or a link must not inherit its risk.
+REVERSIBLE_ROLES = {"checkbox", "radio", "switch", "link"}
 
 
 def _threshold(name, default):
@@ -51,7 +60,11 @@ def check(decision, action):
         irreversible = float(decision.get("irreversible") or 0.0)
     except (TypeError, ValueError):
         irreversible = 0.0
-    high_stakes = irreversible >= IRREVERSIBLE_NOUL
+    high_stakes = (
+        irreversible >= IRREVERSIBLE_NOUL
+        and action.get("kind") in COMMITTABLE_KINDS
+        and (action.get("role") or "").lower() not in REVERSIBLE_ROLES
+    )
     floor = IRREVERSIBLE_MIN if high_stakes else REVERSIBLE_MIN
     if confidence >= floor:
         return None

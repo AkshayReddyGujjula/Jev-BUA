@@ -1,6 +1,7 @@
 """The complete agent loop. Typed choices, observable state, bounded execution."""
 
 import base64
+import hashlib
 import os
 import sys
 import time
@@ -63,6 +64,14 @@ STALL_MEMORY = 12
 # when it stops producing them. An earlier version capped the streak at 10, which in a long
 # list would have forced a click on whatever happened to be next - a fast wrong answer.
 BARREN_SCROLL_LIMIT = int(os.environ.get("JEV_BARREN_SCROLL_LIMIT", "3"))
+# How many times a collector waits for a feed that has not rendered yet before concluding
+# there is nothing to scroll. Each attempt is a re-observation, so a render counts.
+COLLECT_SETTLE_ATTEMPTS = int(os.environ.get("JEV_COLLECT_SETTLE_ATTEMPTS", "4"))
+# A feed whose scroller is an inner element (x.com) offers no document scroll action, so the
+# collector falls back to a code-owned wheel-equivalent scroll of the element under the
+# viewport centre, bounded per run.
+COLLECT_WHEEL_LIMIT = int(os.environ.get("JEV_COLLECT_WHEEL_LIMIT", "10"))
+COLLECT_WHEEL_DELTA = int(os.environ.get("JEV_COLLECT_WHEEL_DELTA", "600"))
 # Distinct element labels to remember when judging whether a step revealed anything new.
 SEEN_LABEL_MEMORY = 800
 
@@ -205,6 +214,8 @@ class Agent:
         self._collect_limit = _budget(
             collect_steps if collect_steps is not None else collect.get("steps"), 8
         )
+        self._collect_settle_attempts = COLLECT_SETTLE_ATTEMPTS
+        self._collect_wheel_limit = COLLECT_WHEEL_LIMIT
         # A recorded descriptor plan for this exact url+goal, when replay was requested.
         # The collect strategy never replays: its contract is that it only scrolls.
         replay_allowed = spec.get("replay") is not False and self._strategy != "collect"
@@ -672,13 +683,22 @@ class Agent:
              "file": None, "stopped": None, "last": []},
         )
         page = state["page"]
+        # Content yield, not control yield, is what a collector is doing. Scrolling a feed
+        # reveals items without changing the control set, so the decision loop's progress
+        # key (url/title/controls) would never move and the anti-loop clock would end the
+        # run mid-collection. New visible text is the collector's progress.
+        visible = (page.get("text") or "")
+        digest = hashlib.sha256(visible.encode("utf-8", "replace")).hexdigest()
+        progressed = digest != state.get("collect_text_hash")
+        if progressed:
+            state["collect_text_hash"] = digest
+            state["progress_at"] = time.monotonic()
         if getattr(self, "_harvest_enabled", False) and getattr(self, "mode", None) is not None:
-            harvested = state.setdefault("harvested", {})
-            if page["fingerprint"] not in harvested:
-                harvested[page["fingerprint"]] = True
-                if len(harvested) > GATE_MEMORY:
-                    for stale in list(harvested)[:-GATE_MEMORY]:
-                        harvested.pop(stale, None)
+            # One harvest per visited page state, keyed to the collector's own step counter.
+            # Triggering on text change alone burned 19 calls in 70 s on x.com, because a
+            # live page rewrites counters and timestamps without yielding new items.
+            if state.get("harvest_last_step") != harvest.get("steps", 0):
+                state["harvest_last_step"] = harvest.get("steps", 0)
                 self._harvest_page(page)
         if state["status"] in TERMINAL_STATUS:
             return self.snapshot()
@@ -693,12 +713,46 @@ class Agent:
              if a["kind"] == "scroll" and (a.get("delta") or 0) > 0),
             None,
         )
+        wheel = False
+        if scroll is None:
+            # A feed that has not rendered yet offers no scroll action. Wait, re-observe, and
+            # only conclude "nothing to scroll" after a bounded number of attempts; the
+            # anti-loop room keeps this from spinning, and a render that adds controls counts
+            # as progress.
+            attempts = state.get("collect_settle", 0)
+            room = STALL_LIMIT_S - (
+                time.monotonic() - (state.get("progress_at") or time.monotonic())
+            )
+            if (
+                attempts < getattr(self, "_collect_settle_attempts", COLLECT_SETTLE_ATTEMPTS)
+                and room > 1.0
+            ):
+                state["collect_settle"] = attempts + 1
+                time.sleep(0.5)
+                state["page"] = state["browser"].observe(
+                    screenshot=self.screenshots, deadline=self.read_deadline()
+                )
+                if self.note_progress(state["page"]):
+                    state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+                    state["status"] = "collecting"
+                    return self.snapshot()
+        if scroll is None and state.get("collect_wheel", 0) < getattr(
+            self, "_collect_wheel_limit", COLLECT_WHEEL_LIMIT
+        ):
+            # An inner-scroller feed (x.com) offers no document scroll action. Scroll the
+            # element under the viewport centre instead; content yield is still what counts.
+            state["collect_wheel"] = state.get("collect_wheel", 0) + 1
+            scroll = {"id": "collect_wheel", "kind": "wheel", "label": "Scroll content (collect)"}
+            wheel = True
         if scroll is None:
             harvest["stopped"] = "no scroll offered"
             return self._collect_done()
         error = None
         try:
-            state["browser"].act(scroll, page)
+            if wheel:
+                state["browser"].scroll_content(COLLECT_WHEEL_DELTA)
+            else:
+                state["browser"].act(scroll, page)
         except StalePage:
             state["page"] = state["browser"].observe(
                 screenshot=self.screenshots, deadline=self.read_deadline()
@@ -714,13 +768,19 @@ class Agent:
         )
         state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
         outcome = action_outcome(page, state["page"], error)
-        progressed = self.note_progress(state["page"])
+        self.note_progress(state["page"])           # keeps the decision-loop clock honest
+        after = (state["page"].get("text") or "")
+        after_digest = hashlib.sha256(after.encode("utf-8", "replace")).hexdigest()
+        content_yield = after_digest != digest
+        if content_yield:
+            state["collect_text_hash"] = after_digest
+            state["progress_at"] = time.monotonic()
         harvest["steps"] = harvest.get("steps", 0) + 1
-        harvest["barren"] = 0 if progressed else harvest.get("barren", 0) + 1
+        harvest["barren"] = 0 if content_yield else harvest.get("barren", 0) + 1
         state["history"].append({
             "step": len(state["history"]) + 1,
-            "action": "Scroll down (collect)",
-            "kind": "scroll",
+            "action": "Scroll content (collect)" if wheel else "Scroll down (collect)",
+            "kind": "wheel" if wheel else "scroll",
             "choice": scroll["id"],
             "probability": 0.0,
             "confidence": None,
@@ -746,8 +806,10 @@ class Agent:
         writer = getattr(self, "evidence", None)
         if writer is not None:
             writer.record(
-                "execution", step=state["history"][-1]["step"], action="Scroll down (collect)",
-                action_kind="scroll", choice=scroll["id"], operation="SCROLL_DOWN",
+                "execution", step=state["history"][-1]["step"],
+                action="Scroll content (collect)" if wheel else "Scroll down (collect)",
+                action_kind="wheel" if wheel else "scroll", choice=scroll["id"],
+                operation="SCROLL_DOWN",
                 confidence=None, collector=True, error=error, url=page.get("url"),
             )
         if harvest["barren"] >= BARREN_SCROLL_LIMIT:
@@ -770,7 +832,7 @@ class Agent:
         state = self.state
         mode = getattr(self, "mode", None)
         harvest = state["harvest"]
-        text = (page.get("text") or "")[:6000]
+        text = (page.get("text") or "")[:3000]
         if mode is None or len(text.strip()) < 80:
             return
         left = STALL_LIMIT_S - (time.monotonic() - (state.get("progress_at") or time.monotonic()))
@@ -1202,7 +1264,16 @@ class Agent:
             if len(state["history"]) >= self.step_budget():
                 state["status"] = "blocked"
                 raise ValueError(f"Stopped at the {self.step_budget()}-action budget")
-            verdict = gate_check(decision, action)
+            # A fill whose value comes from the mode's own memory is not a model guess:
+            # the exact-label match makes it deterministic user data, so the confidence
+            # gate has nothing to protect against here (sensitive labels are never
+            # learned). Every other action still goes through the gate.
+            memory_fill = (
+                action["kind"] == "fill"
+                and getattr(self, "mode", None) is not None
+                and self.mode.value_for(action.get("label")) is not None
+            )
+            verdict = None if memory_fill else gate_check(decision, action)
             if verdict:
                 # The gate never retries a mutation. First low reading: one fresh
                 # observation with the decision cache bypassed. Second low reading on the

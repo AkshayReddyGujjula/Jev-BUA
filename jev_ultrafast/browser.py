@@ -209,6 +209,29 @@ class Browser:
             raise StalePage("Document changed during evaluation")
         return response.get("result", {}).get("value")
 
+    SCROLL_CONTENT = (
+        "(() => {"
+        "  const x = Math.floor(innerWidth / 2), y = Math.floor(innerHeight / 2);"
+        "  const under = (document.elementsFromPoint ? document.elementsFromPoint(x, y) : []);"
+        "  const target = under.find(e => e.scrollHeight > e.clientHeight + 40)"
+        "    || document.scrollingElement;"
+        "  if (!target) return null;"
+        "  const before = target.scrollTop;"
+        "  target.scrollTop = before + __DELTA__;"
+        "  return target.scrollTop;"
+        "})()"
+    )
+
+    def scroll_content(self, delta=600):
+        """Scroll whatever element actually scrolls under the viewport centre.
+
+        Some feeds (x.com) put the timeline in an inner scroller, so the document offers no
+        scroll action and a collector has nothing to click. This is a generic browser
+        operation - find the scrollable element under the cursor and move it - not a site
+        plan. Returns the new offset, or None when nothing scrollable was found.
+        """
+        return self.evaluate(self.SCROLL_CONTENT.replace("__DELTA__", str(int(delta))))
+
     SETTLE_SIGNATURE = (
         "(document.readyState==='complete'?1:0)+':'+"
         "((document.body?document.body.innerText.length:0)+':'+"

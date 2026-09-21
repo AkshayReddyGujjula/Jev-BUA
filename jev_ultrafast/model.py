@@ -40,6 +40,11 @@ DECIDE_TIMEOUT = float(os.environ.get("JEV_DECIDE_TIMEOUT", "3"))
 # answer in time is a failed action, not a stalled run.
 TEXT_TIMEOUT = float(os.environ.get("JEV_TEXT_TIMEOUT", "4"))
 
+# The mode classifier runs before any page is touched, outside the anti-loop deadline, so a
+# long goal may take longer than the in-loop helper budget. Without this ceiling a slow
+# classifier call read as "classifier unavailable" and silently disabled mode creation.
+CLASSIFY_TIMEOUT = float(os.environ.get("JEV_CLASSIFY_TIMEOUT", "12"))
+
 # Stable per-process id for OpenCode Go's routing header; harmless for other providers.
 TEXT_SESSION = os.environ.get("JEV_TEXT_SESSION") or uuid.uuid4().hex
 
@@ -85,16 +90,21 @@ def post_json(url, key, body, headers=None, timeout=None):
     raise RuntimeError("Model unavailable")
 
 
-def text_call(system, context, timeout=None, model=None, base_url=None, max_tokens=1024):
+def text_call(system, context, timeout=None, model=None, base_url=None, max_tokens=1024,
+              ceiling=None):
     """One bounded, JSON-only call to the text helper.
 
     Callers decide how to degrade: field_text turns a failure into a failed action, the
     classifier and the harvest extractor return None. The model and endpoint can be
-    overridden per mode, but the budget can never exceed the helper timeout.
+    overridden per mode. `ceiling` is the most this call may ever take: in-loop calls keep
+    the helper timeout, while the off-loop classifier may ask for more.
     """
     key = os.environ.get("TEXT_MODEL_API_KEY")
     if not key:
         raise ValueError("TEXT_MODEL_API_KEY is required for the text helper.")
+    limit = float(ceiling or TEXT_TIMEOUT)
+    if timeout is not None:
+        limit = min(float(timeout), limit)
     base = (base_url or os.environ.get("TEXT_MODEL_BASE_URL", "https://api.deepseek.com/v1")).rstrip("/")
     if not base.startswith(("http://", "https://")):
         raise ValueError("TEXT_MODEL_BASE_URL must be an http(s) URL.")
@@ -117,7 +127,7 @@ def text_call(system, context, timeout=None, model=None, base_url=None, max_toke
             ],
         },
         headers={"x-opencode-session": TEXT_SESSION, "User-Agent": "jev-ultrafast/0.1"},
-        timeout=min(timeout or TEXT_TIMEOUT, TEXT_TIMEOUT),
+        timeout=limit,
     )
     output = result["choices"][0]["message"]["content"]
     if isinstance(output, str):
@@ -455,7 +465,7 @@ def classify_mode(goal, url, existing, timeout=None):
     """
     context = {"goal": goal, "url": url, "existing_modes": existing or []}
     try:
-        output, _ = text_call(MODE_CLASSIFY, context, timeout=timeout)
+        output, _ = text_call(MODE_CLASSIFY, context, timeout=timeout, ceiling=CLASSIFY_TIMEOUT)
     except Exception:
         return None
     if not isinstance(output, dict):
@@ -487,7 +497,9 @@ def harvest_items(page_text, memory, instructions=None, timeout=None, model=None
     context = {
         "interests": memory or "",
         "extra_instructions": instructions or "",
-        "page_text": (page_text or "")[:6000],
+        # A shorter window keeps the call inside the anti-loop budget; later content is
+        # harvested after the collector scrolls to it.
+        "page_text": (page_text or "")[:2500],
     }
     try:
         output, _ = text_call(
@@ -501,7 +513,7 @@ def harvest_items(page_text, memory, instructions=None, timeout=None, model=None
     if not isinstance(items, list):
         return None
     cleaned = []
-    for item in items[:10]:
+    for item in items[:5]:
         if not isinstance(item, dict):
             continue
         title, note = item.get("title"), item.get("note")

@@ -296,6 +296,17 @@ def test_classify_mode_validates(monkeypatch):
     assert model.classify_mode("g", "u", []) is None
 
 
+def test_classify_gets_a_longer_budget_than_the_loop_helper(monkeypatch):
+    from jev_ultrafast import model
+
+    seen = {}
+    monkeypatch.setenv("TEXT_MODEL_API_KEY", "offline-test")
+    monkeypatch.setattr(model, "post_json", lambda url, key, body, **kwargs: seen.update(
+        kwargs) or {"choices": [{"message": {"content": '{"durable": false}'}}]})
+    assert model.classify_mode("g", "u", []) == {"durable": False}
+    assert seen["timeout"] > model.TEXT_TIMEOUT
+
+
 def test_harvest_items_validates(monkeypatch):
     from jev_ultrafast import model
 
@@ -343,6 +354,10 @@ class FakeBrowser:
 
     def follow_new_tab(self):
         return False
+
+    def scroll_content(self, delta=600):
+        self.wheeled = getattr(self, "wheeled", 0) + 1
+        return 0
 
     def evaluate(self, script):
         current = self.pages[self.index]
@@ -458,6 +473,17 @@ def test_learned_value_is_typed_without_a_model_call(monkeypatch, root):
     assert agent.browser.acted[-1]["text"] == "Ada Lovelace"
 
 
+def test_memory_fill_skips_the_confidence_gate(monkeypatch, root):
+    """A learned value is user data, not a model guess: even a 0.1 decision types it."""
+    mode = internship_mode(root)
+    mode.learn("Full name", "Ada Lovelace")
+    agent = make_agent(page(), mode=mode)
+    agent.state["decision"] = decision(confidence=0.1)
+    agent.command("act", {"fingerprint": agent.state["page"]["fingerprint"]})
+    assert agent.browser.acted[-1]["text"] == "Ada Lovelace"
+    assert agent.state["text_calls"][-1]["model"] == "mode-memory"
+
+
 def test_learning_requires_the_field_to_have_accepted_the_value(monkeypatch, root):
     mode = internship_mode(root)
     before = page()
@@ -546,9 +572,75 @@ def test_collect_stops_when_the_feed_exhausts(root, monkeypatch):
         agent.command("tick")
     assert agent.state["status"] == "done"
     assert agent.state["harvest"]["stopped"] == "feed exhausted"
-    # The first scroll seeds the progress key (an unseen key counts as progress), so the
-    # stop lands on the third barren scroll after it.
-    assert agent.state["harvest"]["steps"] == agent_module.BARREN_SCROLL_LIMIT + 1
+    # The first tick seeds the content hash, then three unchanged reads count as barren.
+    assert agent.state["harvest"]["steps"] == agent_module.BARREN_SCROLL_LIMIT
+
+
+def test_collect_counts_revealed_text_as_progress(root, monkeypatch):
+    mode = modes.create(root, {**DECISION, "strategy": "collect"}, "x")
+    filler = "enough text to pass the harvest floor. " * 3
+    first = page(text="first post. " + filler, fingerprint="same")
+    second = page(text="first post. second post appeared. " + filler, fingerprint="same")
+    browser = FakeBrowser([first, second])
+    agent = make_agent(first, mode=mode, browser=browser)
+    agent._collect_limit = 3
+    monkeypatch.setattr(agent_module, "harvest_items", lambda *a, **k: None)
+    agent.command("tick")
+    assert agent.state["harvest"]["barren"] == 0      # visible text grew: still collecting
+    assert agent.state["collect_text_hash"]           # the collector tracks content, not controls
+
+
+def test_collect_waits_for_a_feed_that_has_not_rendered(root, monkeypatch):
+    mode = modes.create(root, {**DECISION, "strategy": "collect"}, "x")
+    shell = page(text="loading shell with no posts yet, but enough words to pass " * 2,
+                 actions=[], fingerprint="shell")
+    feed = page(url="http://x/feed", text="a rendered post appears here, long enough " * 3,
+                actions=[SCROLL], fingerprint="feed")
+
+    class SettlingBrowser(FakeBrowser):
+        def __init__(self, pages):
+            super().__init__(pages)
+            self.observations = 0
+
+        def observe(self, screenshot=True, deadline=None):
+            self.observations += 1
+            return self.pages[0] if self.observations <= 1 else self.pages[1]
+
+    browser = SettlingBrowser([shell, feed])
+    agent = make_agent(shell, mode=mode, browser=browser)
+    agent._collect_limit = 1
+    monkeypatch.setattr(agent_module, "harvest_items", lambda *a, **k: None)
+    agent.command("tick")          # shell: no scroll yet, wait and re-observe
+    agent.command("tick")          # the feed has rendered
+    assert agent.state["page"]["fingerprint"] == "feed"
+    assert agent.state["collect_settle"] >= 1
+    agent.command("tick")          # now it can scroll
+    assert agent.state["history"][-1]["kind"] == "scroll"
+
+
+def test_collect_gives_up_after_bounded_settle_attempts(root, monkeypatch):
+    mode = modes.create(root, {**DECISION, "strategy": "collect"}, "x")
+    browser = FakeBrowser([page(text="a shell that never renders, with enough words " * 3,
+                                actions=[], fingerprint="shell")])
+    agent = make_agent(browser.pages[0], mode=mode, browser=browser)
+    agent._collect_wheel_limit = 0                 # no wheel fallback: pure settle path
+    monkeypatch.setattr(agent_module, "harvest_items", lambda *a, **k: None)
+    for _ in range(agent_module.COLLECT_SETTLE_ATTEMPTS + 2):
+        agent.command("tick")
+    assert agent.state["status"] == "done"
+    assert agent.state["harvest"]["stopped"] == "no scroll offered"
+
+
+def test_collect_uses_a_content_wheel_when_no_scroll_action_is_offered(root, monkeypatch):
+    mode = modes.create(root, {**DECISION, "strategy": "collect"}, "x")
+    browser = FakeBrowser([page(text="an inner-scroller feed with enough words " * 3,
+                                actions=[], fingerprint="inner")])
+    agent = make_agent(browser.pages[0], mode=mode, browser=browser)
+    agent._collect_settle_attempts = 0             # skip the render wait for this unit test
+    monkeypatch.setattr(agent_module, "harvest_items", lambda *a, **k: None)
+    agent.command("tick")
+    assert agent.state["history"][-1]["kind"] == "wheel"
+    assert browser.wheeled == 1
 
 
 def test_collect_verifies_from_harvest_and_page_checks(root, monkeypatch):

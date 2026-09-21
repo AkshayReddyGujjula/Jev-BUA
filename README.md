@@ -116,9 +116,28 @@ Every executed target is resolved from an observed node. The executor rechecks p
 | `abstained` | a risk gate refused to act |
 | `budget_exhausted` | the anti-loop deadline or a step/time budget fired |
 
-Pass `expect` (`url_contains`, `url_matches`, `title_contains`, `text_contains`, `text_absent`, `selector_count`) to `browser_do`, `run_task.py --expect` or `Agent(expect=...)` to get a verdict. Without one, a completed run reports `unknown`, never `verified`.
+Pass `expect` (`url_contains`, `url_matches`, `title_contains`, `text_contains`, `text_absent`, `selector_count`, `value_contains` for an input's value, `harvest_at_least` for collected items) to `browser_do`, `run_task.py --expect` or `Agent(expect=...)` to get a verdict. Without one, a completed run reports `unknown`, never `verified`.
 
 Three v2 properties go with it: a low-confidence mutation is re-observed once and then refused rather than executed (per-risk confidence floors, with an `irreversible` question riding the same request); repeated decisions are served from a disk cache keyed on the entire request; and a run can write append-only JSONL evidence — offered candidates, raw answers, confidences, the answering model, executions, outcome.
+
+## Modes: memory and specialists per task class
+
+A mode is a folder for one repeated kind of work — internship applications, scrolling a feed — with its own memory, learned field values and settings. The agent gets that context before it decides anything:
+
+```bash
+# Match an existing mode by keyword, or let the text model create one for a durable task.
+uv run --env-file .env python run_task.py --mode auto --goal "..." --url https://x.com/home
+
+# Manage the memory of a mode you own.
+uv run --env-file .env python run_task.py --mode internship-application --remember "Name: Ada Lovelace"
+uv run --env-file .env python run_task.py --mode internship-application --forget "Email"
+```
+
+- Folders live in `JEV_MODES_DIR` (default `~/.jev-ultrafast/modes`, outside git). Each holds `mode.json`, a human-editable `AGENTS.md` (about me / standing instructions / interests), `learned/` field values, `harvest/` collected items and `replay/` plans.
+- `--mode auto` (or `JEV_MODES=auto`) matches existing modes by keyword; only a durable task class gets a new folder, and creation is printed, recorded in evidence and named in the mode's own file. One-off errands stay mode-less.
+- A fill with an exact label match in learned memory is typed with no model call; memory is also given to the text helper for fields it has not seen. Caller-supplied `values` outrank memory.
+- Sensitive labels (password, passcode, OTP, card, CVV, SSN, passport, IBAN, bank, national insurance, routing/sort code, PIN) are never learned, never injected into a prompt, and never persisted in a replay plan.
+- A collect-strategy mode scrolls and harvests only — it never clicks anything — and stores an item only if its title appears verbatim in the page text. Live results for the internship, local-feed and real-x.com scenarios are in [docs/modes-scenarios.json](docs/modes-scenarios.json).
 
 ## Small enough to read
 
