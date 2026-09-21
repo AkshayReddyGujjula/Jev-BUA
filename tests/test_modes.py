@@ -627,3 +627,60 @@ def test_benchmark_scripts_force_modes_off():
                  "benchmark_flights.py", "run_checks.py"):
         text = (scripts / name).read_text(encoding="utf-8")
         assert 'JEV_MODES", "off"' in text, name
+
+
+def test_resolve_degrades_when_creation_fails(root, monkeypatch):
+    def boom(*args, **kwargs):
+        raise OSError("read-only root")
+
+    monkeypatch.setattr(modes, "create", boom)
+    mode, info = modes.resolve("a brand new task", "", classify=lambda *a: dict(DECISION))
+    assert mode is None and info["matched"] == "none"
+    assert "read-only" in info["error"]
+
+
+def test_decision_request_carries_memory_and_changes_the_cache_key(monkeypatch):
+    from jev_ultrafast import model
+
+    captured = []
+
+    def fake_post(url, key, payload, **kwargs):
+        captured.append(payload)
+        return {
+            "answers": {
+                "operation": {"choice": "CLICK", "confidence": 0.9, "probabilities": {
+                    "CLICK": 0.95, "DONE": 0.01, "BACK": 0.01, "BLOCKED": 0.01,
+                    "REOBSERVE": 0.01, "ABSTAIN": 0.01}},
+                "goal_done": {"noul": 0.0},
+                "stuck": {"noul": 0.0},
+                "irreversible": {"noul": 0.0},
+                "click_target": {"choice": "1", "confidence": 0.9,
+                                 "probabilities": {"1": 1.0}},
+            },
+            "model": "m", "usage": {},
+        }
+
+    monkeypatch.setattr(model, "post_json", fake_post)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "offline-test")
+    monkeypatch.setattr(model.cache, "load", lambda key: None)
+    monkeypatch.setattr(model.cache, "store", lambda key, result: None)
+    page_state = {
+        "url": "u", "title": "t", "text": "x",
+        "actions": [{"id": "e1", "kind": "click", "label": "Go", "node": 1, "role": "button"}],
+    }
+    first = model.choose(page_state, "goal", [], mode_state={"name": "m", "memory": "Ada"})
+    second = model.choose(page_state, "goal", [], mode_state={"name": "m", "memory": "Bob"})
+    assert captured[0]["state"]["mode"]["memory"] == "Ada"
+    assert first["cache_key"] != second["cache_key"]
+
+
+def test_retry_context_changes_with_mode_memory():
+    from jev_ultrafast import model
+
+    action = {"label": "Full name", "role": "textbox", "value": ""}
+    page_state = {"title": "t", "text": "x"}
+    first = model.field_context("g", action, page_state, [],
+                                mode_state={"name": "m", "memory": "Ada"})
+    second = model.field_context("g", action, page_state, [],
+                                 mode_state={"name": "m", "memory": "Bob"})
+    assert first != second

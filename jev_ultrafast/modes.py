@@ -34,7 +34,9 @@ from pathlib import Path
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 SENSITIVE_RE = re.compile(
     r"(password|passcode|passwd|one[- ]?time|otp|verification code|security code|"
-    r"cvv|cvc|card number|credit card|ssn|social security|secret|api key|access token)",
+    r"cvv|cvc|card number|credit card|ssn|social security|secret|api key|access token|"
+    r"passport|iban|national insurance|bank account|routing number|sort code|"
+    r"(?<![a-z0-9])pin(?![a-z0-9]))",
     re.IGNORECASE,
 )
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
@@ -394,7 +396,7 @@ class Mode:
         memory = "\n".join(lines).rstrip() + "\n"
         try:
             self._agents_path().parent.mkdir(parents=True, exist_ok=True)
-            temp = self._agents_path().with_name("AGENTS.md.tmp")
+            temp = self._agents_path().with_name(f"AGENTS.md.{os.getpid()}.tmp")
             temp.write_text(memory, encoding="utf-8")
             os.replace(temp, self._agents_path())
         except OSError:
@@ -410,13 +412,21 @@ class Mode:
         return self.harvest_dir() / "seen.json"
 
     def _load_seen(self):
+        """Insertion-ordered hash -> first-seen time. Legacy list files are tolerated."""
         data = _read_json(self._seen_path()) or {}
         titles = data.get("titles")
-        return set(titles) if isinstance(titles, list) else set()
+        if isinstance(titles, dict):
+            return {str(key): float(value or 0) for key, value in titles.items()}
+        if isinstance(titles, list):
+            return {str(key): 0.0 for key in titles}
+        return {}
 
-    def _save_seen(self, titles):
-        ordered = list(titles)[-SEEN_MAX:]
-        _write_json(self._seen_path(), {"version": 1, "titles": ordered})
+    def _save_seen(self, seen):
+        if len(seen) > SEEN_MAX:
+            # Drop the oldest first so which keys survive is deterministic.
+            for key in sorted(seen, key=lambda item: seen[item])[: len(seen) - SEEN_MAX]:
+                seen.pop(key, None)
+        _write_json(self._seen_path(), {"version": 1, "titles": seen})
 
     def save_items(self, url, items):
         """Persist source-matched items, de-duplicated by normalized title."""
@@ -430,7 +440,7 @@ class Mode:
             key = hashlib.sha256(normalize_match(title).encode("utf-8")).hexdigest()
             if not title or key in seen:
                 continue
-            seen.add(key)
+            seen[key] = time.time()
             fresh.append({
                 "at": time.time(),
                 "url": (url or "")[:500],
@@ -598,8 +608,9 @@ def _memory_skeleton(name, description):
 def resolve(goal, url="", requested=None, timeout=None, classify=None):
     """The mode for this run, creating one when the classifier says the task is durable.
 
-    Returns (mode_or_none, info). Never raises for auto resolution; an explicit slug that
-    is missing raises, because the caller named it.
+    Returns (mode_or_none, info). Never raises for auto resolution - a broken classifier,
+    an unwritable root or a corrupt folder all degrade to no mode; an explicit slug that is
+    missing raises, because the caller named it.
     """
     root = modes_root()
     info = {"root": str(root), "root_in_repo": in_repo(root)}
@@ -646,7 +657,12 @@ def resolve(goal, url="", requested=None, timeout=None, classify=None):
     if not decision.get("durable"):
         route_put(root, key, "general")
         return None, {**info, "enabled": True, "matched": "not-durable"}
-    mode = create(root, decision, goal)
+    try:
+        mode = create(root, decision, goal)
+    except OSError as error:
+        # An unwritable modes root must not fail the run: degrade to no mode.
+        return None, {**info, "enabled": True, "matched": "none",
+                      "error": f"could not create the mode: {error}"[:200]}
     route_put(root, key, mode.slug)
     return mode, {**info, "enabled": True, "matched": "created", "slug": mode.slug,
                   "name": mode.name, "strategy": mode.strategy}

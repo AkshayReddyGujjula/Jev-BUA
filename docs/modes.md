@@ -28,7 +28,7 @@ files hold personal facts).
 <root>/<slug>/
   mode.json        machine config: identity, keywords, strategy, specialist knobs
   AGENTS.md        human-editable memory: about me / standing instructions / interests
-  learned.jsonl    machine-learned field label -> value, append-only, last write wins
+  learned/         machine-written label -> value shards, one file per process
   harvest/         collected items (collect strategy), one JSONL file per day
     seen.json      dedupe index of harvested titles
   replay/          per-mode descriptor replay plans
@@ -63,18 +63,22 @@ the mode absent for matching, never raises into a run.
 `modes.resolve(goal, url)` order:
 
 1. **Explicit**: `Agent(mode="<slug>")` / `--mode <slug>` loads it or fails loudly.
-2. **Keyword match** against every mode's `keywords` (case-insensitive substring of
-   `goal + " " + url`). Highest score wins; a tie goes to the classifier.
-3. **Routes cache**: `<root>/routes.json` remembers `sha1(goal|url) -> slug|"general"`.
+2. **Keyword match** against every mode's `keywords`: word-boundary, case-insensitive
+   match of the **goal only** (a URL token must not route a run), keywords under 3
+   characters or in the stopword list ignored. Highest score wins; a tie goes to the
+   classifier rather than a guess.
+3. **Routes cache**: `<root>/routes.json` remembers `sha256(goal|url)[:16] -> slug|`"general"`.
    `general` entries expire after 24 h so a later, similar task can still become a mode.
 4. **Classifier**: the text model receives the goal, the URL and the existing modes and
    returns either `{"durable": true, "slug", "name", "description", "keywords",
-   "strategy"}` or `{"durable": false}`. Invalid output means **no mode** — never a
-   guessed one. `durable` is the model's own judgement of whether this is a task class
-   worth remembering; a one-off errand is not.
-5. **Creation**: folder + `mode.json` + empty `AGENTS.md` skeleton + `learned.jsonl` +
-   `harvest/`; the slug is sanitized to `[a-z0-9-]{1,40}` and de-duplicated with a `-2`
-   suffix. `created_from` records the goal that caused it.
+   "strategy"}` or `{"durable": false}`. Invalid output or an unreachable provider means
+   **no mode** — never a guessed one. `durable` is the model's own judgement of whether
+   this is a task class worth remembering; a one-off errand is not.
+5. **Creation**: folder + `mode.json` + empty `AGENTS.md` skeleton + `learned/` +
+   `harvest/`; the slug is sanitized to `[a-z0-9-]{1,40}`. If the classifier names a mode
+   that already exists, that mode is reused rather than forked. A creation failure (an
+   unwritable root) degrades to no mode and records the error; it never fails the run.
+   `created_from` records the goal that caused it — in `mode.json` only, never in memory.
 
 Auto-creation is opt-in per call: `--mode auto`, `JEV_MODES=auto`, or MCP
 `mode: "auto"`. Library default is off, so tests and benchmarks stay deterministic.
@@ -98,11 +102,15 @@ Three consumers, three bounds:
 
 Caller-supplied `values` outrank learned memory, which outranks the text model.
 
-**Learning**: after a `TYPE_TEXT` action executes and its outcome is not a failure, the
-mode records `{label, value, url, at}`. Learning never happens for sensitive labels
-(password, passcode, OTP, CVV, card, security code, SSN) and never for replay runs.
+**Learning**: after a `TYPE_TEXT` action executes, is not a failure, and a fresh readback
+shows the field actually holds the typed value, the mode records `{label, value, url, at}`
+in a per-process shard under `learned/`. Learning never happens for sensitive labels
+(password, passcode, OTP, CVV, card, security code, SSN, passport, IBAN, bank account,
+national insurance, routing/sort codes, PIN) and never for replay runs.
 
-**Redaction**: sensitive labels are neither learned nor injected. Mode files are local and
+**Redaction**: sensitive labels are neither learned nor injected (checked at learn time
+*and* at read time). Replay descriptors drop the text of a sensitive fill entirely, so a
+recorded plan can never persist a credential. Mode files are local and
 outside git, but they are plain text by design — the user can read and delete them, and
 the docs say plainly that memory is sent to the configured model providers on each run.
 
@@ -130,25 +138,29 @@ strategy. A "careful" mode (internship) keeps defaults, cache, replay, and full 
 When `strategy == "collect"`, `tick` runs a code-owned loop instead of a decision per
 step. Each tick:
 
-1. stops if the anti-loop deadline passed, the step cap is reached, or two consecutive
-   scrolls produced no new page state (feed exhausted);
+1. stops if the anti-loop deadline passed, the step cap is reached, or
+   `BARREN_SCROLL_LIMIT` (3) consecutive scrolls produced no new page state (feed
+   exhausted);
 2. harvests the current page at most once per fingerprint, when enabled:
    the text model receives the visible page text (6,000 chars), the mode's interests
    memory and picking instructions, and must return strict JSON
-   `{"items": [{"title", "note"}]}` (1-10 items). Invalid output stores nothing;
+   `{"items": [{"title", "note"}]}` (1-10 items). Invalid output stores nothing; a title is
+   stored only if it also appears verbatim in the page text this run observed;
 3. scrolls down using the page's own offered scroll action. **The collector never clicks
    anything** — no likes, reposts, or follows — and that is a code property, not a rule
    the model could violate.
 
 New items are appended to `harvest/YYYY-MM-DD.jsonl`, deduplicated by normalized title
-against `harvest/seen.json` (cap 5,000). The run ends `done`; the verdict still comes from
-the same code-owned readback. `expect` gains `harvest_at_least: N` so the collector's
-output itself can verify a run, alongside the usual page checks.
+against `harvest/seen.json` (cap 5,000, oldest dropped first). The run ends `done`; the
+verdict still comes from the same code-owned readback. `expect` gains
+`harvest_at_least: N`: it counts this run's stored, source-matched items, so it is an
+artifact check rather than a live-page readback — pair it with a page check when the
+verdict must stand on the page alone.
 
-Collector bounds: `steps` (default 8), two barren scrolls, one harvest per fingerprint,
+Collector bounds: `steps` (default 8), three barren scrolls, one harvest per fingerprint,
 harvest calls bounded by the remaining anti-loop room like every other model call. A feed
-that stops producing new state stops the run within the same 5-second guarantee as the
-decision loop.
+that stops producing new state stops the run; the 5-second guarantee is measured against
+page progress, so total collector wall time is bounded by the run budget, not by 5 s.
 
 ## Safety rules
 
@@ -161,7 +173,16 @@ decision loop.
 - The mode root is outside the repository; `modes/` is also gitignored where a user keeps
   modes in-tree. Nothing personal is committed.
 - A mode can disable the cache, but cannot widen the cache key or cache irreversible
-  actions.
+  actions. The decision cache key includes the mode memory because memory is part of the
+  decision request, so editing memory invalidates cached decisions and two modes never
+  share an entry; the TYPE_TEXT retry reuse compares the whole helper context, memory
+  included.
+- Auto-creation is opt-in per call: `--mode auto`, `JEV_MODES=auto`, or MCP
+  `mode: "auto"`. The library default is off so tests and benchmarks are deterministic,
+  and `scripts/*` force `JEV_MODES=off`.
+- Mode-scoped writes are per-process shards or temp-file + `os.replace`; parallel workers
+  append their own shard. Last-writer-wins is accepted for the small routes index and the
+  harvest dedupe index, where a lost update costs a duplicate, not corruption.
 - Auto-created namespaces are visible: CLI output, evidence (`mode_resolved`,
   `mode_created`), and the mode's own `AGENTS.md` all name the goal that created them.
 

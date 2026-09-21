@@ -21,6 +21,7 @@ the indexed elements and execute one observed action without any model call.
 """
 
 import contextlib
+import functools
 import io
 import json
 import os
@@ -252,6 +253,26 @@ TOOLS = [
 ]
 
 
+def _tab_env(func):
+    """Set JEV_TAB_MODE from the call's `tab` arg for the duration of the handler.
+
+    The handlers used to mutate os.environ and never restore it, so one call's tab mode
+    could define the next call's (and, with an interleaving client, a concurrent one).
+    """
+    @functools.wraps(func)
+    def wrapper(args):
+        previous = os.environ.get("JEV_TAB_MODE")
+        os.environ["JEV_TAB_MODE"] = (args or {}).get("tab", "background")
+        try:
+            return func(args)
+        finally:
+            if previous is None:
+                os.environ.pop("JEV_TAB_MODE", None)
+            else:
+                os.environ["JEV_TAB_MODE"] = previous
+    return wrapper
+
+
 def _quiet(func):
     """Run with stdout redirected so nothing but JSON-RPC reaches the client."""
     def wrapper(*args, **kwargs):
@@ -266,6 +287,7 @@ def _quiet(func):
 
 
 @_quiet
+@_tab_env
 def tool_browser_do(args):
     _load_env()
     from jev_ultrafast import Agent
@@ -356,6 +378,7 @@ ACT_KINDS = {"CLICK": "click", "TYPE_TEXT": "fill", "SELECT": "select", "SEEK": 
 
 
 @_quiet
+@_tab_env
 def tool_browser_state(args):
     _load_env()
     from jev_ultrafast.model import action_space
@@ -380,6 +403,7 @@ def tool_browser_state(args):
 
 
 @_quiet
+@_tab_env
 def tool_browser_act(args):
     _load_env()
     mode = args.get("tab", "background")
@@ -421,6 +445,7 @@ def tool_browser_act(args):
 
 
 @_quiet
+@_tab_env
 def tool_browser_assert(args):
     _load_env()
     from jev_ultrafast.assertions import evaluate_expectations, page_facts, selectors_for, value_selectors_for
