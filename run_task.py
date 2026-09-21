@@ -158,7 +158,9 @@ def main():
     parser.add_argument("--expect", default="",
                         help="Assertions read off the real page after the run: url_contains, "
                              "url_matches, title_contains, text_contains, text_absent, "
-                             "selector_count ({selector, at_least}). Accepts @path/to/file.json. "
+                             "selector_count ({selector, at_least}), value_contains "
+                             "({selector, text}) and harvest_at_least (collected items; pair it "
+                             "with a page check). Accepts @path/to/file.json. "
                              "Without it the run's outcome is unknown: a DONE is not proof.")
     parser.add_argument("--evidence-dir", default=str(Path("artifacts") / "evidence"),
                         help="Directory for this run's JSONL evidence: every offered candidate, "

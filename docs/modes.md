@@ -182,6 +182,9 @@ not by 5 s.
   decision request, so editing memory invalidates cached decisions and two modes never
   share an entry; the TYPE_TEXT retry reuse compares the whole helper context, memory
   included.
+- Risk-class floors are a code rule, not a per-page heuristic: only clicks can be
+  committal. A page that commits on a select change or a slider move would face only the
+  reversible floor, which is the KB's reversibility rule applied literally.
 - Auto-creation is opt-in per call: `--mode auto`, `JEV_MODES=auto`, or MCP
   `mode: "auto"`. The library default is off so tests and benchmarks are deterministic,
   and `scripts/*` force `JEV_MODES=off`.

@@ -76,3 +76,6 @@ and a tab and the failure mode is *silently wrong pages*.
   `artifacts/modes-live/`; the committed summary is `docs/modes-scenarios.json`.
 - `opencode-instructions.md` is an external reviewer's channel: never edit or commit it (it is
   gitignored), and address findings in code and docs.
+- A wedged page or daemon can hang an MCP tool call for minutes; `browser_do` takes
+  `max_seconds`, the other tools do not. If a call runs past ~60 s, stop and report the hang
+  rather than retrying it; the page never answered.

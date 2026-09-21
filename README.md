@@ -106,7 +106,7 @@ Every executed target is resolved from an observed node. The executor rechecks p
 
 ## Verified outcomes, not opinions
 
-`status` is what the agent did: `done`, `blocked`, `stalled`, or `abstained`. `outcome` is the code-owned verdict, resolved from an independent readback:
+`status` is what the agent did: `done`, `blocked`, `stalled`, or `abstained` (a collect-strategy run passes through `collecting`). `outcome` is the code-owned verdict, resolved from an independent readback:
 
 | outcome | meaning |
 | --- | --- |
