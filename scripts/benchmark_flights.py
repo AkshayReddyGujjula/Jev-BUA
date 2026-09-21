@@ -112,7 +112,7 @@ def main():
     # decisions and understate the request count. measure_flights enforces this for itself.
     os.environ.setdefault("JEV_CACHE", "0")
     # A benchmark must not classify tasks into modes or write mode folders mid-measurement.
-    os.environ.setdefault("JEV_MODES", "off")
+    os.environ["JEV_MODES"] = "off"
 
     arms = [("candidate", str(Path(args.candidate).resolve()))]
     if args.baseline:

@@ -34,9 +34,10 @@ from pathlib import Path
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 SENSITIVE_RE = re.compile(
     r"(password|passcode|passwd|one[- ]?time|otp|verification code|security code|"
+    r"recovery code|backup code|auth(?:enticator| code)|2fa|two[- ]?factor|"
     r"cvv|cvc|card number|credit card|ssn|social security|secret|api key|access token|"
-    r"passport|iban|national insurance|bank account|routing number|sort code|"
-    r"(?<![a-z0-9])pin(?![a-z0-9]))",
+    r"passport|iban|national insurance|bank account|routing number|sort code|seed phrase|"
+    r"private key|(?<![a-z0-9])pin(?![a-z0-9])|(?<![a-z0-9])code(?![a-z0-9]))",
     re.IGNORECASE,
 )
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
@@ -125,27 +126,36 @@ def route_key(goal, url):
 
 
 def route_get(root, key):
-    data = _read_json(Path(root) / "routes.json")
-    entry = ((data or {}).get("routes") or {}).get(key)
-    if not isinstance(entry, dict):
+    try:
+        data = _read_json(Path(root) / "routes.json") or {}
+        entry = (data.get("routes") or {}).get(key)
+        if not isinstance(entry, dict):
+            return None
+        slug = entry.get("slug")
+        if not isinstance(slug, str):
+            return None
+        if slug == "general" and time.time() - float(entry.get("at") or 0) > GENERAL_TTL_S:
+            return None
+        return slug
+    except (TypeError, ValueError, OSError):
+        # A corrupt routes cache is treated as absent, never as a run failure.
         return None
-    slug = entry.get("slug")
-    if not isinstance(slug, str):
-        return None
-    if slug == "general" and time.time() - float(entry.get("at") or 0) > GENERAL_TTL_S:
-        return None
-    return slug
 
 
 def route_put(root, key, slug):
-    path = Path(root) / "routes.json"
-    data = _read_json(path) or {"version": 1, "routes": {}}
-    routes = data.setdefault("routes", {})
-    routes[key] = {"slug": slug, "at": time.time()}
-    if len(routes) > ROUTES_MAX:
-        for stale in sorted(routes, key=lambda k: routes[k].get("at", 0))[: len(routes) - ROUTES_MAX]:
-            routes.pop(stale, None)
-    _write_json(path, data)
+    try:
+        path = Path(root) / "routes.json"
+        data = _read_json(path) or {"version": 1, "routes": {}}
+        routes = data.setdefault("routes", {})
+        routes[key] = {"slug": slug, "at": time.time()}
+        if len(routes) > ROUTES_MAX:
+            for stale in sorted(
+                routes, key=lambda k: float((routes[k] or {}).get("at") or 0)
+            )[: len(routes) - ROUTES_MAX]:
+                routes.pop(stale, None)
+        return _write_json(path, data)
+    except (TypeError, ValueError, OSError):
+        return False
 
 
 def _read_json(path):
@@ -555,6 +565,7 @@ def create(root, decision, goal=""):
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "created_from": " ".join(str(goal or "").split())[:300],
         "specialist": {
+            "operation_model": None,
             "text_model": None,
             "text_base_url": None,
             "decide_timeout_s": None,

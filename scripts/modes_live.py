@@ -64,7 +64,7 @@ X_GOAL = (
     "Scroll my X home timeline and save posts about AI engineering, developer tools and "
     "compilers that I would find interesting. Skip gossip and ads."
 )
-X_EXPECT = {"harvest_at_least": 1}
+X_EXPECT = {"harvest_at_least": 1, "url_contains": "x.com"}
 X_GATE_MARKERS = ("sign in", "log in", "join x", "create account")
 
 
@@ -124,6 +124,9 @@ def run_agent(url, goal, *, mode_slug, expect=None, collect_steps=None, max_seco
         "skipped": sum(1 for h in final["history"] if h.get("skipped")),
         "decisions": len(final.get("decisions") or []),
         "text_calls": len(text_calls),
+        "model_calls": sum(
+            1 for c in text_calls if c.get("model") not in {"mode-memory", "supplied"}
+        ),
         "text_models": sorted({str(c.get("model")) for c in text_calls}),
         "memory_fills": sum(1 for c in text_calls if c.get("model") == "mode-memory"),
         "history": [
@@ -190,8 +193,13 @@ def case_internship():
             expect={"text_contains": ["Application received", "Ada Lovelace"]},
         )
         report["submit_withheld"] = report["submit_run"]["outcome"] != "verified"
+        # Scan the raw shaNds, not the filtered reader, so a sensitive leak cannot hide.
         report["sensitive_learned"] = [
-            label for label, _value in mode.learned_entries() if "password" in label.lower()
+            line
+            for path in (mode.path / "learned").glob("*.jsonl")
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if any(word in line.lower()
+                   for word in ("password", "passcode", "otp", "cvv", "code"))
         ]
     finally:
         server.shutdown()

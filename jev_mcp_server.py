@@ -332,6 +332,9 @@ def tool_browser_do(args):
             facts = page_facts(
                 browser or agent.browser, selectors_for(expect), value_selectors_for(expect)
             )
+            # The collector artifact travels with the facts so harvest_at_least can be
+            # judged here exactly as it is inside the library.
+            facts["harvest"] = state.get("harvest") or {"items": 0}
     finally:
         if max_steps:
             if previous_steps is None:
@@ -342,9 +345,12 @@ def tool_browser_do(args):
             browser.close()
 
     verified, detail = evaluate_expectations(expect, facts)
-    outcome = resolve(
+    # The agent already resolved its own outcome against the same readback; prefer it so
+    # `abstained` and `verified-with-an-abstained-status` survive the MCP boundary.
+    outcome = state.get("outcome") or resolve(
         state["status"], checks=detail if expect else None,
         budget_exhausted=state["status"] == "stalled" or bool(state.get("stall")),
+        abstained=state["status"] == "abstained",
     )
     return {
         "status": state["status"],

@@ -47,6 +47,7 @@ files hold personal facts).
   "created_at": "2026-09-21T12:00:00+00:00",
   "created_from": "Apply to the software engineering internship at ...",
   "specialist": {
+    "operation_model": null,
     "text_model": null, "text_base_url": null,
     "decide_timeout_s": null, "max_steps": null, "screenshots": null,
     "cache": true, "replay": true,
@@ -91,10 +92,10 @@ Slugs from the model are untrusted: they are sanitized, never used as paths dire
 
 Three consumers, three bounds:
 
-- **Decision request** (`model.choose`) gets `state.mode = {name, memory, instructions}`.
+- **Decision request** (`model.choose`) gets `state.mode = {name, memory, note}`.
   Memory is `AGENTS.md` with HTML comments stripped, capped at 1,500 characters.
-- **Text helper** (`model.field_text`) gets the same memory plus the mode's known field
-  values for this label or a related one, capped at 3,500 characters total.
+- **Text helper** (`model.field_text`) gets the same memory plus all of the mode's
+  learned values (newest first, capped at 25 entries / 3,500 characters total).
 - **Fast path** (no model call): an exact normalized-label hit in `learned.jsonl` is typed
   directly. Normalization strips case, whitespace, a trailing `*` or `:` and
   `(required)`. If several labels match, the longest key wins; a tie falls back to the
@@ -120,6 +121,7 @@ the docs say plainly that memory is sent to the configured model providers on ea
 
 | key | effect |
 | --- | --- |
+| `operation_model` | which Jev model answers the decisions |
 | `text_model`, `text_base_url` | which helper writes field values |
 | `decide_timeout_s` | upper bound for one Jev decision (never above `JEV_DECIDE_TIMEOUT`) |
 | `max_steps` | per-run action budget (never above `--max-steps`) |
@@ -186,8 +188,9 @@ not by 5 s.
 - Mode-scoped writes are per-process shards or temp-file + `os.replace`; parallel workers
   append their own shard. Last-writer-wins is accepted for the small routes index and the
   harvest dedupe index, where a lost update costs a duplicate, not corruption.
-- Auto-created namespaces are visible: CLI output, evidence (`mode_resolved`,
-  `mode_created`), and the mode's own `AGENTS.md` all name the goal that created them.
+- Auto-created namespaces are visible: CLI output and evidence (`mode_resolved`,
+  `mode_created`) name the mode, and `created_from` in `mode.json` records the goal that
+  caused it. The goal text itself is never copied into `AGENTS.md` memory.
 
 ## Testing
 
@@ -205,16 +208,18 @@ Offline (no paid APIs, `JEV_MODES_DIR` pointed at tmp):
 - mode context appears in the decision request and the text-helper context
 - CLI/MCP flag plumbing; benchmark scripts force `JEV_MODES=off`
 
-Live:
+Live (`scripts/modes_live.py`, run with real Chrome and paid APIs):
 
 - **Internship applications** (local fixture, fake persona): auto-create the mode from a
-  goal, seed memory, fill a multi-field form (dry run verified by a visible "ready"
-  state), second run reuses learned values with measurably fewer text calls, third run
-  submits and is verified by the receipt page.
+  goal, seed memory, fill the form; the dry run is verified by the input's value readback
+  (`value_contains`) plus the absence of a receipt, and a second identical run reuses
+  learned values with fewer model calls. A third run attempts the submission: if the gate
+  withholds it (Jev below the irreversible floor) the run reports `abstained` and the
+  report says so — the submit path is a safety demonstration, not a verified claim.
 - **Social scrolling** (live `x.com/home`, read-only): auto-create a collect mode, seed
-  interests, scroll and harvest; verified by `harvest_at_least` plus page text. If X
-  gates the run behind sign-in, that is reported as blocked and the deterministic local
-  feed fixture proves the collector instead.
+  interests, scroll and harvest; verified by `harvest_at_least` paired with a URL page
+  check. If X gates the run behind sign-in, that is reported honestly and the
+  deterministic local feed fixture proves the collector instead.
 - Regressions: full offline suite, smoke, parallel checks, trap verifier.
 
 ## Live results (2026-09-21)
@@ -224,19 +229,20 @@ the gitignored `artifacts/modes-live/`.
 
 | Scenario | Mode (auto-created) | Result |
 | --- | --- | --- |
-| Internship form, dry run 1 | `internship-application` | `verified` — the user's details reached the page (`value_contains #full-name`), no receipt |
-| Internship form, dry run 2 (same goal) | same | `verified`, in about half the time: 6 of 7 fills came from learned memory with no text call |
-| Internship submit | same | submit **withheld**: consent was ticked, then Jev read the Submit click at 0.68–0.77 against the 0.9 irreversible floor → `abstained`. The gate working as designed, not a scenario failure. |
-| Local feed collection | `save-interesting-posts` (classifier chose `collect`) | `verified` — 4 scrolls, 4 harvest calls, 4 items, 0 gossip, the page's engagement log still `actions: none` |
-| Live x.com timeline, read-only | `x-timeline-curation` | `verified` — 5 scrolls, 6 harvest calls, 2 real posts stored, zero clicks, `only_scrolled` true |
+| Internship form, dry run 1 | `internship-application` | `verified` — the user's details reached the page (`value_contains #full-name`), no receipt; 9 model calls |
+| Internship form, dry run 2 (same goal) | same | `verified` in about a third of the time: **all nine fills came from learned memory, zero model calls** |
+| Internship submit | same | submit **withheld**: consent was ticked, then the Submit click read 0.68–0.77 against the 0.9 irreversible floor → `abstained`. The gate working as designed, not a scenario failure. |
+| Local feed collection | `collect-feed-posts` (classifier chose `collect`) | `verified` — 6 scrolls plus 2 content-wheel fallbacks, 6 items, 0 gossip, the page's engagement log still `actions: none` |
+| Live x.com timeline, read-only | `x-feed-collect` | `verified` by `url_contains` + `harvest_at_least` — 5 scrolls, 6 harvest calls, 1 real post stored, zero clicks, `only_scrolled` true |
 
 What the live runs taught (all fixed before this doc):
 
 - The gate's `irreversible` reading is page-level, so a visible Submit button was putting a
   *fill* behind the 0.9 floor and a *checkbox* click behind it too. Floors now apply to the
   chosen action's own risk class: only clicks can be committal, and
-  checkbox/radio/switch/link roles are reversible. A fill whose value comes from mode memory
-  skips the gate entirely — the value is deterministic user data, not a model guess.
+  checkbox/radio/switch/link roles are reversible. A memory-sourced fill still faces the
+  reversible floor like any other fill — the gate protects the element choice, and the
+  remembered value is real personal data.
 - The collector harvests once per visited page state, not on every text change; live pages
   rewrite counters and timestamps constantly (19 fruitless harvest calls measured before this).
 - A feed that has not rendered offers no scroll action: the collector waits and re-observes a

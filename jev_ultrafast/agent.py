@@ -219,9 +219,11 @@ class Agent:
         # A recorded descriptor plan for this exact url+goal, when replay was requested.
         # The collect strategy never replays: its contract is that it only scrolls.
         replay_allowed = spec.get("replay") is not False and self._strategy != "collect"
-        self.replay_dir = Path(replay_dir) if replay_dir else (
-            self.mode.replay_dir() if self.mode and replay_allowed else None
-        )
+        if self.mode and replay_allowed:
+            # A mode's own plans win; an explicit replay_dir applies to mode-less runs so
+            # one mode's recorded values can never replay into another.
+            replay_dir = self.mode.replay_dir()
+        self.replay_dir = Path(replay_dir) if replay_dir else None
         self.replay_plan = (
             replay.load(self.replay_dir, url, "\n".join(plan)) if self.replay_dir else None
         )
@@ -747,6 +749,10 @@ class Agent:
         if scroll is None:
             harvest["stopped"] = "no scroll offered"
             return self._collect_done()
+        if len(state["history"]) >= self.step_budget():
+            # The collector is bounded by the same action budget as the decision loop.
+            harvest["stopped"] = "step budget"
+            return self._collect_done()
         error = None
         try:
             if wheel:
@@ -763,20 +769,6 @@ class Agent:
             return self.snapshot()
         except Exception as exc:
             error = str(exc) or type(exc).__name__
-        state["page"] = state["browser"].observe(
-            screenshot=self.screenshots, deadline=self.read_deadline()
-        )
-        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
-        outcome = action_outcome(page, state["page"], error)
-        self.note_progress(state["page"])           # keeps the decision-loop clock honest
-        after = (state["page"].get("text") or "")
-        after_digest = hashlib.sha256(after.encode("utf-8", "replace")).hexdigest()
-        content_yield = after_digest != digest
-        if content_yield:
-            state["collect_text_hash"] = after_digest
-            state["progress_at"] = time.monotonic()
-        harvest["steps"] = harvest.get("steps", 0) + 1
-        harvest["barren"] = 0 if content_yield else harvest.get("barren", 0) + 1
         state["history"].append({
             "step": len(state["history"]) + 1,
             "action": "Scroll content (collect)" if wheel else "Scroll down (collect)",
@@ -796,8 +788,8 @@ class Agent:
             "recovery": "collector scroll",
             "scan": None,
             "error": error,
-            "outcome": outcome,
-            "page_changed": outcome != "no visible change",
+            "outcome": None,
+            "page_changed": None,
             "url": page.get("url"),
             "usage": {},
             "executed_ms": state["elapsed_ms"],
@@ -805,6 +797,7 @@ class Agent:
         })
         writer = getattr(self, "evidence", None)
         if writer is not None:
+            # Recorded before observing its result, exactly as the decision loop does.
             writer.record(
                 "execution", step=state["history"][-1]["step"],
                 action="Scroll content (collect)" if wheel else "Scroll down (collect)",
@@ -812,6 +805,27 @@ class Agent:
                 operation="SCROLL_DOWN",
                 confidence=None, collector=True, error=error, url=page.get("url"),
             )
+        state["page"] = state["browser"].observe(
+            screenshot=self.screenshots, deadline=self.read_deadline()
+        )
+        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+        outcome = action_outcome(page, state["page"], error)
+        self.note_progress(state["page"])           # keeps the decision-loop clock honest
+        after = (state["page"].get("text") or "")
+        after_digest = hashlib.sha256(after.encode("utf-8", "replace")).hexdigest()
+        content_yield = after_digest != digest
+        if content_yield:
+            state["collect_text_hash"] = after_digest
+            state["progress_at"] = time.monotonic()
+        harvest["steps"] = harvest.get("steps", 0) + 1
+        harvest["barren"] = 0 if content_yield else harvest.get("barren", 0) + 1
+        state["history"][-1].update(
+            outcome=outcome,
+            page_changed=outcome != "no visible change",
+            fingerprint=state["page"]["fingerprint"],
+            url=state["page"].get("url"),
+            elapsed_ms=state["elapsed_ms"],
+        )
         if harvest["barren"] >= BARREN_SCROLL_LIMIT:
             # Stop on the barren scroll itself instead of paying one more scroll+read to
             # discover the same thing at the top of the next tick.
@@ -1264,16 +1278,7 @@ class Agent:
             if len(state["history"]) >= self.step_budget():
                 state["status"] = "blocked"
                 raise ValueError(f"Stopped at the {self.step_budget()}-action budget")
-            # A fill whose value comes from the mode's own memory is not a model guess:
-            # the exact-label match makes it deterministic user data, so the confidence
-            # gate has nothing to protect against here (sensitive labels are never
-            # learned). Every other action still goes through the gate.
-            memory_fill = (
-                action["kind"] == "fill"
-                and getattr(self, "mode", None) is not None
-                and self.mode.value_for(action.get("label")) is not None
-            )
-            verdict = None if memory_fill else gate_check(decision, action)
+            verdict = gate_check(decision, action)
             if verdict:
                 # The gate never retries a mutation. First low reading: one fresh
                 # observation with the decision cache bypassed. Second low reading on the
@@ -1541,7 +1546,9 @@ class Agent:
                     writer = getattr(self, "evidence", None)
                     if writer is not None:
                         writer.record(
-                            "mode_learned", label=action["label"], value=text[:80],
+                            "mode_learned", label=action["label"],
+                            value_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest()[:16],
+                            value_chars=len(text),
                             url=state["page"].get("url"),
                         )
             if state["record"]:

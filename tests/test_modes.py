@@ -231,6 +231,23 @@ def test_source_match_drops_paraphrases(root):
     assert [item["title"] for item in kept] == ["we shipped a new compiler [item-1]"]
 
 
+def test_corrupt_routes_cache_is_treated_as_absent(root):
+    (root / "routes.json").write_text("{not json", encoding="utf-8")
+    mode, info = modes.resolve("a task", "", classify=lambda *a: {"durable": False})
+    assert mode is None and info["matched"] == "not-durable"
+    (root / "routes.json").write_text('{"routes": {"x": 3}}', encoding="utf-8")
+    assert modes.route_get(root, "x") is None
+
+
+def test_code_like_labels_are_never_learned(root):
+    mode = modes.create(root, DECISION, "x")
+    assert mode.learn("Verification code", "123456") is False
+    assert mode.learn("Recovery code", "abc-def") is False
+    # "code" is blocked conservatively: a postal code is a small loss, a leaked OTP is not.
+    assert mode.learn("Postal code", "8001") is False
+    assert mode.value_for("Recovery code") is None
+
+
 def test_harvest_dedupe_and_daily_file(root):
     mode = modes.create(root, {**DECISION, "strategy": "collect"}, "x")
     first = mode.save_items("https://x.test/home", [{"title": "Post one"}, {"title": "Post two"}])
@@ -473,12 +490,22 @@ def test_learned_value_is_typed_without_a_model_call(monkeypatch, root):
     assert agent.browser.acted[-1]["text"] == "Ada Lovelace"
 
 
-def test_memory_fill_skips_the_confidence_gate(monkeypatch, root):
-    """A learned value is user data, not a model guess: even a 0.1 decision types it."""
+def test_memory_fill_still_faces_the_reversible_floor(monkeypatch, root):
+    """The gate protects the element choice even when the value comes from memory."""
     mode = internship_mode(root)
     mode.learn("Full name", "Ada Lovelace")
     agent = make_agent(page(), mode=mode)
     agent.state["decision"] = decision(confidence=0.1)
+    state = agent.command("act", {"fingerprint": agent.state["page"]["fingerprint"]})
+    assert state["gate"]["resolution"] == "reobserve"
+    assert agent.browser.acted == []
+
+
+def test_memory_fill_executes_above_the_floor(monkeypatch, root):
+    mode = internship_mode(root)
+    mode.learn("Full name", "Ada Lovelace")
+    agent = make_agent(page(), mode=mode)
+    agent.state["decision"] = decision(confidence=0.9)
     agent.command("act", {"fingerprint": agent.state["page"]["fingerprint"]})
     assert agent.browser.acted[-1]["text"] == "Ada Lovelace"
     assert agent.state["text_calls"][-1]["model"] == "mode-memory"
@@ -718,7 +745,7 @@ def test_benchmark_scripts_force_modes_off():
     for name in ("measure_flights.py", "record_flights.py", "verify_stall.py",
                  "benchmark_flights.py", "run_checks.py"):
         text = (scripts / name).read_text(encoding="utf-8")
-        assert 'JEV_MODES", "off"' in text, name
+        assert 'JEV_MODES"] = "off"' in text, name
 
 
 def test_resolve_degrades_when_creation_fails(root, monkeypatch):

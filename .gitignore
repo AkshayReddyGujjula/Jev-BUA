@@ -10,3 +10,4 @@ artifacts/
 dist/
 .commandcode/
 opencode-instructions.md
+modes/

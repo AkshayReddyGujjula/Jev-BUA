@@ -72,7 +72,7 @@ def run_worker(job, out_path):
     # In parallel runs one instance must never adopt another instance's tab.
     os.environ.setdefault("JEV_FOLLOW_TABS", "0")
     # A check run is a measurement: no mode auto-creation unless the check names one.
-    os.environ.setdefault("JEV_MODES", "off")
+    os.environ["JEV_MODES"] = "off"
 
     started = time.perf_counter()
     result = {

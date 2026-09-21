@@ -64,8 +64,8 @@ and a tab and the failure mode is *silently wrong pages*.
   showed the field accepted the value, and never for sensitive labels, seek controls or replays.
 - The confidence gate's `irreversible` reading is page-level, so floors apply to the chosen
   action's own risk class: only clicks can be committal; checkbox/radio/switch/link clicks and
-  fills/selects/sliders are reversible. A fill backed by exact memory skips the gate — it is user
-  data, not a model guess.
+  fills/selects/sliders are reversible. A memory-sourced fill still faces the reversible
+  floor — the gate protects the element choice, not just the value.
 - The collector is scroll-only by construction. Harvest once per visited page state, never on
   ambient text churn; wait for unrendered feeds; fall back to scrolling the element under the
   viewport centre for inner scrollers. Keep `harvest_at_least` paired with a page check.
