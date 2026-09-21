@@ -50,6 +50,19 @@ def evaluate_expectations(expect, page_state):
         count = page_state.get("selector_counts", {}).get(rule["selector"], 0)
         record("selector_count", count >= rule.get("at_least", 1),
                f"{rule['selector']} -> {count} (need >= {rule.get('at_least', 1)})")
+    if "value_contains" in expect:
+        rule = expect["value_contains"]
+        value = (page_state.get("values") or {}).get(rule.get("selector"), "")
+        wanted = str(rule.get("text", ""))
+        record("value_contains", wanted.lower() in (value or "").lower(),
+               f"{rule.get('selector')} -> {value!r} (need {wanted!r})")
+    if "harvest_at_least" in expect:
+        # Collector artifact check: this run's stored items, each already matched against
+        # page text the run observed. It is not a live-page readback, so pair it with a page
+        # check when the verdict must stand on the page alone.
+        count = int((page_state.get("harvest") or {}).get("items") or 0)
+        record("harvest_at_least", count >= int(expect["harvest_at_least"]),
+               f"harvest -> {count} (need >= {expect['harvest_at_least']})")
     return all(d["pass"] for d in detail), detail
 
 
@@ -60,7 +73,15 @@ def selectors_for(expect):
     return []
 
 
-def page_facts(browser, selectors=()):
+def value_selectors_for(expect):
+    """The selectors a value_contains expectation needs read on the page."""
+    rule = (expect or {}).get("value_contains")
+    if isinstance(rule, dict) and rule.get("selector"):
+        return [str(rule["selector"])]
+    return []
+
+
+def page_facts(browser, selectors=(), value_selectors=()):
     """Read the current page through a live Browser. Missing values degrade, never raise.
 
     Reading again here, through the browser itself, is what makes the result independent
@@ -74,6 +95,14 @@ def page_facts(browser, selectors=()):
             ) or 0
         except Exception:
             counts[selector] = 0
+    values = {}
+    for selector in value_selectors:
+        try:
+            values[selector] = browser.evaluate(
+                f"(document.querySelector({json.dumps(selector)}) || {{}}).value ?? ''"
+            ) or ""
+        except Exception:
+            values[selector] = ""
     text = ""
     try:
         text = browser.evaluate("document.body.innerText") or ""
@@ -87,4 +116,4 @@ def page_facts(browser, selectors=()):
         title = browser.evaluate("document.title") or ""
     except Exception:
         title = ""
-    return {"url": url, "title": title, "text": text, "selector_counts": counts}
+    return {"url": url, "title": title, "text": text, "selector_counts": counts, "values": values}

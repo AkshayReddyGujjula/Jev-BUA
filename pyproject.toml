@@ -25,3 +25,5 @@ select = ["E", "F", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["live: needs a real Chrome and paid model APIs; run with JEV_LIVE=1 -m live"]
+addopts = "-m 'not live'"

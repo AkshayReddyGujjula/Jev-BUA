@@ -22,6 +22,7 @@ from jev_ultrafast import Agent  # noqa: E402
 
 # A recording must show the real decision path, not a replayed cached answer.
 os.environ.setdefault("JEV_CACHE", "0")
+os.environ.setdefault("JEV_MODES", "off")
 
 folder = Path(sys.argv[1] if len(sys.argv) > 1 else "artifacts/flights/recorded")
 folder.mkdir(parents=True, exist_ok=False)

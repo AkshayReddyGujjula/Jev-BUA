@@ -154,6 +154,14 @@ TOOLS = [
                               "description": "Leave the tab open when the run finishes."},
                 "fresh": {"type": "boolean", "default": False,
                           "description": "Force a brand-new tab instead of the warm one."},
+                "mode": {"type": "string", "default": "",
+                         "description": "Task-class mode: a slug, or 'auto' to match or create "
+                                        "one with the text model. A mode adds its own memory "
+                                        "(personal facts, standing instructions), learned "
+                                        "field values and specialist settings such as the "
+                                        "collect strategy for feed scrolling."},
+                "collect_steps": {"type": "integer", "minimum": 1, "maximum": 50,
+                                  "description": "Override the scroll count for a collect-strategy mode."},
                 "replay": {"type": "boolean", "default": False,
                            "description": "Use (and record) a step plan for this exact url+goal. "
                                           "A recorded run repeats without a model call per step, "
@@ -261,7 +269,12 @@ def _quiet(func):
 def tool_browser_do(args):
     _load_env()
     from jev_ultrafast import Agent
-    from jev_ultrafast.assertions import evaluate_expectations, page_facts, selectors_for
+    from jev_ultrafast.assertions import (
+        evaluate_expectations,
+        page_facts,
+        selectors_for,
+        value_selectors_for,
+    )
     from jev_ultrafast.outcomes import resolve
 
     mode = args.get("tab", "background")
@@ -281,6 +294,8 @@ def tool_browser_do(args):
             "expect": expect,
             "evidence_dir": _evidence_dir(),
             "replay_dir": _replay_dir(args.get("replay")),
+            "mode": args.get("mode") or None,
+            "collect_steps": args.get("collect_steps"),
         }
         if browser is not None:
             kwargs["browser"] = browser
@@ -292,7 +307,9 @@ def tool_browser_do(args):
                     break
             state = agent.snapshot()
             # Independent of the agent's opinion: read the page again and assert on it.
-            facts = page_facts(browser or agent.browser, selectors_for(expect))
+            facts = page_facts(
+                browser or agent.browser, selectors_for(expect), value_selectors_for(expect)
+            )
     finally:
         if max_steps:
             if previous_steps is None:
@@ -317,6 +334,8 @@ def tool_browser_do(args):
         "elapsed_ms": state.get("elapsed_ms"),
         "evidence": state.get("evidence"),
         "replay": state.get("replay"),
+        "mode": state.get("mode"),
+        "harvest": state.get("harvest"),
         # What each caller-directed scan did, so the caller can see how far it had to look.
         "scans": [h["scan"] for h in state["history"] if h.get("scan")],
         "stall": state.get("stall"),
@@ -404,7 +423,7 @@ def tool_browser_act(args):
 @_quiet
 def tool_browser_assert(args):
     _load_env()
-    from jev_ultrafast.assertions import evaluate_expectations, page_facts, selectors_for
+    from jev_ultrafast.assertions import evaluate_expectations, page_facts, selectors_for, value_selectors_for
     from jev_ultrafast.browser import Browser
 
     expect = args.get("expect") or {}
@@ -413,7 +432,7 @@ def tool_browser_assert(args):
     # Its own tab on purpose: an assertion must not disturb the warm agent session.
     browser = Browser(args["url"])
     try:
-        facts = page_facts(browser, selectors_for(expect))
+        facts = page_facts(browser, selectors_for(expect), value_selectors_for(expect))
     finally:
         browser.close()
     verified, detail = evaluate_expectations(expect, facts)

@@ -52,6 +52,8 @@ def summarize(state):
         "checks": state.get("checks"),
         "evidence": state.get("evidence"),
         "replay": state.get("replay"),
+        "mode": state.get("mode"),
+        "harvest": state.get("harvest"),
         "elapsed_ms": state.get("elapsed_ms"),
         "goal": state.get("goal"),
         "url": page.get("url"),
@@ -80,7 +82,8 @@ def run_once(args):
     started = time.monotonic()
     status, stall, outcome = None, None, None
     with Agent(args.url, args.goal, values=args.values, find=args.find, expect=args.expect,
-               evidence_dir=args.evidence_dir, replay_dir=args.replay_dir) as agent:
+               evidence_dir=args.evidence_dir, replay_dir=args.replay_dir,
+               mode=args.mode or None, collect_steps=args.collect_steps) as agent:
         for state in agent.run():
             trail.append(summarize(state))
             if len(trail) > args.max_steps:
@@ -170,6 +173,20 @@ def main():
                         help="Where replay plans live. Only used with --replay.")
     parser.add_argument("--keep-open", action="store_true",
                         help="Leave the tab open when the run finishes (foreground/background modes).")
+    parser.add_argument("--mode", default="",
+                        help="Task-class mode: a slug ('internship-applications'), 'auto' to "
+                             "match or create one with the text model, or empty to use JEV_MODES. "
+                             "A mode carries its own memory file, learned field values and "
+                             "specialist settings (models, timeouts, budgets, collect strategy).")
+    parser.add_argument("--modes-dir", default="",
+                        help="Mode root. Defaults to JEV_MODES_DIR or ~/.jev-ultrafast/modes. "
+                             "Keep personal mode memory outside the repository.")
+    parser.add_argument("--collect-steps", type=int, default=None,
+                        help="Override the scroll count for a collect-strategy mode.")
+    parser.add_argument("--remember", default="",
+                        help="Add a fact to a mode's memory and exit. Needs --mode <slug>.")
+    parser.add_argument("--forget", default="",
+                        help="Forget a learned field value by label and exit. Needs --mode <slug>.")
     args = parser.parse_args()
 
     args.values = _json_arg(parser, args.values, "--values")
@@ -187,6 +204,26 @@ def main():
     # instead of the internal hard-coded one cutting the run short at 60.
     load_dotenv()
     os.environ["JEV_MAX_STEPS"] = str(args.max_steps)
+    if args.modes_dir:
+        os.environ["JEV_MODES_DIR"] = args.modes_dir
+    if args.remember or args.forget:
+        from jev_ultrafast import modes
+
+        setting = (args.mode or os.environ.get("JEV_MODES") or "").strip()
+        if not setting or setting.lower() == "auto":
+            parser.error("--remember/--forget need an explicit --mode <slug> (not auto)")
+        try:
+            if args.remember:
+                changed = modes.remember(setting, args.remember)
+                print(json.dumps({"mode": setting, "remembered": bool(changed),
+                                  "fact": args.remember}, indent=2))
+            else:
+                removed = modes.forget(setting, args.forget)
+                print(json.dumps({"mode": setting, "forgot": removed, "label": args.forget},
+                                 indent=2))
+        except ValueError as error:
+            parser.error(str(error))
+        return 0
     if args.tab:
         os.environ["JEV_TAB_MODE"] = args.tab
     if args.keep_open:

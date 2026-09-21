@@ -2,11 +2,12 @@
 
 import base64
 import os
+import sys
 import time
 from pathlib import Path
 
-from . import replay
-from .assertions import evaluate_expectations, page_facts, selectors_for
+from . import modes, replay
+from .assertions import evaluate_expectations, page_facts, selectors_for, value_selectors_for
 from .browser import SCAN_MAX_S, Browser, StalePage, target_visible
 from .evidence import Evidence
 from .gates import IRREVERSIBLE_NOUL
@@ -19,6 +20,7 @@ from .model import (
     classify_failure,
     field_context,
     field_text,
+    harvest_items,
 )
 from .outcomes import resolve
 from .questions import MAX_STEPS
@@ -79,6 +81,28 @@ def step_budget():
         except ValueError:
             pass
     return MAX_STEPS
+
+
+def _number(value, default, ceiling=None):
+    """A positive float specialist setting, clamped, or the default."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not (number > 0):
+        return default
+    return min(number, ceiling) if ceiling is not None else number
+
+
+def _budget(value, default):
+    """A positive int specialist setting, or the default (None stays None)."""
+    if value is None:
+        return default
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return number if number > 0 else default
 
 
 def progress_key(page):
@@ -155,15 +179,38 @@ def choice_probability(decision, alt):
 
 class Agent:
     def __init__(self, url, goals, *, record_dir=None, screenshots=False, values=None, find=None,
-                 expect=None, browser=None, evidence_dir=None, replay_dir=None):
+                 expect=None, browser=None, evidence_dir=None, replay_dir=None, mode=None,
+                 collect_steps=None):
         task = goals.strip() if isinstance(goals, str) else "\n".join(goals).strip()
         if not task:
             raise ValueError("Supply a task")
         plan = [task]
         self.pending_text = None
         self.start_url = url
+        # Task-class mode: per-mode memory, learned field values and specialist settings.
+        # Resolution may create the mode (mode="auto" / JEV_MODES=auto) and never guesses
+        # one; an explicitly named missing mode is the caller's error and raises.
+        self.mode, self._mode_info = modes.resolve("\n".join(plan), url, requested=mode)
+        spec = self.mode.specialist if self.mode else {}
+        self._strategy = self.mode.strategy if self.mode else "decide"
+        self._operation_model = spec.get("operation_model") or None
+        self._text_model = spec.get("text_model") or None
+        self._text_base_url = spec.get("text_base_url") or None
+        self.decide_timeout = _number(spec.get("decide_timeout_s"), DECIDE_TIMEOUT, ceiling=DECIDE_TIMEOUT)
+        self._max_steps = _budget(spec.get("max_steps"), None)
+        self.use_cache = spec.get("cache") is not False
+        collect = spec.get("collect") if isinstance(spec.get("collect"), dict) else {}
+        self._harvest_enabled = bool(collect.get("harvest")) and self._strategy == "collect"
+        self._harvest_instructions = collect.get("instructions") or None
+        self._collect_limit = _budget(
+            collect_steps if collect_steps is not None else collect.get("steps"), 8
+        )
         # A recorded descriptor plan for this exact url+goal, when replay was requested.
-        self.replay_dir = Path(replay_dir) if replay_dir else None
+        # The collect strategy never replays: its contract is that it only scrolls.
+        replay_allowed = spec.get("replay") is not False and self._strategy != "collect"
+        self.replay_dir = Path(replay_dir) if replay_dir else (
+            self.mode.replay_dir() if self.mode and replay_allowed else None
+        )
         self.replay_plan = (
             replay.load(self.replay_dir, url, "\n".join(plan)) if self.replay_dir else None
         )
@@ -189,9 +236,23 @@ class Agent:
             url=url,
             tab_mode=os.environ.get("JEV_TAB_MODE", "foreground"),
             model=os.environ.get("TYPESAFE_MODEL", "jev-latest"),
+            mode=self.mode.slug if self.mode else None,
         ) if evidence_dir else None
+        if self.evidence is not None and self._mode_info.get("enabled"):
+            self.evidence.record("mode_resolved", **self._mode_info)
+            if self.mode is not None and self._mode_info.get("matched") == "created":
+                self.evidence.record(
+                    "mode_created", slug=self.mode.slug, name=self.mode.name,
+                    strategy=self.mode.strategy, root=self._mode_info.get("root"),
+                )
+        if self._mode_info.get("matched") == "created" and self._mode_info.get("root_in_repo"):
+            print(
+                f"warning: mode root {self._mode_info.get('root')} is inside a git repository; "
+                "mode memory is personal data and should not be committed",
+                file=sys.stderr,
+            )
         self.record_dir = Path(record_dir) if record_dir else None
-        self.screenshots = screenshots or bool(record_dir)
+        self.screenshots = screenshots or bool(record_dir) or bool(spec.get("screenshots"))
         try:
             page = self.browser.observe(screenshot=self.screenshots)
         except Exception:
@@ -236,6 +297,11 @@ class Agent:
                 "stopped": None,
                 "recorded": None,
             },
+            # Task-class mode: name/strategy for callers, and this run's collector state.
+            mode=self.mode.summary() if self.mode else None,
+            mode_matched=self._mode_info.get("matched"),
+            harvest={"items": 0, "calls": 0, "dropped": 0, "steps": 0, "barren": 0,
+                     "file": None, "stopped": None, "last": []},
         )
         self.note_progress(page)
         # Seed the content-yield memory from the first view, so the first scroll is judged
@@ -320,14 +386,21 @@ class Agent:
         expect = getattr(self, "expect", None)
         if expect:
             try:
-                facts = page_facts(state["browser"], selectors_for(expect))
+                facts = page_facts(
+                    state["browser"], selectors_for(expect), value_selectors_for(expect)
+                )
             except Exception:
                 facts = {
                     "url": state["page"].get("url"),
                     "title": state["page"].get("title"),
                     "text": state["page"].get("text"),
                     "selector_counts": {},
+                    "values": {},
                 }
+            facts["harvest"] = {
+                "items": (state.get("harvest") or {}).get("items", 0),
+                "file": (state.get("harvest") or {}).get("file"),
+            }
             _, checks = evaluate_expectations(expect, facts)
             state["checks"] = checks
             state["readback"] = {
@@ -565,6 +638,172 @@ class Agent:
             )
         return True
 
+    @staticmethod
+    def _value_present(action, page, text):
+        """Did the field actually accept the typed value? Learning must not poison later runs."""
+        wanted = " ".join(str(text).split()).lower()
+        label = (action.get("label") or "").strip().lower()
+        for candidate in page.get("actions") or []:
+            if candidate.get("kind") != "fill":
+                continue
+            if (candidate.get("label") or "").strip().lower() != label:
+                continue
+            value = " ".join(str(candidate.get("value") or "").split()).lower()
+            if value and (wanted in value or value in wanted):
+                return True
+        return False
+
+    def _collect_tick(self):
+        """One code-owned collection step: harvest the page, then scroll it.
+
+        The collector exists for feed-style work where one model decision per scroll is
+        pure overhead. It never clicks anything - no like, repost or follow can happen
+        here - and that is a property of this code path, not a rule the model could break.
+        """
+        state = self.state
+        if state["started_at"] is None:
+            state["started_at"] = time.perf_counter()
+            state["progress_at"] = time.monotonic()
+        if self.stalled():
+            return self._stop_stalled()
+        harvest = state.setdefault(
+            "harvest",
+            {"items": 0, "calls": 0, "dropped": 0, "steps": 0, "barren": 0,
+             "file": None, "stopped": None, "last": []},
+        )
+        page = state["page"]
+        if getattr(self, "_harvest_enabled", False) and getattr(self, "mode", None) is not None:
+            harvested = state.setdefault("harvested", {})
+            if page["fingerprint"] not in harvested:
+                harvested[page["fingerprint"]] = True
+                if len(harvested) > GATE_MEMORY:
+                    for stale in list(harvested)[:-GATE_MEMORY]:
+                        harvested.pop(stale, None)
+                self._harvest_page(page)
+        if state["status"] in TERMINAL_STATUS:
+            return self.snapshot()
+        if harvest.get("steps", 0) >= getattr(self, "_collect_limit", 8):
+            harvest["stopped"] = "steps"
+            return self._collect_done()
+        if harvest.get("barren", 0) >= BARREN_SCROLL_LIMIT:
+            harvest["stopped"] = "feed exhausted"
+            return self._collect_done()
+        scroll = next(
+            (a for a in page["actions"]
+             if a["kind"] == "scroll" and (a.get("delta") or 0) > 0),
+            None,
+        )
+        if scroll is None:
+            harvest["stopped"] = "no scroll offered"
+            return self._collect_done()
+        error = None
+        try:
+            state["browser"].act(scroll, page)
+        except StalePage:
+            state["page"] = state["browser"].observe(
+                screenshot=self.screenshots, deadline=self.read_deadline()
+            )
+            self.note_progress(state["page"])
+            state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+            state["status"] = "collecting"
+            return self.snapshot()
+        except Exception as exc:
+            error = str(exc) or type(exc).__name__
+        state["page"] = state["browser"].observe(
+            screenshot=self.screenshots, deadline=self.read_deadline()
+        )
+        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+        outcome = action_outcome(page, state["page"], error)
+        progressed = self.note_progress(state["page"])
+        harvest["steps"] = harvest.get("steps", 0) + 1
+        harvest["barren"] = 0 if progressed else harvest.get("barren", 0) + 1
+        state["history"].append({
+            "step": len(state["history"]) + 1,
+            "action": "Scroll down (collect)",
+            "kind": "scroll",
+            "choice": scroll["id"],
+            "probability": 0.0,
+            "confidence": None,
+            "irreversible": 0.0,
+            "cached": False,
+            "model": None,
+            "latency_ms": 0,
+            "text": None,
+            "text_helper": None,
+            "text_latency_ms": 0,
+            "operation": "SCROLL_DOWN",
+            "target": None,
+            "recovery": "collector scroll",
+            "scan": None,
+            "error": error,
+            "outcome": outcome,
+            "page_changed": outcome != "no visible change",
+            "url": page.get("url"),
+            "usage": {},
+            "executed_ms": state["elapsed_ms"],
+            "elapsed_ms": state["elapsed_ms"],
+        })
+        writer = getattr(self, "evidence", None)
+        if writer is not None:
+            writer.record(
+                "execution", step=state["history"][-1]["step"], action="Scroll down (collect)",
+                action_kind="scroll", choice=scroll["id"], operation="SCROLL_DOWN",
+                confidence=None, collector=True, error=error, url=page.get("url"),
+            )
+        if harvest["barren"] >= BARREN_SCROLL_LIMIT:
+            # Stop on the barren scroll itself instead of paying one more scroll+read to
+            # discover the same thing at the top of the next tick.
+            harvest["stopped"] = "feed exhausted"
+            return self._collect_done()
+        state["status"] = "collecting"
+        return self.snapshot()
+
+    def _collect_done(self):
+        state = self.state
+        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+        state["status"] = "done"
+        self._finalize()
+        return self.snapshot()
+
+    def _harvest_page(self, page):
+        """One harvest call for one page state, bounded by the anti-loop room left."""
+        state = self.state
+        mode = getattr(self, "mode", None)
+        harvest = state["harvest"]
+        text = (page.get("text") or "")[:6000]
+        if mode is None or len(text.strip()) < 80:
+            return
+        left = STALL_LIMIT_S - (time.monotonic() - (state.get("progress_at") or time.monotonic()))
+        if left < 0.5:
+            return
+        harvest["calls"] = harvest.get("calls", 0) + 1
+        writer = getattr(self, "evidence", None)
+        try:
+            items = harvest_items(
+                text, mode.memory_text(include_learned=False), getattr(self, "_harvest_instructions", None),
+                timeout=min(TEXT_TIMEOUT, max(0.5, left)),
+                model=getattr(self, "_text_model", None),
+                base_url=getattr(self, "_text_base_url", None),
+            )
+        except Exception as exc:
+            if writer is not None:
+                writer.record("harvest", ok=False, error=str(exc)[:200], url=page.get("url"))
+            return
+        offered = len(items or [])
+        matched = modes.source_match(items, text)
+        stored = mode.save_items(page.get("url"), matched)
+        harvest["dropped"] = harvest.get("dropped", 0) + (offered - len(stored))
+        if stored:
+            harvest["items"] = harvest.get("items", 0) + len(stored)
+            harvest["file"] = str(mode.harvest_dir())
+            harvest["last"] = [entry["title"][:80] for entry in stored[-5:]]
+        if writer is not None:
+            writer.record(
+                "harvest", ok=bool(stored), offered=offered, saved=len(stored),
+                dropped=offered - len(stored), url=page.get("url"),
+                titles=[entry["title"][:80] for entry in stored[:5]],
+            )
+
     def _record_skipped(self, decision, action, verdict):
         """A gate refusal that is not terminal: nothing executed, and the loop sees why.
 
@@ -677,6 +916,13 @@ class Agent:
             "elements": action_space(self.state["page"]["actions"])[0],
         }
 
+    def step_budget(self):
+        """Action budget for this run. A mode may lower the run's cap, never raise it."""
+        base = step_budget()
+        if getattr(self, "_max_steps", None):
+            return min(base, self._max_steps)
+        return base
+
     def read_deadline(self):
         """Absolute monotonic time an observation must return by, or None before the run.
 
@@ -692,6 +938,8 @@ class Agent:
         body = body or {}
         state = self.state
         if name == "tick":
+            if getattr(self, "_strategy", "decide") == "collect":
+                return self._collect_tick()
             if self._replay_step():
                 return self.snapshot()
             try:
@@ -722,7 +970,7 @@ class Agent:
             state["decision"] = None
             if state["status"] in TERMINAL_STATUS:
                 raise ValueError("This run has stopped. Start a fresh demo.")
-            if len(state["decisions"]) >= step_budget() * 2:
+            if len(state["decisions"]) >= self.step_budget() * 2:
                 raise ValueError("Reached the demo's model-call budget")
             # Bound the decision by the time left before the anti-loop deadline, and refuse
             # to start one that cannot finish inside it. Without this a single slow decision
@@ -730,9 +978,10 @@ class Agent:
             left = STALL_LIMIT_S - (time.monotonic() - state["progress_at"])
             if left < MIN_DECIDE_S:
                 return self._stop_stalled()
+            skip_cache = state.pop("skip_cache_once", False)
             decision = choose(
                 state["page"], state["goal"], state["history"],
-                timeout=min(DECIDE_TIMEOUT, max(MIN_DECIDE_S, left)),
+                timeout=min(getattr(self, "decide_timeout", DECIDE_TIMEOUT), max(MIN_DECIDE_S, left)),
                 # Re-observing the same unchanged page once is enough; offering it again
                 # would only replay the same non-answer. Refusals below still get their
                 # own fresh look through the gate.
@@ -741,7 +990,11 @@ class Agent:
                     and state["page"]["fingerprint"] not in (state.get("reobserved") or {})
                 ),
                 # A gate retry must be a genuine second reading, not a replayed answer.
-                use_cache=not state.pop("skip_cache_once", False),
+                use_cache=getattr(self, "use_cache", True) and not skip_cache,
+                model_id=getattr(self, "_operation_model", None),
+                mode_state=(
+                    self.mode.decision_state() if getattr(self, "mode", None) else None
+                ),
             )
             # If the decision itself used up the budget, stop without acting. Without this
             # one more action plus its observation could run while the deadline had already
@@ -946,9 +1199,9 @@ class Agent:
                 action = {"id": "BACK", "kind": "back", "label": "Back"}
             else:
                 action = next(a for a in page["actions"] if a["id"] == selected)
-            if len(state["history"]) >= step_budget():
+            if len(state["history"]) >= self.step_budget():
                 state["status"] = "blocked"
-                raise ValueError(f"Stopped at the {step_budget()}-action budget")
+                raise ValueError(f"Stopped at the {self.step_budget()}-action budget")
             verdict = gate_check(decision, action)
             if verdict:
                 # The gate never retries a mutation. First low reading: one fresh
@@ -1004,6 +1257,12 @@ class Agent:
             text, helper = None, None
             if action["kind"] in {"fill", "seek"}:
                 supplied = self.supplied_text(action)
+                remembered = None
+                if supplied is None and action["kind"] == "fill" and getattr(self, "mode", None):
+                    # Exact normalized-label hit only: an approximate match could type one
+                    # person's value into another field, so anything fuzzier goes to the
+                    # text model with the memory in context instead.
+                    remembered = self.mode.value_for(action["label"])
                 if supplied is not None:
                     # No model call and nothing to cache: a supplied literal cannot go
                     # stale, and Browser.act re-checks freshness immediately before input.
@@ -1017,10 +1276,26 @@ class Agent:
                             "value": text,
                         }
                     )
+                elif remembered is not None:
+                    # Learned memory, not a model call. The gate, step budget and freshness
+                    # checks around this branch are the same as for any other execution.
+                    text = remembered
+                    state["text_calls"].append(
+                        {
+                            "model": "mode-memory",
+                            "latency_ms": 0,
+                            "usage": {},
+                            "field": action["label"],
+                            "value": text,
+                        }
+                    )
                 else:
                     if not state["browser"].fresh(page):
                         raise StalePage("Page changed before text generation. Choose again.")
-                    context = field_context(state["goal"], action, page, state["history"])
+                    context = field_context(
+                        state["goal"], action, page, state["history"],
+                        mode_state=self.mode.text_state() if getattr(self, "mode", None) else None,
+                    )
                     if self.pending_text and self.pending_text[0] == context:
                         _, text, helper = self.pending_text
                     else:
@@ -1030,7 +1305,12 @@ class Agent:
                         # and the deadline then ends the run.
                         left = STALL_LIMIT_S - (time.monotonic() - state["progress_at"])
                         try:
-                            text, helper = field_text(context, timeout=min(TEXT_TIMEOUT, max(0.5, left)))
+                            text, helper = field_text(
+                                context,
+                                timeout=min(TEXT_TIMEOUT, max(0.5, left)),
+                                model=getattr(self, "_text_model", None),
+                                base_url=getattr(self, "_text_base_url", None),
+                            )
                         except Exception as exc:
                             # A slow or failed text call must be a failed ACTION, not a dead
                             # run. The helper's measured tail reaches 22 s; letting that
@@ -1168,7 +1448,31 @@ class Agent:
                 and outcome not in DEAD_OUTCOMES
             ):
                 # Descriptor of a successfully executed step, for a possible replay.
-                state["descriptors"].append(replay.descriptor(action, decision, outcome, text))
+                # Credentials are never persisted: a redacted fill just falls back to Jev.
+                state["descriptors"].append(
+                    replay.descriptor(
+                        action, decision, outcome,
+                        modes.redact_for_replay(action.get("label"), text),
+                    )
+                )
+            if (
+                getattr(self, "mode", None) is not None
+                and action["kind"] == "fill"
+                and text
+                and not decision.get("replay")
+                and error is None
+                and outcome not in DEAD_OUTCOMES
+                and self._value_present(action, state["page"], text)
+            ):
+                # Learn only what the field actually accepted: a value the page rejected
+                # would otherwise be retyped into every later run of this mode.
+                if self.mode.learn(action["label"], text, url=state["page"].get("url")):
+                    writer = getattr(self, "evidence", None)
+                    if writer is not None:
+                        writer.record(
+                            "mode_learned", label=action["label"], value=text[:80],
+                            url=state["page"].get("url"),
+                        )
             if state["record"]:
                 (self.record_dir / f"{state['elapsed_ms']:06d}.jpg").write_bytes(
                     base64.b64decode(state["page"]["screenshot"])

@@ -71,6 +71,8 @@ def run_worker(job, out_path):
     os.environ.pop("JEV_KEEP_TAB", None)
     # In parallel runs one instance must never adopt another instance's tab.
     os.environ.setdefault("JEV_FOLLOW_TABS", "0")
+    # A check run is a measurement: no mode auto-creation unless the check names one.
+    os.environ.setdefault("JEV_MODES", "off")
 
     started = time.perf_counter()
     result = {
@@ -81,7 +83,8 @@ def run_worker(job, out_path):
         "text_calls": [], "trail": [], "error": None, "stall": None,
     }
     try:
-        with Agent(job["url"], job["goal"], values=job.get("values")) as agent:
+        with Agent(job["url"], job["goal"], values=job.get("values"),
+                   mode=job.get("mode"), collect_steps=job.get("collect_steps")) as agent:
             deadline = time.monotonic() + job.get("max_seconds", 60)
             for _ in agent.run():
                 if time.monotonic() > deadline:
@@ -90,16 +93,26 @@ def run_worker(job, out_path):
             state = agent.snapshot()
             page = state["page"]
             selectors = {}
-            for rule in ([job["expect"]["selector_count"]] if "selector_count" in (job.get("expect") or {}) else []):
+            values = {}
+            expect = job.get("expect") or {}
+            for rule in ([expect["selector_count"]] if "selector_count" in expect else []):
                 try:
                     selectors[rule["selector"]] = agent.browser.evaluate(
                         f"document.querySelectorAll({json.dumps(rule['selector'])}).length"
                     ) or 0
                 except Exception:
                     selectors[rule["selector"]] = 0
+            for rule in ([expect["value_contains"]] if "value_contains" in expect else []):
+                try:
+                    values[rule["selector"]] = agent.browser.evaluate(
+                        f"(document.querySelector({json.dumps(rule['selector'])}) || {{}}).value ?? ''"
+                    ) or ""
+                except Exception:
+                    values[rule["selector"]] = ""
             page_state = {
                 "url": page.get("url"), "title": page.get("title"),
-                "text": page.get("text"), "selector_counts": selectors,
+                "text": page.get("text"), "selector_counts": selectors, "values": values,
+                "harvest": state.get("harvest") or {"items": 0},
             }
             # Independent of the agent's opinion: read the page again and assert on it.
             try:

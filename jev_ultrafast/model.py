@@ -1,4 +1,8 @@
-"""TypeSafe makes choices; an optional small OpenAI-compatible model writes field values."""
+"""TypeSafe makes choices; an optional small OpenAI-compatible model writes field values.
+
+The same helper model also classifies a goal into a durable task mode and harvests notable
+items from a collected page. All three calls share one bounded, JSON-only text call path.
+"""
 
 import json
 import math
@@ -13,7 +17,9 @@ from .questions import (
     ABSTAIN,
     FAILURE_CLASS,
     GOAL_DONE,
+    HARVEST_PICK,
     IRREVERSIBLE,
+    MODE_CLASSIFY,
     NEXT_ACTION,
     REOBSERVE,
     STUCK,
@@ -77,6 +83,52 @@ def post_json(url, key, body, headers=None, timeout=None):
             raise RuntimeError(f"Model provider returned HTTP {response.status_code}; no action executed.")
         return response.json()
     raise RuntimeError("Model unavailable")
+
+
+def text_call(system, context, timeout=None, model=None, base_url=None, max_tokens=1024):
+    """One bounded, JSON-only call to the text helper.
+
+    Callers decide how to degrade: field_text turns a failure into a failed action, the
+    classifier and the harvest extractor return None. The model and endpoint can be
+    overridden per mode, but the budget can never exceed the helper timeout.
+    """
+    key = os.environ.get("TEXT_MODEL_API_KEY")
+    if not key:
+        raise ValueError("TEXT_MODEL_API_KEY is required for the text helper.")
+    base = (base_url or os.environ.get("TEXT_MODEL_BASE_URL", "https://api.deepseek.com/v1")).rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        raise ValueError("TEXT_MODEL_BASE_URL must be an http(s) URL.")
+    model_name = model or os.environ.get("TEXT_MODEL", "deepseek-chat")
+    reasoning = {"thinking": {"type": "disabled"}} if "api.deepseek.com/" in base else {"reasoning": {"effort": "low"}}
+    if os.environ.get("TEXT_MODEL_REASONING") == "none":
+        reasoning = {"reasoning": {"enabled": False}}
+    started = time.perf_counter()
+    result = post_json(
+        base + "/chat/completions",
+        key,
+        {
+            "model": model_name,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+            **reasoning,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": json.dumps(context)},
+            ],
+        },
+        headers={"x-opencode-session": TEXT_SESSION, "User-Agent": "jev-ultrafast/0.1"},
+        timeout=min(timeout or TEXT_TIMEOUT, TEXT_TIMEOUT),
+    )
+    output = result["choices"][0]["message"]["content"]
+    if isinstance(output, str):
+        output = json.loads(output)
+    if not isinstance(output, dict):
+        raise ValueError("Text helper returned non-object JSON.")
+    return output, {
+        "model": model_name,
+        "latency_ms": round((time.perf_counter() - started) * 1000),
+        "usage": result.get("usage", {}),
+    }
 
 
 def noul(answer):
@@ -149,7 +201,8 @@ def action_space(actions):
     return elements, targets, controls
 
 
-def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=True):
+def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=True,
+           model_id=None, mode_state=None):
     elements, targets, controls = action_space(state["actions"])
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
@@ -211,10 +264,13 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
             "instructions": {"goal": goal, "operation": operation, "rules": [NEXT_ACTION, TARGET]},
         }
     body = {
-        "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
+        "model": model_id or os.environ.get("TYPESAFE_MODEL", "jev-latest"),
         "state": {
             "page": {k: state[k] for k in ("url", "title", "text")},
             "elements": elements,
+            # Mode memory is user-authored context for this task class. It is data, not
+            # page instructions, and the decision contract still comes from the questions.
+            **({"mode": mode_state} if mode_state else {}),
             # `recovery` is included so the model can see WHY an action was substituted.
             # Without it a guard could silently redirect the loop and the model had no way
             # to learn the list was exhausted and change strategy (search instead of scan).
@@ -313,56 +369,29 @@ def _cached_heads_valid(result, operations, targets):
     return True
 
 
-def field_context(goal, action, page, history):
-    return {
+def field_context(goal, action, page, history, mode_state=None):
+    context = {
         "goal": goal,
         "field": {k: action.get(k) for k in ("label", "role", "value")},
         "page": {"title": page["title"], "text": page["text"][:6000]},
         "recent_actions": [{k: h.get(k) for k in ("action", "text")} for h in history[-6:]],
     }
+    if mode_state:
+        context["mode"] = mode_state
+    return context
 
 
-def field_text(context, timeout=None):
-    key = os.environ.get("TEXT_MODEL_API_KEY")
-    if not key:
+def field_text(context, timeout=None, model=None, base_url=None):
+    if not os.environ.get("TEXT_MODEL_API_KEY"):
         raise ValueError("TYPE_TEXT needs TEXT_MODEL_API_KEY; no text is hardcoded or guessed by the executor.")
-    base = os.environ.get("TEXT_MODEL_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
-    model = os.environ.get("TEXT_MODEL", "deepseek-chat")
-    reasoning = {"thinking": {"type": "disabled"}} if "api.deepseek.com/" in base else {"reasoning": {"effort": "low"}}
-    if os.environ.get("TEXT_MODEL_REASONING") == "none":
-        reasoning = {"reasoning": {"enabled": False}}
-    started = time.perf_counter()
-    result = post_json(
-        base + "/chat/completions",
-        key,
-        {
-            "model": model,
-            "max_tokens": 1024,
-            "response_format": {"type": "json_object"},
-            **reasoning,
-            "messages": [
-                {"role": "system", "content": TEXT_VALUE},
-                {
-                    "role": "user",
-                    "content": json.dumps(context),
-                },
-            ],
-        },
-        headers={"x-opencode-session": TEXT_SESSION, "User-Agent": "jev-ultrafast/0.1"},
-        timeout=min(timeout or TEXT_TIMEOUT, TEXT_TIMEOUT),
-    )
     try:
-        output = json.loads(result["choices"][0]["message"]["content"])
+        output, meta = text_call(TEXT_VALUE, context, timeout=timeout, model=model, base_url=base_url)
         value = output["text"]
         if set(output) != {"text"} or not isinstance(value, str) or not value.strip() or len(value) > 2000:
             raise ValueError()
     except (ValueError, KeyError, TypeError):
         raise ValueError("Text helper returned no valid field value; nothing typed.") from None
-    return value, {
-        "model": model,
-        "latency_ms": round((time.perf_counter() - started) * 1000),
-        "usage": result.get("usage", {}),
-    }
+    return value, meta
 
 
 FAILURE_CRITERIA = {
@@ -416,3 +445,70 @@ def classify_failure(state, goal, history, timeout=None):
         "model": result.get("model"),
         "latency_ms": round((time.perf_counter() - started) * 1000),
     }
+
+
+def classify_mode(goal, url, existing, timeout=None):
+    """One typed judgement: is this a durable task class worth its own mode?
+
+    Returns {"durable": False}, a mode decision dict, or None when the helper cannot answer.
+    None means no mode: a guessed namespace with guessed keywords is worse than none.
+    """
+    context = {"goal": goal, "url": url, "existing_modes": existing or []}
+    try:
+        output, _ = text_call(MODE_CLASSIFY, context, timeout=timeout)
+    except Exception:
+        return None
+    if not isinstance(output, dict):
+        return None
+    durable = output.get("durable")
+    if isinstance(durable, str):
+        durable = durable.strip().lower() in {"true", "yes", "1"}
+    if durable is False:
+        return {"durable": False}
+    if durable is not True:
+        return None
+    name, slug = output.get("name"), output.get("slug")
+    if not isinstance(name, str) or not isinstance(slug, str):
+        return None
+    keywords = [k for k in (output.get("keywords") or []) if isinstance(k, str)]
+    strategy = output.get("strategy")
+    return {
+        "durable": True,
+        "slug": slug,
+        "name": name,
+        "description": str(output.get("description") or ""),
+        "keywords": keywords[:8],
+        "strategy": strategy if strategy in {"decide", "collect"} else "decide",
+    }
+
+
+def harvest_items(page_text, memory, instructions=None, timeout=None, model=None, base_url=None):
+    """Pick notable items from one page. None when the helper cannot answer validly."""
+    context = {
+        "interests": memory or "",
+        "extra_instructions": instructions or "",
+        "page_text": (page_text or "")[:6000],
+    }
+    try:
+        output, _ = text_call(
+            HARVEST_PICK, context, timeout=timeout, model=model, base_url=base_url, max_tokens=1500
+        )
+    except Exception:
+        return None
+    if not isinstance(output, dict):
+        return None
+    items = output.get("items")
+    if not isinstance(items, list):
+        return None
+    cleaned = []
+    for item in items[:10]:
+        if not isinstance(item, dict):
+            continue
+        title, note = item.get("title"), item.get("note")
+        if not isinstance(title, str) or not (3 <= len(title.strip()) <= 200):
+            continue
+        cleaned.append({
+            "title": title.strip(),
+            "note": note.strip()[:300] if isinstance(note, str) else "",
+        })
+    return cleaned or None

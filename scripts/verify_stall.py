@@ -37,6 +37,7 @@ for line in (ROOT / ".env").read_text(encoding="utf-8-sig").splitlines():
 # The verifier measures loop behaviour under real decision latency; a cached answer would
 # change the request path and the timing the deadline assertions are about.
 os.environ.setdefault("JEV_CACHE", "0")
+os.environ.setdefault("JEV_MODES", "off")
 
 from jev_ultrafast import Agent  # noqa: E402
 from jev_ultrafast.agent import STALL_LIMIT_S, TERMINAL_STATUS  # noqa: E402

@@ -21,6 +21,7 @@ args = parser.parse_args()
 # A benchmark must measure the real decision path, not a cached answer: with the cache on,
 # a repeated measurement would report fewer requests and no model latency.
 os.environ.setdefault("JEV_CACHE", "0")
+os.environ.setdefault("JEV_MODES", "off")
 source = Path(args.source).resolve()
 sys.path.insert(0, str(source))
 from jev_ultrafast import Agent  # noqa: E402
