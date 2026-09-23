@@ -30,7 +30,13 @@ from .questions import (
     TEXT_VALUES,
 )
 
-CLIENT = httpx.Client(http2=True, timeout=25)
+# httpx drops an idle pooled connection after 5 s by default, and a new one costs ~325 ms of
+# TLS + HTTP/2 setup (measured 2026-09-24: 499 ms cold vs 173 ms warm to TypeSafe). Any
+# decision more than 5 s after the last - a slow results page, a supervisor consult, the
+# next MCP call - silently paid it again. TypeSafe kept idle connections for 90 s+ (probed).
+KEEPALIVE_S = float(os.environ.get("JEV_KEEPALIVE_SECONDS", "120"))
+DECIDE_URL = "https://api.typesafe.ai/v1/systemone"
+CLIENT = httpx.Client(http2=True, timeout=25, limits=httpx.Limits(keepalive_expiry=KEEPALIVE_S))
 
 # The decision call also sits inside the anti-loop deadline, so it is bounded too: with
 # the shared 25 s client timeout one slow decision could overshoot a 5 s guarantee five
@@ -44,7 +50,8 @@ DECIDE_TIMEOUT = float(os.environ.get("JEV_DECIDE_TIMEOUT", "3"))
 # on its own connection (a stalled pooled HTTP/2 connection would stall a hedge sharing it)
 # and the first valid answer wins. Under 1% of decisions pay for a duplicate. 0 disables.
 DECIDE_HEDGE_S = float(os.environ.get("JEV_DECIDE_HEDGE", "1.0"))
-HEDGE_CLIENT = httpx.Client(http2=True, timeout=25)
+HEDGE_CLIENT = httpx.Client(http2=True, timeout=25,
+                            limits=httpx.Limits(keepalive_expiry=KEEPALIVE_S))
 _HEDGE_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="jev-hedge")
 
 # The text helper is called inside the loop's anti-loop deadline (JEV_STALL_SECONDS,
@@ -60,6 +67,25 @@ CLASSIFY_TIMEOUT = float(os.environ.get("JEV_CLASSIFY_TIMEOUT", "12"))
 
 # Stable per-process id for OpenCode Go's routing header; harmless for other providers.
 TEXT_SESSION = os.environ.get("JEV_TEXT_SESSION") or uuid.uuid4().hex
+
+
+def prewarm():
+    """Open both decision connections while the browser is still starting.
+
+    A fresh process otherwise pays the handshake inside its first decision. An unauthenticated
+    HEAD carries no key and costs nothing; failures are ignored. Skipped without a TypeSafe
+    key, so offline tests never touch the network.
+    """
+    if not os.environ.get("TYPESAFE_API_KEY"):
+        return []
+    return [_HEDGE_POOL.submit(_touch, client) for client in (CLIENT, HEDGE_CLIENT)]
+
+
+def _touch(client):
+    try:
+        client.head(DECIDE_URL.rsplit("/v1/", 1)[0] + "/", timeout=3)
+    except Exception:
+        pass
 
 
 def _typesafe_key():
@@ -374,7 +400,7 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
         result = stored
     else:
         result, hedged = post_hedged(
-            "https://api.typesafe.ai/v1/systemone",
+            DECIDE_URL,
             _typesafe_key(),
             body,
             timeout=min(timeout or DECIDE_TIMEOUT, DECIDE_TIMEOUT),

@@ -10,7 +10,12 @@ verification after the run. Jev's median decision latency was ~300 ms in these r
 | --- | --- | --- | --- | --- |
 | before text prefetch (`71cac0b`) | 1 | 1/1 | 16.8 s | 2 × ~1.35 s on the critical path |
 | exact-field-set prefetch | 3 | 3/3 | 13.4–15.2 s | 0.8–1.4 s per field |
-| covered-field-set prefetch, drafts kept per goal (`2291375`) | 4 | 4/4 | **10.5–12.8 s** | **0 ms** per field |
+| covered-field-set prefetch, drafts kept per goal (`2291375`) | 4 | 4/4 | 10.5–12.8 s | 0 ms per field |
+| + hedged decisions, 120 s keepalive, connection prewarm (2026-09-24, date 2026-10-20) | 3 | 3/3 | **10.4–11.7 s** | **0 ms** per field |
+
+Decision time on those three runs was 4.6–5.6 s for 12–14 decisions (first decision
+329–415 ms, none over 512 ms, no hedge fired), against 6.4–6.8 s for the same 14 decisions
+before the keepalive fix (ADR-014).
 
 Where a 10.5 s run goes: 13 Jev decisions (~300 ms each), ~100–270 ms of browser work
 before each action and ~130–300 ms of settling after it, and ~2.5 s after Search while the

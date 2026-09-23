@@ -30,6 +30,7 @@ from .model import (
     field_text,
     field_values,
     harvest_items,
+    prewarm,
 )
 from .outcomes import resolve
 from .privacy import redact
@@ -278,6 +279,8 @@ class Agent:
         self.find = (find or "").strip()
         # An injected browser is owned by the caller (the MCP server keeps one warm), so the
         # agent must never close it out from under the next call.
+        # The decision connection opens while the tab opens, not inside the first decision.
+        prewarm()
         self.browser = browser or Browser(url)
         self._owns_browser = browser is None
         # A supplied value that appears verbatim in the goal is not private: the goal already

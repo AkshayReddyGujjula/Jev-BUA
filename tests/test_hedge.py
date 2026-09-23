@@ -76,3 +76,29 @@ def test_hedging_can_be_disabled(monkeypatch):
     result, hedged = model.post_hedged("u", "k", {}, timeout=2, hedge_after=0)
     assert result == {"a": 1} and hedged is None
     assert calls == ["primary"]
+
+
+def test_prewarm_is_offline_without_a_key(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    assert model.prewarm() == []
+
+
+def test_prewarm_opens_both_decision_connections_and_never_raises(monkeypatch):
+    touched = []
+
+    class Client:
+        def head(self, url, timeout=None):
+            touched.append(url)
+            raise OSError("offline")        # a failed warm-up is ignored
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "offline-test")
+    monkeypatch.setattr(model, "CLIENT", Client())
+    monkeypatch.setattr(model, "HEDGE_CLIENT", Client())
+    for future in model.prewarm():
+        assert future.result(timeout=2) is None
+    assert touched == ["https://api.typesafe.ai/"] * 2
+
+
+def test_decision_connections_outlive_the_httpx_default_idle_expiry():
+    for client in (model.CLIENT, model.HEDGE_CLIENT):
+        assert client._transport._pool._keepalive_expiry >= 60

@@ -135,6 +135,18 @@ first valid answer wins, inside the same total budget. Evidence records `hedged`
 a healthy provider pays nothing. Only the decision call is hedged; nothing that mutates, and
 not the text helper, whose single-field answers are not idempotent in content.
 
+## ADR-014 — Decision connections stay open and open early (2026-09-24)
+
+A new TLS + HTTP/2 connection to TypeSafe costs ~325 ms (499 ms cold vs 173 ms warm, same
+request). httpx closes an idle pooled connection after 5 s by default, so any decision more
+than 5 s after the previous one paid it again, and a fresh process always paid it inside its
+first decision (first-decision tail 780-950 ms against a 287 ms median). TypeSafe kept idle
+connections for 90 s+ when probed, so both decision clients now keep them for
+`JEV_KEEPALIVE_SECONDS` (120), and `Agent()` opens both with an unauthenticated HEAD while the
+tab opens (skipped without a key, so tests stay offline). Matched live Flights runs, 14
+decisions each: 12.4-12.6 s before, 10.4-11.7 s after (3/3 verified); decision time 6.4-6.8 s
+to 4.6-5.6 s; first decision 839-951 ms to 329-415 ms.
+
 ## ADR-003 — No secret store; the profile holds non-secret data
 
 `~/.jev-ultrafast/profile/` stores identity fields and site usernames as
