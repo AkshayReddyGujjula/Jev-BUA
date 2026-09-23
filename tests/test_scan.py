@@ -28,7 +28,7 @@ def stub(pages):
 
     queue = list(pages)
     b.act = act
-    b.observe = lambda screenshot=True: queue.pop(0)
+    b.observe = lambda screenshot=True, deadline=None: queue.pop(0)
     b.seen_calls = seen_calls
     return b
 
@@ -99,6 +99,23 @@ def test_scan_respects_a_deadline():
     b = stub(rising)
     out, screens, found = b.scan(SCROLL, "never", page("item start"), deadline=time.monotonic() - 1)
     assert screens == 0                       # already past the deadline: hands straight back
+
+
+def test_scan_rechecks_a_progress_deadline_after_each_observation():
+    import time
+
+    b = stub([page("second"), page("third"), page("never read")])
+    seen = []
+
+    def deadline():
+        return time.monotonic() + 1 if len(seen) < 2 else time.monotonic() - 1
+
+    _, screens, found = b.scan(
+        SCROLL, "missing", page("first"), deadline=deadline,
+        on_observe=lambda observed: seen.append(observed),
+    )
+    assert screens == 2 and not found
+    assert len(seen) == 2
 
 
 def test_scan_walks_a_long_list_to_the_bottom():

@@ -82,38 +82,24 @@ def value_selectors_for(expect):
 
 
 def page_facts(browser, selectors=(), value_selectors=()):
-    """Read the current page through a live Browser. Missing values degrade, never raise.
+    """Read the current page through a live Browser, or fail the whole readback.
 
     Reading again here, through the browser itself, is what makes the result independent
     of whatever the agent last observed.
     """
-    counts = {}
-    for selector in selectors:
-        try:
-            counts[selector] = browser.evaluate(
-                f"document.querySelectorAll({json.dumps(selector)}).length"
-            ) or 0
-        except Exception:
-            counts[selector] = 0
-    values = {}
-    for selector in value_selectors:
-        try:
-            values[selector] = browser.evaluate(
-                f"(document.querySelector({json.dumps(selector)}) || {{}}).value ?? ''"
-            ) or ""
-        except Exception:
-            values[selector] = ""
-    text = ""
-    try:
-        text = browser.evaluate("document.body.innerText") or ""
-    except Exception:
-        pass
-    try:
-        url = browser.evaluate("location.href") or getattr(browser, "last_url", "")
-    except Exception:
-        url = getattr(browser, "last_url", "")
-    try:
-        title = browser.evaluate("document.title") or ""
-    except Exception:
-        title = ""
+    counts = {
+        selector: browser.evaluate(f"document.querySelectorAll({json.dumps(selector)}).length") or 0
+        for selector in selectors
+    }
+    values = {
+        selector: browser.evaluate(
+            f"(document.querySelector({json.dumps(selector)}) || {{}}).value ?? ''"
+        ) or ""
+        for selector in value_selectors
+    }
+    text = browser.evaluate("document.body.innerText") or ""
+    url = browser.evaluate("location.href")
+    title = browser.evaluate("document.title") or ""
+    if not url:
+        raise RuntimeError("Live readback did not return a URL")
     return {"url": url, "title": title, "text": text, "selector_counts": counts, "values": values}

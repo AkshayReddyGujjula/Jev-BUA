@@ -199,7 +199,10 @@ class Browser:
         try:
             return browser_operation(request)
         except RuntimeError as error:
-            if not self._session_lost(error) or not self.reattach():
+            # A lost reply does not tell us whether an action already ran. Replaying
+            # it could submit a form, buy something, or type twice. Observations are
+            # safe to retry after reattaching; mutations must surface as uncertain.
+            if request.get("operation") != "observe" or not self._session_lost(error) or not self.reattach():
                 raise
             return browser_operation({**request, "session": self.session})
 
@@ -316,7 +319,7 @@ class Browser:
                 return False
             time.sleep(0.25)
 
-    def scan(self, action, target, page, max_screens=None, deadline=None):
+    def scan(self, action, target, page, max_screens=None, deadline=None, on_observe=None):
         """Scroll until `target` appears. Returns (page, screens, found).
 
         A caller-supplied target turns a scan into deterministic work: once the model has
@@ -333,14 +336,20 @@ class Browser:
         barren = 0
         found = target_visible(page, needle)
         while not found and screens < (max_screens or SCAN_MAX_SCREENS):
-            if deadline is not None and time.monotonic() >= deadline:
+            current_deadline = deadline() if callable(deadline) else deadline
+            if current_deadline is not None and time.monotonic() >= current_deadline:
                 break
             current = next((a for a in page["actions"] if a["id"] == action["id"]), None)
             if current is None:
                 break                      # no scroll offered: end of the list
             self.act(current, page)
-            page = self.observe(screenshot=False)
+            page = (
+                self.observe(screenshot=False, deadline=current_deadline)
+                if current_deadline is not None else self.observe(screenshot=False)
+            )
             screens += 1
+            if on_observe is not None:
+                on_observe(page)
             if target_visible(page, needle):
                 found = True
                 break

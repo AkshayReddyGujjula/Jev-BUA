@@ -484,7 +484,7 @@ def test_call_heals_a_dropped_session(monkeypatch):
     assert sessions == ["dead", "fresh"]
 
 
-def test_run_task_retries_once_on_session_errors(monkeypatch):
+def test_run_task_never_retries_an_ambiguous_session_error(monkeypatch):
     import run_task
 
     calls = {"n": 0}
@@ -495,12 +495,29 @@ def test_run_task_retries_once_on_session_errors(monkeypatch):
             raise RuntimeError("{'code': -32001, 'message': 'Session with given id not found.'}")
         return [], None, 0
 
-    restarts = []
     monkeypatch.setattr(run_task, "run_once", fake_run_once)
-    monkeypatch.setattr(run_task, "restart_daemon", lambda: restarts.append(True))
     monkeypatch.setattr(sys, "argv", ["run_task.py", "--goal", "g", "--url", "https://example.test/"])
-    assert run_task.main() == 0
-    assert calls["n"] == 2 and restarts
+    assert run_task.main() == 1
+    assert calls["n"] == 1
+
+
+def test_browser_does_not_redispatch_an_ambiguous_action(monkeypatch):
+    import jev_ultrafast.browser as browser
+
+    b = browser.Browser.__new__(browser.Browser)
+    calls = []
+
+    def lost_reply(request):
+        calls.append(request)
+        raise RuntimeError("Session with given id not found")
+
+    monkeypatch.setattr(browser, "browser_operation", lost_reply)
+    reattach = Mock(return_value=True)
+    monkeypatch.setattr(b, "reattach", reattach)
+    with pytest.raises(RuntimeError, match="Session with given id"):
+        b._browser_operation({"operation": "act", "action": {"kind": "click"}})
+    assert len(calls) == 1
+    reattach.assert_not_called()
 
 
 def test_navigation_during_prediction_reobserves_without_action(runner):
@@ -851,6 +868,7 @@ def test_outcome_precedence():
     assert outcomes.resolve("done") == "unknown"
     assert outcomes.resolve("abstained") == "abstained"
     assert outcomes.resolve("stalled") == "budget_exhausted"
+    assert outcomes.resolve("budget_exhausted") == "budget_exhausted"
     assert outcomes.resolve("done", checks=[]) == "unknown"
 
 
@@ -876,6 +894,23 @@ def test_a_run_without_an_expectation_is_never_verified(runner):
     runner.state["status"] = "done"
     runner._finalize()
     assert runner.state["outcome"] == "unknown"
+
+
+def test_failed_live_readback_cannot_verify_a_stale_observation(runner):
+    runner.expect = {"url_contains": "example"}
+    runner.state["browser"].evaluate = Mock(side_effect=ConnectionError("browser gone"))
+    runner.state["status"] = "done"
+    runner._finalize()
+    assert runner.state["outcome"] == "unknown"
+    assert runner.state.get("checks") is None
+    assert runner.state["readback_error"] == "ConnectionError"
+
+
+def test_explicit_budget_stop_is_terminal_and_finalized(runner):
+    state = runner.stop_budget("caller time limit")
+    assert state["status"] == "budget_exhausted"
+    assert state["outcome"] == "budget_exhausted"
+    assert state["budget_reason"] == "caller time limit"
 
 
 @pytest.mark.parametrize("confidence,irreversible,gated", [

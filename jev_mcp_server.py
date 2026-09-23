@@ -68,6 +68,7 @@ def _replay_dir(wanted):
 # to its own URL first, so a warm tab never leaks page state between verification runs.
 _WARM = {"browser": None, "mode": None, "url": None}
 _WARM_LOCK = threading.Lock()
+_FENCED_WORKER = None
 
 
 def _warm_enabled():
@@ -330,15 +331,22 @@ def tool_browser_do(args):
             started = time.monotonic()
             for _ in agent.run():
                 if time.monotonic() - started > deadline:
+                    agent.stop_budget(f"{deadline:g}s MCP budget")
                     break
             state = agent.snapshot()
             # Independent of the agent's opinion: read the page again and assert on it.
-            facts = page_facts(
-                browser or agent.browser, selectors_for(expect), value_selectors_for(expect)
-            )
-            # The collector artifact travels with the facts so harvest_at_least can be
-            # judged here exactly as it is inside the library.
-            facts["harvest"] = state.get("harvest") or {"items": 0}
+            try:
+                facts = page_facts(
+                    browser or agent.browser, selectors_for(expect), value_selectors_for(expect)
+                )
+            except Exception as error:
+                readback_error = type(error).__name__
+                facts = None
+            else:
+                readback_error = None
+                # The collector artifact travels with the facts so harvest_at_least can
+                # be judged here exactly as it is inside the library.
+                facts["harvest"] = state.get("harvest") or {"items": 0}
     finally:
         if max_steps:
             if previous_steps is None:
@@ -348,12 +356,9 @@ def tool_browser_do(args):
         if browser is not None and not _warm_enabled() and not args.get("keep_open"):
             browser.close()
 
-    verified, detail = evaluate_expectations(expect, facts)
-    # The agent already resolved its own outcome against the same readback; prefer it so
-    # `abstained` and `verified-with-an-abstained-status` survive the MCP boundary.
-    outcome = state.get("outcome") or resolve(
+    verified, detail = evaluate_expectations(expect, facts) if facts is not None else (None, [])
+    outcome = "unknown" if readback_error else resolve(
         state["status"], checks=detail if expect else None,
-        budget_exhausted=state["status"] == "stalled" or bool(state.get("stall")),
         abstained=state["status"] == "abstained",
     )
     return {
@@ -361,8 +366,9 @@ def tool_browser_do(args):
         "outcome": outcome,
         "verified": verified,
         "checks": detail,
-        "url": facts["url"],
-        "title": facts["title"],
+        "url": facts["url"] if facts is not None else None,
+        "title": facts["title"] if facts is not None else None,
+        "readback_error": readback_error,
         "elapsed_ms": state.get("elapsed_ms"),
         "evidence": state.get("evidence"),
         "replay": state.get("replay"),
@@ -480,21 +486,27 @@ def tool_browser_checks(args):
     import subprocess
     import tempfile
 
-    out = Path(tempfile.gettempdir()) / "jev-mcp-checks.json"
-    spec_path = Path(tempfile.gettempdir()) / "jev-mcp-checks-spec.json"
-    spec_path.write_text(json.dumps({
-        "base_url": args["base_url"],
-        "defaults": {"max_seconds": 60, "tab": "background"},
-        "checks": args["checks"],
-    }), encoding="utf-8")
-    proc = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "run_checks.py"), str(spec_path),
-         "--workers", str(min(int(args.get("workers", 4)), 10)), "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if not out.exists():
-        return {"error": "checks did not run", "detail": (proc.stdout or proc.stderr)[-800:]}
-    report = json.loads(out.read_text(encoding="utf-8"))
+    # Each invocation owns both files. A failed preflight must never return a prior
+    # invocation's report, and concurrent MCP server processes must not race.
+    with tempfile.TemporaryDirectory(prefix="jev-mcp-checks-") as temp_dir:
+        out = Path(temp_dir) / "report.json"
+        spec_path = Path(temp_dir) / "spec.json"
+        spec_path.write_text(json.dumps({
+            "base_url": args["base_url"],
+            "defaults": {"max_seconds": 60, "tab": "background"},
+            "checks": args["checks"],
+        }), encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "run_checks.py"), str(spec_path),
+             "--workers", str(min(int(args.get("workers", 4)), 10)), "--out", str(out)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        if not out.exists():
+            return {"error": "checks did not run", "exit_code": proc.returncode,
+                    "detail": (proc.stdout or proc.stderr)[-800:]}
+        report = json.loads(out.read_text(encoding="utf-8"))
+    if not isinstance(report, dict) or not all(k in report for k in ("passed", "total", "results")):
+        return {"error": "checks returned an invalid report", "exit_code": proc.returncode}
     return {
         "passed": report["passed"], "total": report["total"],
         "wall_s": report["wall_s"], "serial_equivalent_s": report["serial_equivalent_s"],
@@ -516,28 +528,19 @@ def send(payload):
     sys.stdout.flush()
 
 
-def _close_quietly(browser):
-    try:
-        browser.close()
-    except Exception:
-        pass
-
-
-def _abandon_warm():
-    """Forget the warm browser without blocking on the one a stuck call may still hold."""
-    browser, _WARM["browser"] = _WARM["browser"], None
-    _WARM["mode"] = _WARM["url"] = None
-    if browser is not None:
-        threading.Thread(target=_close_quietly, args=(browser,), daemon=True).start()
-
-
 def _bounded(handler, arguments, timeout=None):
     """Run a tool handler under a wall-clock deadline.
 
-    The worker is a daemon thread, so an abandoned call can never block process exit. On
-    timeout the warm session is dropped rather than shared with a call that never returned,
-    and the caller gets a structured error telling it the run is stalled.
+    An abandoned worker may still be executing. Fence the entire server until it exits;
+    closing its browser while it is running would let it reattach to another task's tab.
     """
+    global _FENCED_WORKER
+    if _FENCED_WORKER is not None:
+        if _FENCED_WORKER.is_alive():
+            return {"error": "a previous tool call is still running after timeout; browser access is fenced",
+                    "abandoned": True}
+        _FENCED_WORKER = None
+        _drop_warm()
     limit = CALL_TIMEOUT_S if timeout is None else float(timeout)
     if limit <= 0:
         return handler(arguments)
@@ -553,7 +556,7 @@ def _bounded(handler, arguments, timeout=None):
     worker.start()
     worker.join(limit)
     if worker.is_alive():
-        _abandon_warm()
+        _FENCED_WORKER = worker
         return {
             "error": (
                 f"tool call exceeded {limit:g}s and was abandoned; the page never answered. "

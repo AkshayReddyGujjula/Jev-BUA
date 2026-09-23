@@ -30,7 +30,7 @@ from .recovery import PLANNER_TIMEOUT, propose_action
 TERMINAL = {"DONE", "BLOCKED", "ABSTAIN"}
 # "stalled" and "abstained" are terminal too: the anti-loop bound fired, or a risk gate
 # refused to act. Both end the run honestly instead of taking another lap.
-TERMINAL_STATUS = {"done", "blocked", "stalled", "abstained"}
+TERMINAL_STATUS = {"done", "blocked", "stalled", "abstained", "budget_exhausted"}
 RECOVERY_LIMIT = 6
 ESCALATION_LIMIT = 2
 DEAD_OUTCOMES = {"no visible change", "action failed", "loop detected"}
@@ -391,6 +391,19 @@ class Agent:
         self._finalize()
         return self.snapshot()
 
+    def stop_budget(self, reason):
+        """End a run at an explicit action, decision, or caller time budget."""
+        state = self.state
+        if state["status"] in TERMINAL_STATUS:
+            return self.snapshot()
+        state["decision"] = None
+        state["status"] = "budget_exhausted"
+        state["budget_reason"] = str(reason)
+        if state["started_at"] is not None:
+            state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+        self._finalize()
+        return self.snapshot()
+
     def _finalize(self):
         """Resolve the run's outcome from an independent readback, exactly once.
 
@@ -409,25 +422,23 @@ class Agent:
                 facts = page_facts(
                     state["browser"], selectors_for(expect), value_selectors_for(expect)
                 )
-            except Exception:
-                facts = {
-                    "url": state["page"].get("url"),
-                    "title": state["page"].get("title"),
-                    "text": state["page"].get("text"),
-                    "selector_counts": {},
-                    "values": {},
+            except Exception as error:
+                # The last observation is not an independent verification. In
+                # particular, an absent-text assertion could otherwise pass when
+                # the browser stopped answering.
+                state["readback_error"] = type(error).__name__
+            else:
+                facts["harvest"] = {
+                    "items": (state.get("harvest") or {}).get("items", 0),
+                    "file": (state.get("harvest") or {}).get("file"),
                 }
-            facts["harvest"] = {
-                "items": (state.get("harvest") or {}).get("items", 0),
-                "file": (state.get("harvest") or {}).get("file"),
-            }
-            _, checks = evaluate_expectations(expect, facts)
-            state["checks"] = checks
-            state["readback"] = {
-                "url": facts.get("url"),
-                "title": facts.get("title"),
-                "text_chars": len(facts.get("text") or ""),
-            }
+                _, checks = evaluate_expectations(expect, facts)
+                state["checks"] = checks
+                state["readback"] = {
+                    "url": facts.get("url"),
+                    "title": facts.get("title"),
+                    "text_chars": len(facts.get("text") or ""),
+                }
         state["outcome"] = resolve(
             state.get("status"),
             checks=checks,
@@ -1054,7 +1065,7 @@ class Agent:
             if state["status"] in TERMINAL_STATUS:
                 raise ValueError("This run has stopped. Start a fresh demo.")
             if len(state["decisions"]) >= self.step_budget() * 2:
-                raise ValueError("Reached the demo's model-call budget")
+                return self.stop_budget("model-call budget")
             # Bound the decision by the time left before the anti-loop deadline, and refuse
             # to start one that cannot finish inside it. Without this a single slow decision
             # could overshoot the deadline by up to the provider timeout.
@@ -1283,8 +1294,7 @@ class Agent:
             else:
                 action = next(a for a in page["actions"] if a["id"] == selected)
             if len(state["history"]) >= self.step_budget():
-                state["status"] = "blocked"
-                raise ValueError(f"Stopped at the {self.step_budget()}-action budget")
+                return self.stop_budget(f"{self.step_budget()}-action budget")
             # An exact-label memory fill is code-validated: the value is user data, and the
             # element is only trusted when exactly one fill action on the page carries that
             # label. A second field with the same label is the wrong-field risk, so
@@ -1439,8 +1449,11 @@ class Agent:
                 # One decision buys the whole scan. Every screen is still observed inside
                 # Browser.scan, so the target cannot be scrolled past unseen.
                 try:
+                    scan_end = time.monotonic() + SCAN_MAX_S
                     scanned_page, screens, found = state["browser"].scan(
-                        action, self.find, page, deadline=time.monotonic() + SCAN_MAX_S
+                        action, self.find, page,
+                        deadline=lambda: min(scan_end, self.read_deadline() or scan_end),
+                        on_observe=self.note_progress,
                     )
                     scan = {"target": self.find, "screens": screens, "found": found}
                     state["page"] = scanned_page

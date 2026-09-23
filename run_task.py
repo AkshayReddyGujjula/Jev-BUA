@@ -20,7 +20,6 @@ from jev_ultrafast import Agent
 TAB_MODES = ("foreground", "background", "active")
 HISTORY_FIELDS = ("step", "action", "kind", "text", "outcome", "page_changed", "confidence",
                   "recovery", "scan", "error")
-SESSION_ERROR = "session with given id"
 
 
 def load_dotenv():
@@ -87,8 +86,10 @@ def run_once(args):
         for state in agent.run():
             trail.append(summarize(state))
             if len(trail) > args.max_steps:
+                trail.append(summarize(agent.stop_budget(f"{args.max_steps}-step caller budget")))
                 return trail, f"stopped after {args.max_steps} actions", 2
             if time.monotonic() - started > args.max_seconds:
+                trail.append(summarize(agent.stop_budget(f"{args.max_seconds}s caller budget")))
                 return trail, f"stopped after the {args.max_seconds}s budget", 2
         status = agent.state.get("status")
         stall = agent.state.get("stall")
@@ -106,16 +107,6 @@ def run_once(args):
         # hid failures. The outcome says whether anything was actually verified.
         return trail, f"ended as {status} ({outcome})", 2
     return trail, None, 0
-
-
-def restart_daemon():
-    """Best effort: drop a daemon whose browser connection is wedged, so the retry gets a fresh one."""
-    try:
-        from browser_harness.admin import restart_daemon as restart
-
-        restart()
-    except Exception:
-        pass
 
 
 def _json_arg(parser, raw, flag):
@@ -234,23 +225,17 @@ def main():
     if not args.url and mode != "active":
         parser.error("--url is required unless --tab active")
 
-    for attempt in (1, 2):
-        try:
-            trail, error, code = run_once(args)
-        except Exception as exc:
-            message = f"{type(exc).__name__}: {exc}"
-            if attempt == 1 and SESSION_ERROR in message.lower():
-                restart_daemon()
-                continue
-            # Running out of budget is a budget stop, not a crash, and the exit code says
-            # which one happened.
-            return report(mode, [], message, 2 if "budget" in message.lower() else 1)
-        if error:
-            return report(mode, trail, error, code)
-        final = trail[-1] if trail else {"status": "blocked"}
-        print(json.dumps({"tab_mode": mode, "result": final, "trail": trail}, indent=2, default=str))
-        return 0
-    return 1
+    try:
+        trail, error, code = run_once(args)
+    except Exception as exc:
+        # An exception after dispatch is ambiguous. Starting the whole goal again can
+        # repeat a mutation; the caller must inspect the browser before a new run.
+        return report(mode, [], f"{type(exc).__name__}: {exc}", 1)
+    if error:
+        return report(mode, trail, error, code)
+    final = trail[-1] if trail else {"status": "blocked"}
+    print(json.dumps({"tab_mode": mode, "result": final, "trail": trail}, indent=2, default=str))
+    return 0
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ def resolve(status, checks=None, budget_exhausted=False, abstained=False):
         return "verified" if all(item.get("pass") for item in checks) else "refuted"
     if abstained or status == "abstained":
         return "abstained"
-    if budget_exhausted or status == "stalled":
+    if budget_exhausted or status in {"stalled", "budget_exhausted"}:
         return "budget_exhausted"
     return "unknown"
 

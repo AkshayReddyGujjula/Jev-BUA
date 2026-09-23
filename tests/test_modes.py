@@ -520,14 +520,21 @@ def test_default_floor_still_withholds_the_same_submit(root):
 
 def test_mcp_tool_calls_are_bounded_by_a_deadline():
     import time as time_module
+    from threading import Event
 
     import jev_mcp_server
 
     assert jev_mcp_server._bounded(lambda args: {"ok": args}, {"x": 1}, timeout=1) == {"ok": {"x": 1}}
+    release = Event()
     started = time_module.monotonic()
-    result = jev_mcp_server._bounded(lambda args: time_module.sleep(5), {}, timeout=0.2)
+    result = jev_mcp_server._bounded(lambda args: release.wait(5), {}, timeout=0.2)
     assert result["abandoned"] is True
     assert time_module.monotonic() - started < 3
+    fenced = jev_mcp_server._bounded(lambda args: {"unsafe": True}, {}, timeout=1)
+    assert fenced["abandoned"] is True
+    assert "fenced" in fenced["error"]
+    release.set()
+    jev_mcp_server._FENCED_WORKER.join(1)
 
     def boom(args):
         raise ValueError("nope")
