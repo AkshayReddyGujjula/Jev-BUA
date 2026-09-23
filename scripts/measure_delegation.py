@@ -1,10 +1,11 @@
 """Cold/warm measurement for the delegated task interface on a local fixture.
 
 Each run is a real delegated task (`DelegatedTask`, the same code `browser_task`
-drives) against `scripts/trap_server.py`. The only difference between the arms
-is the decision cache: the cold arm runs with `JEV_CACHE=0`, the warm arm with
-the cache enabled after one warm-up run. Every run must end `outcome=verified`
-or the measurement is not a pass.
+drives) against `scripts/trap_server.py` (`/trap?mode=simple`, a deterministic
+search with no form submit, so no approval checkpoint interrupts the run). The
+only difference between the arms is the decision cache: the cold arm runs with
+`JEV_CACHE=0`, the warm arm with the cache enabled after one warm-up run. Every
+run must end `outcome=verified` or the measurement is not a pass.
 
 Start the fixture first:
 
@@ -29,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 GOAL = "Search the catalogue for laptops and open the results."
 VALUES = {"Search the catalogue": "laptops"}
-EXPECT = {"url_contains": "mode=results", "text_contains": ["laptops"]}
+EXPECT = {"text_contains": ["Results for laptops"]}
 
 
 def run_once(url, out_dir, *, cache, arm):
@@ -98,7 +99,7 @@ def summarize(arm, runs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default="http://127.0.0.1:8791/trap?mode=form")
+    parser.add_argument("--url", default="http://127.0.0.1:8791/trap?mode=simple")
     parser.add_argument("--pairs", type=int, default=3,
                         help="cold/warm pairs; each pair runs one cold then one warm task")
     parser.add_argument("--out", default=str(Path("artifacts") / "delegation-measurement"))

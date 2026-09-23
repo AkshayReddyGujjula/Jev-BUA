@@ -103,6 +103,26 @@ FORM = f"""<!doctype html><html><head><title>Search the catalogue</title></head>
 </form>
 </body></html>"""
 
+# A deterministic search fixture with no form submit and no committal label, so a
+# delegated task can run unattended. `form` above exercises the approval boundary;
+# this one exists for measurement and smoke runs.
+SIMPLE = f"""<!doctype html><html><head><title>Search the catalogue</title></head>
+<body style="{STYLE}">
+<h1>Catalogue</h1>
+<label for="q">Search the catalogue</label>
+<input id="q" type="search" placeholder="Search the catalogue">
+<button id="go" type="button">Search</button>
+<p id="result" hidden></p>
+<script>
+document.getElementById('go').onclick = () => {{
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  const result = document.getElementById('result');
+  result.textContent = 'Results for ' + q;
+  result.hidden = false;
+}};
+</script></body></html>"""
+
 
 def results_page(query, sort):
     return f"""<!doctype html><html><head><title>Results for {query}</title></head>
@@ -196,6 +216,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(LOADING)
         elif mode == "form":
             self._send(FORM)
+        elif mode == "simple":
+            self._send(SIMPLE)
         elif mode == "results":
             self._send(results_page((params.get("q") or [""])[0], (params.get("sort") or [""])[0]))
         elif mode == "list":

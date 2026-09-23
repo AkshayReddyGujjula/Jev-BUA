@@ -474,6 +474,8 @@ class Agent:
                 stall=state.get("stall"),
                 gate=state.get("gate"),
                 failure_class=state.get("failure_class"),
+                blocked_reason=state.get("blocked_reason"),
+                budget_reason=state.get("budget_reason"),
                 cache_hits=state.get("cache_hits", 0),
                 cache_misses=state.get("cache_misses", 0),
             )
@@ -1100,23 +1102,39 @@ class Agent:
             if left < MIN_DECIDE_S:
                 return self._stop_stalled()
             skip_cache = state.pop("skip_cache_once", False)
-            decision = choose(
-                state["page"], state["goal"], state["history"],
-                timeout=min(getattr(self, "decide_timeout", DECIDE_TIMEOUT), max(MIN_DECIDE_S, left)),
-                # Re-observing the same unchanged page once is enough; offering it again
-                # would only replay the same non-answer. Refusals below still get their
-                # own fresh look through the gate.
-                allow_reobserve=(
-                    state.get("reobserves", 0) < REOBSERVE_LIMIT
-                    and state["page"]["fingerprint"] not in (state.get("reobserved") or {})
-                ),
-                # A gate retry must be a genuine second reading, not a replayed answer.
-                use_cache=getattr(self, "use_cache", True) and not skip_cache,
-                model_id=getattr(self, "_operation_model", None),
-                mode_state=(
-                    self.mode.decision_state() if getattr(self, "mode", None) else None
-                ),
-            )
+            decision = None
+            for attempt in range(2):
+                try:
+                    decision = choose(
+                        state["page"], state["goal"], state["history"],
+                        timeout=min(getattr(self, "decide_timeout", DECIDE_TIMEOUT), max(MIN_DECIDE_S, left)),
+                        # Re-observing the same unchanged page once is enough; offering it again
+                        # would only replay the same non-answer. Refusals below still get their
+                        # own fresh look through the gate.
+                        allow_reobserve=(
+                            state.get("reobserves", 0) < REOBSERVE_LIMIT
+                            and state["page"]["fingerprint"] not in (state.get("reobserved") or {})
+                        ),
+                        # A gate retry must be a genuine second reading, not a replayed answer.
+                        use_cache=getattr(self, "use_cache", True) and not skip_cache,
+                        model_id=getattr(self, "_operation_model", None),
+                        mode_state=(
+                            self.mode.decision_state() if getattr(self, "mode", None) else None
+                        ),
+                    )
+                    break
+                except ValueError as error:
+                    # A malformed TypeSafe answer is not a page state, and the client-side
+                    # validation is never relaxed. Take one live re-reading, then end the run
+                    # honestly instead of escaping the loop with no status and no outcome.
+                    state["invalid_answers"] = state.get("invalid_answers", 0) + 1
+                    if attempt:
+                        state["status"] = "blocked"
+                        state["blocked_reason"] = f"invalid model answer: {error}"[:300]
+                        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+                        self._finalize()
+                        return self.snapshot()
+                    skip_cache = True
             # If the decision itself used up the budget, stop without acting. Without this
             # one more action plus its observation could run while the deadline had already
             # passed (measured: a 6.4 s window against a 5 s limit), and that action is also

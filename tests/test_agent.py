@@ -653,6 +653,39 @@ def test_repeated_no_effect_action_without_alternative_stops(runner, monkeypatch
     runner.state["browser"].act.assert_not_called()
 
 
+def test_invalid_model_answer_retries_once_then_blocks(runner, monkeypatch):
+    """A malformed TypeSafe answer is re-read once, then ends the run honestly."""
+    calls = []
+
+    def bad_choose(*args, **kwargs):
+        calls.append(1)
+        raise ValueError("Invalid TypeSafe response (chosen id is not the argmax)")
+
+    monkeypatch.setattr(loop, "choose", bad_choose)
+    state = runner.command("predict")
+    assert len(calls) == 2                       # one live re-reading, not a cached replay
+    assert state["status"] == "blocked"
+    assert state["outcome"] == "unknown"
+    assert "invalid model answer" in (runner.state.get("blocked_reason") or "")
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_invalid_model_answer_recovers_on_the_second_reading(runner, monkeypatch):
+    calls = []
+
+    def flaky_choose(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ValueError("Invalid TypeSafe response (chosen id is not the argmax)")
+        return decision("e1")
+
+    monkeypatch.setattr(loop, "choose", flaky_choose)
+    state = runner.command("predict")
+    assert len(calls) == 2
+    assert state["status"] == "predicted"
+    assert state["decision"]["choice"] == "e1"
+
+
 def test_goal_watcher_stops_the_tick_loop(runner, monkeypatch):
     runner.state["history"] = [{"step": 1, "choice": "e1", "kind": "click", "outcome": "page changed"}]
     monkeypatch.setattr(loop, "choose", lambda *args, **kwargs: {
