@@ -366,3 +366,114 @@ def test_mcp_task_tools_keep_the_same_session_across_login_and_approval(monkeypa
     assert jev_mcp_server._TASKS.current is None
     task_tools = {tool["name"]: tool for tool in jev_mcp_server.TOOLS}
     assert task_tools["browser_task"]["annotations"]["destructiveHint"] is True
+
+
+def _mcp(monkeypatch, agent_factory, browser_page=None):
+    import AgentJevUltraFast
+    import AgentJevUltraFast.browser as browser_module
+    import jev_mcp_server
+
+    monkeypatch.setattr(browser_module, "Browser",
+                        lambda url, *, follow_tabs=None: FakeBrowser(browser_page or page()))
+    monkeypatch.setattr(AgentJevUltraFast, "Agent", agent_factory)
+    monkeypatch.setattr(jev_mcp_server, "_TASKS", TaskRegistry())
+    monkeypatch.setattr(jev_mcp_server, "_load_env", lambda: None)
+    monkeypatch.setattr(jev_mcp_server, "_drop_warm", lambda: None)
+    monkeypatch.setattr(jev_mcp_server, "_evidence_dir", lambda: None)
+
+    def call(name, arguments):
+        return jev_mcp_server.handle({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        })["result"]
+
+    return jev_mcp_server, call
+
+
+def test_exception_inside_a_task_slice_does_not_wedge_the_server(monkeypatch):
+    """Regression: a provider error left the task registered and every later call refused."""
+
+    class ExplodingAgent(FakeAgent):
+        def command(self, name, body=None):
+            raise RuntimeError("Model connection failed; no action executed.")
+
+    server, call = _mcp(monkeypatch, lambda url, goal, **kw: ExplodingAgent(page(), "e1"))
+    failed = call("browser_task", {"url": "https://example.test/setup", "goal": "Set up"})
+    assert failed["isError"] is True
+    assert server._TASKS.current is None
+    # The next task is accepted, not refused with "a delegated task owns this session".
+    monkeypatch.setattr("AgentJevUltraFast.Agent",
+                        lambda url, goal, **kw: FakeAgent(page(password=True), "e1"))
+    again = call("browser_task", {"url": "https://example.test/setup", "goal": "Set up"})
+    assert again["isError"] is False
+
+
+def test_bad_slice_seconds_is_rejected_before_registration(monkeypatch):
+    server, call = _mcp(monkeypatch, lambda url, goal, **kw: FakeAgent(page(), "e1"))
+    reply = call("browser_task", {"url": "https://example.test/setup", "goal": "Set up",
+                                  "slice_seconds": "soon"})
+    assert reply["isError"] is True
+    assert server._TASKS.current is None and server._TASKS.reservation is None
+
+
+def test_expired_yielded_task_is_cleared_on_the_next_call(monkeypatch):
+    import json
+
+    server, call = _mcp(monkeypatch, lambda url, goal, **kw: FakeAgent(page(password=True), "e1"))
+    first = json.loads(call("browser_task", {"url": "https://example.test/setup",
+                                             "goal": "Set up"})["content"][0]["text"])
+    assert first["phase"] == "needs_human"
+    refused = call("browser_state", {})
+    assert refused["isError"] is True
+    # The refusal names the live task so a caller that lost the id can still cancel it.
+    assert first["task_id"] in refused["content"][0]["text"]
+    server._TASKS.current.expires_at = time.monotonic() - 1
+    assert server._TASKS.expire_stale() is True
+    assert server._TASKS.current is None
+
+
+def test_browser_act_requires_the_state_fingerprint(monkeypatch):
+    import jev_mcp_server
+
+    monkeypatch.setattr(jev_mcp_server, "_load_env", lambda: None)
+    monkeypatch.setattr(jev_mcp_server, "_warm_browser",
+                        lambda *a, **k: pytest.fail("no browser work without a fingerprint"))
+    reply = jev_mcp_server.tool_browser_act({"element": "e1", "operation": "CLICK"})
+    assert reply["executed"] is None and "fingerprint is required" in reply["error"]
+    act_tool = next(t for t in jev_mcp_server.TOOLS if t["name"] == "browser_act")
+    assert "fingerprint" in act_tool["inputSchema"]["required"]
+
+
+def test_expiry_never_closes_a_task_whose_worker_was_abandoned():
+    """Regression (review Q3): a fenced worker may still be inside resume's browser calls."""
+    registry = TaskRegistry()
+    task = DelegatedTask(FakeAgent(page(password=True), "e1"), FakeBrowser(page()))
+    registry.add(task)
+    task.drive()
+    assert task.phase == "needs_human"
+    task.expires_at = time.monotonic() - 1
+    task.abandon()                      # what _bounded's timeout path does
+    assert registry.expire_stale() is False
+    assert registry.current is task and task.browser.closed is False
+
+
+def test_mcp_does_not_expire_while_a_worker_is_fenced(monkeypatch):
+    import threading
+
+    import jev_mcp_server
+
+    calls = []
+    registry = TaskRegistry()
+    monkeypatch.setattr(registry, "expire_stale", lambda: calls.append(1))
+    monkeypatch.setattr(jev_mcp_server, "_TASKS", registry)
+    release = threading.Event()
+    worker = threading.Thread(target=release.wait, daemon=True)
+    worker.start()
+    monkeypatch.setattr(jev_mcp_server, "_FENCED_WORKER", worker)
+    try:
+        jev_mcp_server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                               "params": {"name": "browser_state", "arguments": {}}})
+        assert calls == []
+    finally:
+        release.set()
+        worker.join(2)

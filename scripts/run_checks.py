@@ -27,8 +27,11 @@ Check file:
     ]
   }
 
-`expect` keys: url_contains, url_matches (regex), title_contains, text_contains (any of),
-text_absent (none of), selector_count ({selector, at_least}). Anything omitted is not checked.
+`expect` keys: url_contains, url_matches (regex), title_contains, text_contains (any of; a
+bare string is one phrase), text_absent (none of), selector_count ({selector, at_least >= 1}),
+value_contains ({selector, text}), harvest_at_least (>= 1). Anything omitted is not checked;
+an unknown key or a malformed or vacuous value rejects the whole spec before any browser starts.
+Each check's verdict is the agent's own final readback, resolved like browser_do.
 
 Exit code 0 only when every check is verified.
 """
@@ -59,7 +62,7 @@ def load_env():
 
 # Judged by the package's assertion module so the library, the CLI and the MCP server all
 # apply exactly the same rules. Re-exported here because callers import it from run_checks.
-from AgentJevUltraFast.assertions import evaluate_expectations  # noqa: E402
+from AgentJevUltraFast.assertions import evaluate_expectations, normalize_expect  # noqa: E402,F401
 
 
 def run_worker(job, out_path):
@@ -69,8 +72,9 @@ def run_worker(job, out_path):
 
     os.environ["JEV_TAB_MODE"] = job.get("tab", "background")
     os.environ.pop("JEV_KEEP_TAB", None)
-    # In parallel runs one instance must never adopt another instance's tab.
-    os.environ.setdefault("JEV_FOLLOW_TABS", "0")
+    # In parallel runs one instance must never adopt another instance's tab. Forced, not
+    # defaulted: an inherited JEV_FOLLOW_TABS=1 would re-enable adoption.
+    os.environ["JEV_FOLLOW_TABS"] = "0"
     # A check run is a measurement: no mode auto-creation unless the check names one.
     os.environ["JEV_MODES"] = "off"
 
@@ -78,58 +82,47 @@ def run_worker(job, out_path):
     result = {
         "name": job["name"], "url": job["url"], "goal": job["goal"],
         "bu_name": os.environ.get("BU_NAME"), "pid": os.getpid(),
-        "status": None, "verified": None, "checks": [], "wall_s": None,
+        "status": None, "outcome": None, "verified": None, "checks": [], "wall_s": None,
         "actions": 0, "decisions": 0, "final_url": None, "title": None,
         "text_calls": [], "trail": [], "error": None, "stall": None,
     }
     try:
-        with Agent(job["url"], job["goal"], values=job.get("values"),
+        with Agent(job["url"], job["goal"], values=job.get("values"), expect=job.get("expect"),
                    mode=job.get("mode"), collect_steps=job.get("collect_steps")) as agent:
             deadline = time.monotonic() + job.get("max_seconds", 60)
             for _ in agent.run():
                 if time.monotonic() > deadline:
                     result["error"] = f"exceeded the {job.get('max_seconds', 60)}s budget"
+                    # Finalizes the run, which performs the one independent readback.
+                    agent.stop_budget(f"{job.get('max_seconds', 60)}s check budget")
                     break
             state = agent.snapshot()
-            page = state["page"]
-            selectors = {}
-            values = {}
-            expect = job.get("expect") or {}
-            for rule in ([expect["selector_count"]] if "selector_count" in expect else []):
+            # The verdict is the agent's own final readback (one atomic read of the live
+            # page, the same one written to evidence) resolved through outcomes.resolve, so a
+            # check is judged exactly like browser_do and run_task.
+            outcome = state.get("outcome")
+            result["outcome"] = outcome
+            result["verified"] = (
+                {"verified": True, "refuted": False}.get(outcome) if job.get("expect") else None
+            )
+            result["checks"] = state.get("checks") or []
+            result["readback_error"] = state.get("readback_error")
+            location = state.get("readback") or {}
+            if not location:
                 try:
-                    selectors[rule["selector"]] = agent.browser.evaluate(
-                        f"document.querySelectorAll({json.dumps(rule['selector'])}).length"
-                    ) or 0
+                    location = agent.browser.evaluate(
+                        "({url: location.href, title: document.title})"
+                    ) or {}
                 except Exception:
-                    selectors[rule["selector"]] = 0
-            for rule in ([expect["value_contains"]] if "value_contains" in expect else []):
-                try:
-                    values[rule["selector"]] = agent.browser.evaluate(
-                        f"(document.querySelector({json.dumps(rule['selector'])}) || {{}}).value ?? ''"
-                    ) or ""
-                except Exception:
-                    values[rule["selector"]] = ""
-            page_state = {
-                "url": page.get("url"), "title": page.get("title"),
-                "text": page.get("text"), "selector_counts": selectors, "values": values,
-                "harvest": state.get("harvest") or {"items": 0},
-            }
-            # Independent of the agent's opinion: read the page again and assert on it.
-            try:
-                page_state["text"] = agent.browser.evaluate("document.body.innerText") or page.get("text")
-            except Exception:
-                pass
+                    location = {}
             result["status"] = state["status"]
             result["stall"] = state.get("stall")
             result["actions"] = sum(1 for h in state["history"] if not h.get("skipped"))
             result["skipped"] = sum(1 for h in state["history"] if h.get("skipped"))
             result["decisions"] = len(state["decisions"])
             result["text_calls"] = state["text_calls"]
-            result["final_url"] = page_state["url"]
-            result["title"] = page_state["title"]
-            verified, detail = evaluate_expectations(job.get("expect"), page_state)
-            result["verified"] = verified
-            result["checks"] = detail
+            result["final_url"] = location.get("url") or state["page"].get("url")
+            result["title"] = location.get("title") or state["page"].get("title")
             result["trail"] = [
                 {"action": h.get("action"), "outcome": h.get("outcome"), "error": h.get("error")}
                 for h in state["history"][-12:]
@@ -158,6 +151,12 @@ def run_parent(args):
         else:
             job["url"] = path
         job["name"] = check.get("name") or f"check {index + 1}"
+        # Fail the whole spec before launching anything: a malformed expectation must
+        # never surface later as a pass.
+        try:
+            job["expect"] = normalize_expect(job.get("expect")) or {}
+        except ValueError as error:
+            raise SystemExit(f"{job['name']}: {error}") from error
         jobs.append(job)
 
     outdir = Path(args.out).resolve().parent / (Path(args.out).stem + "_parts")

@@ -428,6 +428,25 @@ class TaskRegistry:
                 raise ValueError("Task is abandoned and cannot be resumed")
             return task
 
+    def expire_stale(self):
+        """Cancel a yielded task that waited past its expiry. True when one was cleared.
+
+        Runs on every tool call: expiry used to be checked only when a new task was
+        reserved, which the server refused while a task was registered, so a caller that
+        lost a paused task's id could never recover without a restart.
+        """
+        with self.lock:
+            task = self.current
+            if task is None or time.monotonic() <= task.expires_at:
+                return False
+            # An abandoned task may still have a worker inside a browser call: only the
+            # fence path may close it, after that worker exits.
+            if task.phase not in {"paused", "needs_human"} or task.cancel_requested.is_set():
+                return False
+            task.cancel()
+            self.current = None
+            return True
+
     def release_if_terminal(self, task):
         with self.lock:
             if task.phase in {"complete", "cancelled", "abandoned"} and self.current is task:

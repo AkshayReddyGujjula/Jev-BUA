@@ -9,6 +9,78 @@ server all judge a run the same way.
 import json
 import re
 
+# Every key an expectation may carry. Anything else is a caller mistake, and a mistake must
+# never read as a pass: an unknown key would add no check, and "all of zero checks passed"
+# is True.
+TEXT_LIST_KEYS = ("text_contains", "text_absent")
+STRING_KEYS = ("url_contains", "url_matches", "title_contains")
+EXPECT_KEYS = frozenset(
+    TEXT_LIST_KEYS + STRING_KEYS + ("selector_count", "value_contains", "harvest_at_least")
+)
+
+
+def normalize_expect(expect):
+    """Validate a caller's expectation and return it in canonical shape, or raise ValueError.
+
+    `text_contains` / `text_absent` take a list of phrases ("any of" / "none of"). A bare
+    string is one phrase, not a sequence of characters: iterating it would let a single
+    matching letter verify a page.
+    """
+    if expect is None or expect == {}:
+        return None
+    if not isinstance(expect, dict):
+        raise ValueError("expect must be an object of assertion keys")
+    unknown = sorted(set(expect) - EXPECT_KEYS)
+    if unknown:
+        raise ValueError(f"unknown expect key(s) {unknown}; allowed: {sorted(EXPECT_KEYS)}")
+    out = {}
+    for key in STRING_KEYS:
+        if key in expect:
+            value = expect[key]
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"expect.{key} must be a non-empty string")
+            if key == "url_matches":
+                try:
+                    re.compile(value)
+                except re.error as error:
+                    raise ValueError(f"expect.url_matches is not a valid regex: {error}") from error
+            out[key] = value
+    for key in TEXT_LIST_KEYS:
+        if key in expect:
+            value = expect[key]
+            if isinstance(value, str):
+                value = [value]
+            if (
+                not isinstance(value, (list, tuple))
+                or not value
+                or not all(isinstance(v, str) and v for v in value)
+            ):
+                raise ValueError(f"expect.{key} must be a non-empty string or list of strings")
+            out[key] = list(value)
+    for key in ("selector_count", "value_contains"):
+        if key in expect:
+            rule = expect[key]
+            if not isinstance(rule, dict) or not isinstance(rule.get("selector"), str) \
+                    or not rule["selector"]:
+                raise ValueError(f"expect.{key} must be an object with a non-empty 'selector'")
+            if key == "selector_count":
+                at_least = rule.get("at_least", 1)
+                # 0 would pass on any page: a vacuous check is a mistake, not a verdict.
+                if isinstance(at_least, bool) or not isinstance(at_least, int) or at_least < 1:
+                    raise ValueError("expect.selector_count.at_least must be an integer >= 1")
+                out[key] = {"selector": rule["selector"], "at_least": at_least}
+            else:
+                # An empty string is contained in every value, so it could never fail.
+                if not isinstance(rule.get("text"), str) or not rule["text"]:
+                    raise ValueError("expect.value_contains.text must be a non-empty string")
+                out[key] = {"selector": rule["selector"], "text": rule["text"]}
+    if "harvest_at_least" in expect:
+        value = expect["harvest_at_least"]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError("expect.harvest_at_least must be an integer >= 1")
+        out["harvest_at_least"] = value
+    return out
+
 
 def evaluate_expectations(expect, page_state):
     """Judge a finished run against the real page. Returns (verified, per-check detail).
@@ -17,6 +89,7 @@ def evaluate_expectations(expect, page_state):
     no expectation means no verification. `page_state` needs url, title, text and
     selector_counts.
     """
+    expect = normalize_expect(expect)
     if not expect:
         return None, []
     detail = []
@@ -63,6 +136,9 @@ def evaluate_expectations(expect, page_state):
         count = int((page_state.get("harvest") or {}).get("items") or 0)
         record("harvest_at_least", count >= int(expect["harvest_at_least"]),
                f"harvest -> {count} (need >= {expect['harvest_at_least']})")
+    if not detail:
+        # Unreachable after normalize_expect, and kept so zero checks can never verify.
+        return None, []
     return all(d["pass"] for d in detail), detail
 
 

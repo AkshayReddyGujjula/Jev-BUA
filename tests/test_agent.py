@@ -1454,3 +1454,50 @@ def test_a_replay_run_does_not_rerecord_a_plan(runner, tmp_path):
     runner._finalize()
     assert runner.state["replay"]["recorded"] is None
     assert not list(tmp_path.glob("*.json"))
+
+
+def test_provider_failure_retries_once_then_blocks_with_reason(runner, monkeypatch):
+    """A decision-provider timeout/outage must end the run honestly, not escape run()."""
+    calls = []
+
+    def down(*args, **kwargs):
+        calls.append(kwargs.get("timeout"))
+        raise RuntimeError("Model connection failed; no action executed.")
+
+    monkeypatch.setattr(loop, "choose", down)
+    state = runner.command("predict")
+    assert len(calls) == 2
+    assert state["status"] == "blocked"
+    assert state["outcome"] == "unknown"
+    assert "decision provider unavailable" in (runner.state.get("blocked_reason") or "")
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_provider_failure_recovers_on_retry(runner, monkeypatch):
+    calls = []
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("Model call exceeded its 3s budget; no action executed.")
+        return decision("e1")
+
+    monkeypatch.setattr(loop, "choose", flaky)
+    state = runner.command("predict")
+    assert state["status"] == "predicted" and state["decision"]["choice"] == "e1"
+
+
+def test_provider_retry_is_not_started_past_the_deadline(runner, monkeypatch):
+    def slow_failure(*args, **kwargs):
+        # The first attempt used up the anti-loop window.
+        runner.state["progress_at"] -= loop.STALL_LIMIT_S
+        raise RuntimeError("Model call exceeded its 3s budget; no action executed.")
+
+    monkeypatch.setattr(loop, "choose", slow_failure)
+    state = runner.command("predict")
+    assert state["status"] == "stalled"
+
+
+def test_malformed_expect_fails_at_construction():
+    with pytest.raises(ValueError):
+        loop.normalize_expect({"text_contain": ["x"]})

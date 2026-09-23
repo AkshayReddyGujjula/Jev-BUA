@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from AgentJevUltraFast import Agent
+from AgentJevUltraFast.assertions import normalize_expect
 
 TAB_MODES = ("foreground", "background", "active")
 HISTORY_FIELDS = ("step", "action", "kind", "text", "outcome", "page_changed", "confidence",
@@ -188,6 +189,10 @@ def main():
     args.expect = _json_arg(parser, args.expect, "--expect")
     if not isinstance(args.expect, dict):
         parser.error("--expect must be a JSON object of assertions")
+    try:
+        args.expect = normalize_expect(args.expect) or {}
+    except ValueError as error:
+        parser.error(f"--expect: {error}")
     if args.no_evidence:
         args.evidence_dir = None
     if not args.replay:

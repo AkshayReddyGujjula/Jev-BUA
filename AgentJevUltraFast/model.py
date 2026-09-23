@@ -49,6 +49,15 @@ CLASSIFY_TIMEOUT = float(os.environ.get("JEV_CLASSIFY_TIMEOUT", "12"))
 TEXT_SESSION = os.environ.get("JEV_TEXT_SESSION") or uuid.uuid4().hex
 
 
+def _typesafe_key():
+    key = os.environ.get("TYPESAFE_API_KEY")
+    if not key:
+        # A RuntimeError, like any other provider failure, so the loop ends the run with a
+        # reason instead of escaping with no status.
+        raise RuntimeError("TYPESAFE_API_KEY is not set; no action executed.")
+    return key
+
+
 def post_json(url, key, body, headers=None, timeout=None):
     """POST with a TOTAL time budget, not a per-attempt one.
 
@@ -305,7 +314,7 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
     else:
         result = post_json(
             "https://api.typesafe.ai/v1/systemone",
-            os.environ["TYPESAFE_API_KEY"],
+            _typesafe_key(),
             body,
             timeout=min(timeout or DECIDE_TIMEOUT, DECIDE_TIMEOUT),
         )

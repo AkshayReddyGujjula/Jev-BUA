@@ -117,7 +117,7 @@ Every executed target is resolved from an observed node. The executor rechecks p
 | `abstained` | a risk gate refused to act |
 | `budget_exhausted` | the anti-loop deadline or a step/time budget fired |
 
-Pass `expect` (`url_contains`, `url_matches`, `title_contains`, `text_contains`, `text_absent`, `selector_count`, `value_contains` for an input's value, `harvest_at_least` for collected items) to `browser_do`, `run_task.py --expect` or `Agent(expect=...)` to get a verdict. Without one, a completed run reports `unknown`, never `verified`.
+Pass `expect` (`url_contains`, `url_matches`, `title_contains`, `text_contains`, `text_absent`, `selector_count`, `value_contains` for an input's value, `harvest_at_least` for collected items) to `browser_do`, `run_task.py --expect` or `Agent(expect=...)` to get a verdict. Without one, a completed run reports `unknown`, never `verified`. `text_contains` / `text_absent` take a phrase or a list of phrases (a bare string is one phrase). An unknown key, a malformed value, or a vacuous one (`at_least: 0`, an empty `value_contains` text) is rejected before the browser starts, because a check that cannot fail must not produce `verified`.
 
 Three v2 properties go with it: a low-confidence mutation is re-observed once and then refused rather than executed (per-risk confidence floors, with an `irreversible` question riding the same request); repeated decisions are served from a disk cache keyed on the entire request; and a run can write append-only JSONL evidence — offered candidates, raw answers, confidences, the answering model, executions, outcome.
 

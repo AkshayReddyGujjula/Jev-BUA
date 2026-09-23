@@ -223,7 +223,7 @@ TOOLS = [
                 "tab": {"type": "string", "enum": ["background", "foreground", "active"],
                         "default": "background"},
             },
-            "required": ["element", "operation"],
+            "required": ["element", "operation", "fingerprint"],
         },
     },
     {
@@ -373,18 +373,14 @@ def _quiet(func):
 def tool_browser_do(args):
     _load_env()
     from AgentJevUltraFast import Agent
-    from AgentJevUltraFast.assertions import (
-        evaluate_expectations,
-        page_facts,
-        selectors_for,
-        value_selectors_for,
-    )
+    from AgentJevUltraFast.assertions import normalize_expect
     from AgentJevUltraFast.outcomes import resolve
     from AgentJevUltraFast.privacy import redact
 
     mode = args.get("tab", "background")
     os.environ["JEV_TAB_MODE"] = mode
-    expect = args.get("expect") or None
+    # Validate before touching the browser: a malformed expectation fails the call.
+    expect = normalize_expect(args.get("expect"))
     max_steps = args.get("max_steps")
     previous_steps = os.environ.get("JEV_MAX_STEPS")
     if max_steps:
@@ -412,19 +408,17 @@ def tool_browser_do(args):
                     agent.stop_budget(f"{deadline:g}s MCP budget")
                     break
             state = agent.snapshot()
-            # Independent of the agent's opinion: read the page again and assert on it.
-            try:
-                facts = page_facts(
-                    browser or agent.browser, selectors_for(expect), value_selectors_for(expect)
-                )
-            except Exception as error:
-                readback_error = type(error).__name__
-                facts = None
-            else:
-                readback_error = None
-                # The collector artifact travels with the facts so harvest_at_least can
-                # be judged here exactly as it is inside the library.
-                facts["harvest"] = state.get("harvest") or {"items": 0}
+            # The verdict is the agent's own final readback (_finalize): one independent
+            # read of the live page, the same one written to evidence. A second read here
+            # could disagree with it if the page moved in between.
+            location = state.get("readback")
+            if location is None:
+                try:
+                    location = (browser or agent.browser).evaluate(
+                        "({url: location.href, title: document.title})"
+                    )
+                except Exception:
+                    location = None
     finally:
         if max_steps:
             if previous_steps is None:
@@ -434,19 +428,20 @@ def tool_browser_do(args):
         if browser is not None and not _warm_enabled() and not args.get("keep_open"):
             browser.close()
 
-    verified, detail = evaluate_expectations(expect, facts) if facts is not None else (None, [])
-    outcome = "unknown" if readback_error else resolve(
-        state["status"], checks=detail if expect else None,
-        abstained=state["status"] == "abstained",
+    detail = state.get("checks") or []
+    outcome = state.get("outcome") or resolve(
+        state["status"], checks=None, abstained=state["status"] == "abstained",
+        budget_exhausted=state["status"] == "stalled",
     )
+    verified = {"verified": True, "refuted": False}.get(outcome) if expect else None
     return redact({
         "status": state["status"],
         "outcome": outcome,
         "verified": verified,
         "checks": detail,
-        "url": facts["url"] if facts is not None else None,
-        "title": facts["title"] if facts is not None else None,
-        "readback_error": readback_error,
+        "url": (location or {}).get("url"),
+        "title": (location or {}).get("title"),
+        "readback_error": state.get("readback_error"),
         "elapsed_ms": state.get("elapsed_ms"),
         "evidence": state.get("evidence"),
         "replay": state.get("replay"),
@@ -506,9 +501,14 @@ def tool_browser_act(args):
     kind = ACT_KINDS.get(operation)
     if kind is None:
         return {"executed": None, "error": f"operation must be one of {sorted(ACT_KINDS)}"}
+    # Action ids are positional in the observed table. Without the fingerprint of the table
+    # they were read from, a re-render could make the same id name a different element.
+    if not args.get("fingerprint"):
+        return {"executed": None,
+                "error": "fingerprint is required: pass the one browser_state returned"}
     browser = _warm_browser(args.get("url") or "", mode)
     page = browser.observe(screenshot=False)
-    if args.get("fingerprint") and args["fingerprint"] != page["fingerprint"]:
+    if args["fingerprint"] != page["fingerprint"]:
         return {"executed": None, "stale": True, "fingerprint": page["fingerprint"],
                 "error": "page changed since browser_state; read state again"}
     element = str(args.get("element", ""))
@@ -542,10 +542,18 @@ def tool_browser_act(args):
 @_tab_env
 def tool_browser_assert(args):
     _load_env()
-    from AgentJevUltraFast.assertions import evaluate_expectations, page_facts, selectors_for, value_selectors_for
+    from AgentJevUltraFast.assertions import (
+        evaluate_expectations,
+        normalize_expect,
+        page_facts,
+        selectors_for,
+        value_selectors_for,
+    )
     from AgentJevUltraFast.browser import Browser
 
-    expect = args.get("expect") or {}
+    expect = normalize_expect(args.get("expect"))
+    if not expect:
+        raise ValueError("browser_assert needs at least one expect key")
     os.environ["JEV_TAB_MODE"] = args.get("tab", "background")
     os.environ.pop("JEV_KEEP_TAB", None)
     # Its own tab on purpose: an assertion must not disturb the warm agent session.
@@ -605,6 +613,10 @@ def tool_browser_task(args):
 
     if not args.get("goal") or not args.get("url"):
         raise ValueError("browser_task needs a goal and start URL")
+    try:
+        float(args.get("slice_seconds", 12))
+    except (TypeError, ValueError):
+        raise ValueError("slice_seconds must be a number") from None
     reservation = _TASKS.reserve()
     previous_tab = os.environ.get("JEV_TAB_MODE")
     os.environ["JEV_TAB_MODE"] = "foreground"
@@ -648,12 +660,24 @@ def tool_browser_task(args):
     try:
         result = task.drive(slice_seconds=args.get("slice_seconds", 12))
     except Exception:
-        task.abandon()
-        task._close()
-        _TASKS.release_if_terminal(task)
+        _fail_task(task)
         raise
     _TASKS.release_if_terminal(task)
     return result
+
+
+def _fail_task(task):
+    """An exception escaped a task's active slice: end it so the registry frees the slot.
+
+    Without a terminal phase release_if_terminal() is a no-op, the registry keeps a task
+    whose cancel flag makes it unresumable, and every later tool call is refused until the
+    server restarts.
+    """
+    task.abandon()
+    task._close()
+    task.phase = "abandoned"
+    task.reason = task.reason or "error"
+    _TASKS.release_if_terminal(task)
 
 
 @_quiet
@@ -666,10 +690,7 @@ def tool_browser_task_resume(args):
         )
     except Exception:
         if task.phase not in {"paused", "needs_human"}:
-            task.abandon()
-            task._close()
-            task.phase = "abandoned"
-            _TASKS.release_if_terminal(task)
+            _fail_task(task)
         raise
     _TASKS.release_if_terminal(task)
     return result
@@ -775,10 +796,17 @@ def handle(request):
         if handler is None:
             return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602,
                                                            "message": f"Unknown tool: {name}"}}
-        if _TASKS.current is not None and name not in {"browser_task_resume", "browser_task_cancel"}:
+        if _FENCED_WORKER is None or not _FENCED_WORKER.is_alive():
+            # Never while a timed-out worker may still be using the task's browser.
+            _TASKS.expire_stale()
+        current = _TASKS.current
+        if current is not None and name not in {"browser_task_resume", "browser_task_cancel"}:
             return {"jsonrpc": "2.0", "id": rid, "result": {
-                "content": [{"type": "text", "text": "A delegated browser task owns this Chrome session. "
-                             "Resume or cancel it before using another browser tool."}],
+                "content": [{"type": "text", "text": (
+                    "A delegated browser task owns this Chrome session. Resume or cancel it "
+                    "before using another browser tool: "
+                    f"task_id={current.id} checkpoint={current.checkpoint} phase={current.phase}."
+                )}],
                 "isError": True,
             }}
         try:

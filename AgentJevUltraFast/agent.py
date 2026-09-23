@@ -8,7 +8,13 @@ import time
 from pathlib import Path
 
 from . import modes, replay
-from .assertions import evaluate_expectations, page_facts, selectors_for, value_selectors_for
+from .assertions import (
+    evaluate_expectations,
+    normalize_expect,
+    page_facts,
+    selectors_for,
+    value_selectors_for,
+)
 from .browser import SCAN_MAX_S, Browser, StalePage, target_visible
 from .evidence import Evidence
 from .gates import IRREVERSIBLE_NOUL
@@ -257,7 +263,9 @@ class Agent:
         self.browser.private_values = sorted(self.private_values, key=len, reverse=True)
         # The independent readback, when the caller supplied one. finalize() evaluates it
         # against the live page; without it the run's outcome is "unknown", never "verified".
-        self.expect = expect or None
+        # Validated here, before any browser work: a malformed expectation must fail the
+        # call, never silently weaken or pass the verdict.
+        self.expect = normalize_expect(expect)
         self.evidence = Evidence(
             evidence_dir,
             time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}",
@@ -635,11 +643,14 @@ class Agent:
         error = None
         try:
             state["browser"].act(scroll, page)
+        except StalePage:
+            # Raised before any input is dispatched: nothing was scrolled.
+            return False
         except Exception as exc:
             error = str(exc) or type(exc).__name__
-        state["page"] = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
-        self.note_progress(state["page"])
         state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+        # Record the dispatched scroll before observing its result, like every other
+        # execution: a failed observation must not erase the record of the input.
         state["history"].append({
             "step": len(state["history"]) + 1,
             "action": "Scroll down (reveal)",
@@ -666,6 +677,16 @@ class Agent:
             "executed_ms": state["elapsed_ms"],
             "elapsed_ms": state["elapsed_ms"],
         })
+        evidence = getattr(self, "evidence", None)
+        if evidence is not None:
+            evidence.record(
+                "execution", step=state["history"][-1]["step"], action="Scroll down (reveal)",
+                action_kind="scroll", choice=scroll["id"], operation="SCROLL_DOWN",
+                recovery=state["history"][-1]["recovery"], error=error, url=page.get("url"),
+            )
+        state["page"] = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
+        self.note_progress(state["page"])
+        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
         outcome = action_outcome(page, state["page"], error)
         state["history"][-1].update(
             outcome=outcome,
@@ -677,13 +698,6 @@ class Agent:
         if state.get("descriptors") is not None and outcome not in DEAD_OUTCOMES:
             state["descriptors"].append(
                 replay.descriptor(scroll, {"operation": "SCROLL_DOWN"}, outcome, None)
-            )
-        evidence = getattr(self, "evidence", None)
-        if evidence is not None:
-            evidence.record(
-                "execution", step=state["history"][-1]["step"], action="Scroll down (reveal)",
-                action_kind="scroll", choice=scroll["id"], operation="SCROLL_DOWN",
-                recovery=state["history"][-1]["recovery"], error=error, url=page.get("url"),
             )
         return True
 
@@ -1104,6 +1118,12 @@ class Agent:
             skip_cache = state.pop("skip_cache_once", False)
             decision = None
             for attempt in range(2):
+                if attempt:
+                    # The first attempt spent part of the window: size the retry by what is
+                    # left, and do not start one that cannot finish inside the deadline.
+                    left = STALL_LIMIT_S - (time.monotonic() - state["progress_at"])
+                    if left < MIN_DECIDE_S:
+                        return self._stop_stalled()
                 try:
                     decision = choose(
                         state["page"], state["goal"], state["history"],
@@ -1135,6 +1155,17 @@ class Agent:
                         self._finalize()
                         return self.snapshot()
                     skip_cache = True
+                except RuntimeError as error:
+                    # The decision provider timed out or failed. A decision is not a
+                    # mutation, so one retry inside the deadline is safe; a second failure
+                    # ends the run with a reason instead of escaping with no status.
+                    state["provider_errors"] = state.get("provider_errors", 0) + 1
+                    if attempt:
+                        state["status"] = "blocked"
+                        state["blocked_reason"] = f"decision provider unavailable: {error}"[:300]
+                        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+                        self._finalize()
+                        return self.snapshot()
             # If the decision itself used up the budget, stop without acting. Without this
             # one more action plus its observation could run while the deadline had already
             # passed (measured: a 6.4 s window against a 5 s limit), and that action is also
