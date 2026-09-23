@@ -299,6 +299,24 @@ def test_approval_resume_rebases_the_stall_clock():
     assert done["phase"] == "complete" and done["outcome"] == "verified"
 
 
+def test_simple_fixture_routes_for_unattended_measurement():
+    from urllib.request import urlopen
+
+    from scripts.trap_server import serve
+
+    server = serve(0)
+    try:
+        port = server.server_address[1]
+        search = urlopen(f"http://127.0.0.1:{port}/trap?mode=simple", timeout=5).read().decode()
+        results = urlopen(f"http://127.0.0.1:{port}/trap?mode=simple-results", timeout=5).read().decode()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert 'type="button"' in search and "form" not in search
+    assert "simple-results" in search
+    assert "Results ready" in results
+
+
 def test_mcp_task_tools_keep_the_same_session_across_login_and_approval(monkeypatch):
     import json
 

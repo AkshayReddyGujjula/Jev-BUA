@@ -94,7 +94,7 @@ so use a trusted orchestrator and inspect live actions for sensitive work.
 | Resume after server restart, OAuth popup/new-tab journeys | Pending |
 | Shadow DOM, iframe controls, native passkey dialogs | Pending |
 | Windows DPAPI secret vault | Separate later feature |
-| Current latency and cost comparison against v2/orchestrator tools | Pending live measurement |
+| Cold/warm delegated runs on a local fixture | Measured (docs/performance.md); v2 and orchestrator-tool comparison still pending |
 
 The older Flights video and timing remain historical evidence for the original
 loop. They are not evidence that the new delegation path has the same latency.

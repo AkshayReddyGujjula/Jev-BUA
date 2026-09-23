@@ -28,9 +28,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-GOAL = "Search the catalogue for laptops and open the results."
+GOAL = "Search the catalogue for laptops and stop when the results are visible."
 VALUES = {"Search the catalogue": "laptops"}
-EXPECT = {"text_contains": ["Results for laptops"]}
+EXPECT = {"url_contains": "simple-results", "text_contains": ["Results ready"]}
 
 
 def run_once(url, out_dir, *, cache, arm):
@@ -57,7 +57,9 @@ def run_once(url, out_dir, *, cache, arm):
         while result["phase"] in {"paused", "needs_human"} and guard < 20:
             guard += 1
             if result["phase"] == "needs_human":  # the fixture has no human steps
+                checkpoint = {key: result.get(key) for key in ("phase", "reason", "proposed_action")}
                 result = task.cancel()
+                result["checkpoint"] = checkpoint
                 break
             result = task.resume(result["checkpoint"])
         result["wall_s"] = round(time.perf_counter() - started, 3)

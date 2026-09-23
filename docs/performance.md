@@ -1,9 +1,32 @@
 # Faster on the real web
 
-> The measurements below are historical results from the predecessor loop.
-> AgentJevUltraFast's delegation, profile, router, and renamed package have
-> not yet been measured in a live matched run. Do not use these numbers as
-> current end-to-end delegation benchmarks.
+## Delegated task interface — cold vs warm (local fixture)
+
+Measured 2026-09-23 on the same machine, Chrome, and Jev API, against
+`scripts/trap_server.py` (`/trap?mode=simple`: fill a search field, click, land
+on the results page). Three alternating pairs; the only difference between the
+arms is the decision cache. Every run ended `outcome=verified`; one warm-up run
+populated the cache and is excluded from the table.
+
+| Arm | Runs | Verified | Median wall | Median active | Decisions | Cache hits | Jev input tokens |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| cold (`JEV_CACHE=0`) | 3 | 3/3 | 2.021 s | 1.399 s | 3 | 0 | 23,471 (≈$0.00099 total) |
+| warm (cache on) | 3 | 3/3 | 0.897 s | 0.507 s | 3 | 3 | 0 ($0) |
+
+Raw runs live in the gitignored `artifacts/delegation-measurement/measurement.json`;
+reproduce with
+`uv run --env-file .env python scripts/measure_delegation.py --pairs 3`.
+
+Boundaries: `wall_s` starts before Agent construction and includes browser attach
+and the first observation; `active_seconds` is the task's own active budget;
+verification runs after the timed task and is excluded. One fixture, one goal,
+one browser profile — not a general benchmark. The orchestrator's own browser
+tool was not part of this comparison, and no v2 comparison was run.
+
+## Historical: Google Flights 7.073 s
+
+> These predate the delegation, profile, router, and renamed package. Do not use
+> them as current end-to-end delegation benchmarks.
 
 The historical video completes the Google Flights task in **7.073 seconds at 1×**. It starts with one natural-language goal and uses dynamic controls throughout. Jev selects operation + target in one request; Mercury generates the city strings when TYPE_TEXT is selected.
 

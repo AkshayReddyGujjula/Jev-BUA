@@ -10,7 +10,7 @@
 
 Give it one goal. [TypeSafe's Jev](https://docs.typesafe.ai/introduction) picks an operation and an element. A small LLM writes text only when the operation is `TYPE_TEXT`.
 
-**Historical baseline:** Zürich → London on Google Flights in 7.1 seconds. That recording predates the delegation and profile changes; the current version still needs a fresh live benchmark.
+**Historical baseline:** Zürich → London on Google Flights in 7.1 seconds. That recording predates the delegation and profile changes; the delegated interface now has its own cold/warm measurement in [performance.md](docs/performance.md), and a fresh Flights benchmark is still pending.
 
 <a href="docs/demo.mp4"><img src="docs/demo.gif" alt="A real Google Flights search at 1× speed, with generated city names and dynamic operation/target decisions" width="100%" /></a>
 
