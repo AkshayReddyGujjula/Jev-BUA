@@ -1837,3 +1837,133 @@ def test_private_sources_are_still_masked_once_typed(runner):
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert runner._private_pixels is True
     assert "ada@example.test" in runner.state["browser"].private_values
+
+
+def _prefetching(runner, monkeypatch, values):
+    monkeypatch.setenv("TEXT_MODEL_API_KEY", "offline")
+    batches = []
+
+    def fake(goal, labels, page, **kwargs):
+        batches.append((goal, list(labels)))
+        return values, {"model": "batch", "latency_ms": 7, "usage": {}}
+
+    monkeypatch.setattr(loop, "field_values", fake)
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: decision("e1"))
+    return batches
+
+
+def test_prefetched_value_is_typed_without_a_second_text_call(runner, monkeypatch):
+    batches = _prefetching(runner, monkeypatch, {"Search": "dune"})
+    monkeypatch.setattr(loop, "field_text", lambda *a, **k: pytest.fail("no single call"))
+    runner.command("predict")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert batches == [("Find a book", ["Search"])]
+    assert runner.state["browser"].act.call_args.kwargs["text"] == "dune"
+    assert runner.state["text_calls"][-1]["prefetched"] is True
+
+
+def test_prefetch_is_not_reused_for_a_different_goal(runner, monkeypatch):
+    _prefetching(runner, monkeypatch, {"Search": "dune"})
+    single = Mock(return_value=("atlas", {"model": "single", "latency_ms": 5}))
+    monkeypatch.setattr(loop, "field_text", single)
+    runner.command("predict")
+    runner.state["goal"] = "Find an atlas"
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert single.call_count == 1
+    assert runner.state["browser"].act.call_args.kwargs["text"] == "atlas"
+
+
+def test_null_draft_falls_back_to_the_single_field_call(runner, monkeypatch):
+    _prefetching(runner, monkeypatch, {"Search": None})
+    single = Mock(return_value=("dune", {"model": "single", "latency_ms": 5}))
+    monkeypatch.setattr(loop, "field_text", single)
+    runner.command("predict")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert single.call_count == 1
+
+
+def test_prefetch_skips_sensitive_and_supplied_fields(runner):
+    p = page()
+    p["actions"] += [
+        {"id": "e7", "kind": "fill", "label": "Password", "role": "textbox", "value": "", "node": 70},
+        {"id": "e8", "kind": "fill", "label": "Email", "role": "textbox", "value": "", "node": 80},
+    ]
+    runner.values = {"Email": "ada@example.test"}
+    assert runner._prefetch_fields(p) == ["Search"]
+
+
+def test_no_prefetch_without_a_text_key(runner, monkeypatch):
+    monkeypatch.setattr(loop, "field_values", lambda *a, **k: pytest.fail("no paid call"))
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: decision("e1"))
+    runner.command("predict")
+    assert "prefetches" not in runner.state
+
+
+@pytest.mark.parametrize("reply", [
+    {"values": {"Search": "x", "Other": "y"}},      # a label that was not asked for
+    {"values": {"Search": 3}},
+    {"values": ["x"]},
+    {"text": "x"},                                  # a bare mapping must still use asked labels
+    {},
+])
+def test_batch_replies_are_validated_whole(monkeypatch, reply):
+    monkeypatch.setattr(model, "text_call", lambda *a, **k: (reply, {"model": "m"}))
+    with pytest.raises(ValueError):
+        model.field_values("goal", ["Search"], {"title": "t", "text": ""})
+
+
+def test_batch_reply_keeps_nulls(monkeypatch):
+    monkeypatch.setattr(model, "text_call",
+                        lambda *a, **k: ({"values": {"Search": "x", "Email": None}}, {"model": "m"}))
+    values, _ = model.field_values("goal", ["Search", "Email"], {"title": "t", "text": ""})
+    assert values == {"Search": "x", "Email": None}
+
+
+def test_batch_keys_match_labels_despite_stray_whitespace(monkeypatch):
+    monkeypatch.setattr(model, "text_call",
+                        lambda *a, **k: ({"values": {"Where to?": "London"}}, {"model": "m"}))
+    values, _ = model.field_values("goal", ["Where to? "], {"title": "t", "text": ""})
+    assert values == {"Where to? ": "London"}
+
+
+def test_bare_mapping_batch_is_accepted(monkeypatch):
+    monkeypatch.setattr(model, "text_call",
+                        lambda *a, **k: ({"Where from?": "Zurich", "Return": None}, {"model": "m"}))
+    values, _ = model.field_values("goal", ["Where from?", "Return"], {"title": "t", "text": ""})
+    assert values == {"Where from?": "Zurich", "Return": None}
+
+
+def test_a_draft_covers_pages_whose_fields_it_already_saw(runner, monkeypatch):
+    batches = _prefetching(runner, monkeypatch, {"Search": "dune", "Return": None})
+    wide = page()
+    wide["actions"] = wide["actions"] + [
+        {"id": "e9", "kind": "fill", "label": "Return", "role": "textbox", "value": "", "node": 90}]
+    runner._maybe_prefetch(wide)
+    runner._prefetches[-1]["future"].result(timeout=5)
+    runner._maybe_prefetch(page())          # "Return" disappeared: still covered
+    assert len(batches) == 1
+    extra = page()
+    extra["actions"] = extra["actions"] + [
+        {"id": "e8", "kind": "fill", "label": "Middle name", "role": "textbox", "value": "", "node": 80}]
+    runner._maybe_prefetch(extra)           # a field the draft never saw: draft again
+    runner._prefetches[-1]["future"].result(timeout=5)
+    assert len(batches) == 2
+
+
+def test_a_finished_older_draft_is_used_without_waiting(runner, monkeypatch):
+    import threading
+
+    _prefetching(runner, monkeypatch, {"Search": "dune"})
+    runner._maybe_prefetch(page())
+    runner._prefetches[-1]["future"].result(timeout=5)
+    gate = threading.Event()
+    monkeypatch.setattr(loop, "field_values", lambda *a, **k: gate.wait(5) and ({}, {}))
+    grown = page()
+    grown["actions"] = grown["actions"] + [
+        {"id": "e8", "kind": "fill", "label": "Middle name", "role": "textbox", "value": "", "node": 80}]
+    runner._maybe_prefetch(grown)                 # a second draft is now pending
+    started = time.monotonic()
+    text, meta = runner._take_prefetch(page()["actions"][0], grown)
+    gate.set()
+    assert text == "dune" and meta["waited_ms"] == 0
+    assert time.monotonic() - started < 1.0

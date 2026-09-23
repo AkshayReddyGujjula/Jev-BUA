@@ -91,6 +91,20 @@ a salary, and CPU inference starved the browser daemon (a CDP call timed out dur
 run). The hosted helper stays; its latency is to be hidden by prefetching values in
 parallel with Jev's decision rather than by a local model.
 
+## ADR-011 — Field values are drafted in parallel with the decision (2026-09-23)
+
+The text helper (~1.3 s) sat on the critical path twice per Flights run. Now one batch
+call (TEXT_VALUES) drafts every fillable field that is not sensitive, supplied, or in mode
+memory, launched when `predict` starts, so it overlaps Jev's decision. A draft is used only
+under the identical goal and only for a field it saw; a page with a field no draft has seen
+gets a new draft, and a finished older draft is used at once instead of waiting on a newer
+one. Validation is whole-batch: an unrequested key or a non-string value voids the batch
+and the field falls back to the single-field call. Keys are matched on normalized labels
+(Google's "Where to? " carries a trailing space) and a bare mapping is accepted as well
+as `{"values": ...}` (measured: the model drops the wrapper on some real pages).
+Measured on Flights (background tab, 4 runs): both text waits 0 ms, 10.5-12.8 s verified
+4/4, 3 batch calls per run instead of 2 single calls.
+
 ## ADR-003 — No secret store; the profile holds non-secret data
 
 `~/.jev-ultrafast/profile/` stores identity fields and site usernames as

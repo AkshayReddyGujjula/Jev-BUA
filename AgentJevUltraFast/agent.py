@@ -5,6 +5,7 @@ import hashlib
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import cache, modes, replay, supervisor
@@ -27,6 +28,7 @@ from .model import (
     classify_failure,
     field_context,
     field_text,
+    field_values,
     harvest_items,
 )
 from .outcomes import resolve
@@ -38,6 +40,11 @@ TERMINAL = {"DONE", "BLOCKED", "ABSTAIN"}
 # refused to act. Both end the run honestly instead of taking another lap.
 TERMINAL_STATUS = {"done", "blocked", "stalled", "abstained", "budget_exhausted"}
 RECOVERY_LIMIT = 6
+# Text prefetch: one helper call drafts every fillable field while Jev decides, so TYPE_TEXT
+# rarely waits on the helper (measured 2026-09-23: two waits of ~1.35 s on the Flights path).
+PREFETCH_ENABLED = os.environ.get("JEV_TEXT_PREFETCH", "1") not in {"0", "off", "false"}
+PREFETCH_FIELDS = 12
+_PREFETCH_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="jev-prefetch")
 # A supervisor sub-goal steers this many actions, then Jev is back on the caller's goal alone.
 GUIDANCE_STEPS = 6
 DEAD_OUTCOMES = {"no visible change", "action failed", "loop detected"}
@@ -492,6 +499,88 @@ class Agent:
             state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
         self._finalize()
         return self.snapshot()
+
+    def _prefetch_fields(self, page):
+        """Fill labels a batch draft may cover: not sensitive, not supplied, not remembered."""
+        labels = []
+        for action in page.get("actions") or []:
+            label = action.get("label")
+            if action.get("kind") != "fill" or not label or label in labels:
+                continue
+            if modes.is_sensitive(label) or self.supplied_text(action) is not None:
+                continue
+            mode = getattr(self, "mode", None)
+            if mode is not None and mode.value_for(label, page.get("url")) is not None:
+                continue
+            labels.append(label)
+        return labels[:PREFETCH_FIELDS]
+
+    def _maybe_prefetch(self, page):
+        """Start one batch draft for this goal and field set, unless one already covers it.
+
+        A draft covers a page when the goal is identical and every fill label on the page
+        was in that draft (labels, not values). A draft made on the first view of a form is
+        therefore reused as fields disappear or get filled - Google Flights drops "Return"
+        after One way - and a page with a field no draft has seen gets a new draft.
+        """
+        if not PREFETCH_ENABLED or not os.environ.get("TEXT_MODEL_API_KEY"):
+            return
+        labels = self._prefetch_fields(page)
+        if not labels:
+            return
+        goal = self.state["goal"]
+        batches = [b for b in getattr(self, "_prefetches", []) if b["goal"] == goal]
+        if any(set(labels) <= b["labels"] for b in batches):
+            return
+        mode = getattr(self, "mode", None)
+        future = _PREFETCH_POOL.submit(
+            field_values, goal, labels, page,
+            mode_state=mode.text_state(page.get("url")) if mode else None,
+            model=getattr(self, "_text_model", None),
+            base_url=getattr(self, "_text_base_url", None),
+        )
+        self._prefetches = [*batches, {"goal": goal, "labels": set(labels), "future": future}][-6:]
+        self.state["prefetches"] = self.state.get("prefetches", 0) + 1
+
+    def _take_prefetch(self, action, page):
+        """(text, helper meta) drafted for this field under this goal, or None to ask singly.
+
+        A finished draft that saw this field is used at once; otherwise the newest pending
+        draft that includes it is awaited (never longer than the text-helper timeout).
+        """
+        label = action.get("label")
+        goal = self.state["goal"]
+        candidates = [b for b in reversed(getattr(self, "_prefetches", []))
+                      if b["goal"] == goal and label in b["labels"]]
+        if not candidates:
+            return None
+        misses = self.state.setdefault("prefetch_misses", [])
+        for batch in candidates:
+            future = batch["future"]
+            if future.done() and future.exception() is None:
+                values, meta = future.result()
+                if values.get(label) is not None:
+                    return values[label], {**meta, "prefetched": True, "waited_ms": 0}
+        pending = next((b for b in candidates if not b["future"].done()), None)
+        if pending is None:
+            misses.append({"field": label, "reason": "no usable draft"})
+            return None
+        asked = time.monotonic()
+        try:
+            values, meta = pending["future"].result(
+                timeout=max(0.0, min(TEXT_TIMEOUT, self._model_room()))
+            )
+        except Exception as error:
+            # Slow, failed or invalid: fall back to the single-field call, never guess.
+            misses.append({"field": label, "reason": f"{type(error).__name__}: {error}"[:160]})
+            return None
+        finally:
+            self._credit_wait(asked)
+        if values.get(label) is None:
+            misses.append({"field": label, "reason": "drafted as null"})
+            return None
+        return values[label], {**meta, "prefetched": True,
+                               "waited_ms": round((time.monotonic() - asked) * 1000)}
 
     def _guidance(self):
         """The supervisor's current sub-goal, or None once it has steered GUIDANCE_STEPS actions."""
@@ -1304,6 +1393,7 @@ class Agent:
             left = self._model_room()
             if left < MIN_DECIDE_S:
                 return self._stop_stalled()
+            self._maybe_prefetch(state["page"])
             skip_cache = state.pop("skip_cache_once", False)
             decision = None
             for attempt in range(2):
@@ -1708,7 +1798,13 @@ class Agent:
                         state["goal"], action, page, state["history"],
                         mode_state=self.mode.text_state(page.get("url")) if getattr(self, "mode", None) else None,
                     )
-                    if self.pending_text and self.pending_text[0] == context:
+                    prefetched = self._take_prefetch(action, page)
+                    if prefetched is not None:
+                        text, helper = prefetched
+                        state["text_calls"].append(
+                            {**helper, "field": action["label"], "value": "[redacted]"}
+                        )
+                    elif self.pending_text and self.pending_text[0] == context:
                         _, text, helper = self.pending_text
                     else:
                         # Bound the model call by the hard backstop, so a slow text call

@@ -26,6 +26,7 @@ from .questions import (
     SUBGOAL,
     TARGET,
     TEXT_VALUE,
+    TEXT_VALUES,
 )
 
 CLIENT = httpx.Client(http2=True, timeout=25)
@@ -424,6 +425,52 @@ def field_text(context, timeout=None, model=None, base_url=None):
     except (ValueError, KeyError, TypeError):
         raise ValueError("Text helper returned no valid field value; nothing typed.") from None
     return value, meta
+
+
+# A batch draft costs more output tokens than one field, so it gets a little more room. It
+# runs off the critical path (in parallel with Jev), so this ceiling is not a stall risk.
+PREFETCH_TIMEOUT = float(os.environ.get("JEV_PREFETCH_TIMEOUT", "8"))
+
+
+def field_values(goal, labels, page, mode_state=None, timeout=None, model=None, base_url=None):
+    """Draft values for several fields in ONE text call: {label: text or None}, plus meta.
+
+    Used to prefetch while Jev decides, so TYPE_TEXT rarely waits on the helper. Every key
+    must be one of the requested labels and every value a short string or null; anything
+    else invalidates the whole batch rather than being repaired.
+    """
+    # Labels are sent and matched in normalized form: real pages carry stray whitespace
+    # ("Where to? ") that a model reasonably trims, and one trimmed key must not void the
+    # batch. Results are keyed back to the exact observed label.
+    by_norm = {" ".join(str(label).split()).casefold(): label for label in labels}
+    context = {
+        "goal": goal,
+        "fields": [" ".join(str(label).split()) for label in labels],
+        "page": {"title": page.get("title"), "text": (page.get("text") or "")[:6000]},
+        **({"mode": mode_state} if mode_state else {}),
+    }
+    output, meta = text_call(TEXT_VALUES, context, timeout=timeout, model=model,
+                             base_url=base_url, ceiling=PREFETCH_TIMEOUT)
+    # {"values": {...}} is asked for; a bare mapping is the same answer (measured: the model
+    # drops the wrapper on some real pages). Every key is still checked below.
+    values = output.get("values") if set(output) == {"values"} else output
+    if not isinstance(values, dict) or not values:
+        raise ValueError("Text helper returned no valid batch of field values.")
+    keyed = {}
+    for key, value in values.items():
+        label = by_norm.get(" ".join(str(key).split()).casefold())
+        if label is None:
+            raise ValueError("Text helper returned a value for a field that was not asked for.")
+        keyed[label] = value
+    clean = {}
+    for label, value in keyed.items():
+        if value is None or (isinstance(value, str) and not value.strip()):
+            clean[label] = None
+        elif isinstance(value, str) and len(value) <= 2000:
+            clean[label] = value
+        else:
+            raise ValueError("Text helper returned an invalid field value in a batch.")
+    return clean, meta
 
 
 FAILURE_CRITERIA = {
