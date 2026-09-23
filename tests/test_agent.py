@@ -1501,3 +1501,52 @@ def test_provider_retry_is_not_started_past_the_deadline(runner, monkeypatch):
 def test_malformed_expect_fails_at_construction():
     with pytest.raises(ValueError):
         loop.normalize_expect({"text_contain": ["x"]})
+
+
+def test_background_tab_starts_a_render_keepalive(monkeypatch):
+    """Regression: a background tab barely rendered, so JS menus never opened (2026-09-23)."""
+    import AgentJevUltraFast.browser as browser
+
+    calls = []
+    b = browser.Browser.__new__(browser.Browser)
+    b.mode, b.session = "background", "s1"
+    monkeypatch.setattr(b, "call", lambda method, **params: calls.append((method, params)) or {})
+    b._keep_rendering()
+    assert calls and calls[0][0] == "Page.startScreencast" and b.can_screenshot
+    calls.clear()
+    b.mode = "foreground"
+    b.rendering = True
+    b._keep_rendering()
+    assert calls == []                     # a visible tab renders on its own
+    b.mode = "background"
+    monkeypatch.setenv("JEV_RENDER_KEEPALIVE", "0")
+    b.rendering = False
+    b._keep_rendering()
+    assert calls == [] and b.can_screenshot is False
+
+
+def test_screenshot_is_refused_not_hung_on_a_non_rendering_tab(monkeypatch):
+    import AgentJevUltraFast.browser as browser
+
+    b = browser.Browser.__new__(browser.Browser)
+    b.rendering = False
+    monkeypatch.setattr(browser, "cdp", lambda *a, **k: pytest.fail("no capture attempt"))
+    with pytest.raises(RuntimeError, match="not rendering"):
+        b.screenshot()
+    b.rendering, b.session = True, "s1"
+    seen = {}
+    monkeypatch.setattr(browser, "cdp", lambda method, **k: seen.update(k) or {"data": "QQ=="})
+    assert b.screenshot(timeout=1.5) == "QQ==" and seen["_response_timeout"] == 1.5
+
+
+def test_reattach_rearms_the_render_keepalive(monkeypatch):
+    import AgentJevUltraFast.browser as browser
+
+    b = browser.Browser.__new__(browser.Browser)
+    b.mode, b.target, b.session = "background", "t1", "dead"
+    b.owns_target, b.owned_targets, b._known_targets = True, ["t1"], {"t1"}
+    monkeypatch.setattr(b, "_page_targets", lambda: [{"targetId": "t1", "url": "https://a.test/"}])
+    methods = []
+    monkeypatch.setattr(browser, "cdp", lambda method, **k: methods.append(method) or {"sessionId": "s2"})
+    assert b.reattach() is True
+    assert methods == ["Target.attachToTarget", "Page.startScreencast"]

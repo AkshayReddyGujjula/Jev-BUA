@@ -46,6 +46,12 @@ SCAN_BARREN_LIMIT = int(os.environ.get("JEV_SCAN_BARREN_LIMIT", "3"))
 
 # How long a single caller-directed scan may run before handing back to the model.
 SCAN_MAX_S = float(os.environ.get("JEV_SCAN_MAX_SECONDS", "120"))
+# A screenshot is a luxury, never worth a 5 s IPC wait inside a run.
+SCREENSHOT_TIMEOUT = float(os.environ.get("JEV_SCREENSHOT_TIMEOUT", "3"))
+
+
+def render_keepalive_enabled():
+    return os.environ.get("JEV_RENDER_KEEPALIVE", "1").strip().lower() not in {"0", "off", "no", "false"}
 
 
 def target_visible(page, target):
@@ -126,6 +132,8 @@ class Browser:
         self.owned_targets = [self.target] if self.owns_target else []
         # Keep rAF/menus rendering even when the tab is not the visible one.
         self.call("Emulation.setFocusEmulationEnabled", enabled=True)
+        self.rendering = self.mode != "background"
+        self._keep_rendering()
         if url:
             self.navigate(url)
 
@@ -153,8 +161,40 @@ class Browser:
         # mutate the page. A lost reply cannot establish whether they ran.
         return cdp(method, session_id=self.session, **params)
 
-    def screenshot(self, quality=60):
-        return self.call("Page.captureScreenshot", format="jpeg", quality=quality)["data"]
+    def _keep_rendering(self):
+        """Make a background tab produce frames, so the page renders like a visible one.
+
+        Measured 2026-09-23 on Chrome 153: focus emulation alone leaves a background tab of
+        a real site (Google Flights) at 0-2 requestAnimationFrame callbacks per 500 ms, so a
+        JavaScript-driven menu never finishes opening - its options stay at opacity 0, the
+        snapshot correctly drops them as invisible, and the agent loops on a control whose
+        choices it cannot see. Page.captureScreenshot never returns either. An active
+        screencast makes Chrome produce frames for the target: 30-32 callbacks per 500 ms,
+        the menu opens within 50 ms, and a screenshot returns in ~80 ms. Frames are never
+        acknowledged, so Chrome sends about three tiny frames and then stops sending while
+        rendering continues (verified over 20 s). JEV_RENDER_KEEPALIVE=0 turns it off.
+        """
+        if getattr(self, "mode", None) != "background" or not render_keepalive_enabled():
+            return
+        try:
+            self.call("Page.startScreencast", format="jpeg", quality=1, maxWidth=32, maxHeight=32)
+            self.rendering = True
+        except Exception:
+            # Rendering stays throttled; observation still works, screenshots are skipped.
+            self.rendering = False
+
+    @property
+    def can_screenshot(self):
+        """False for a background tab that is not rendering: its capture would never return."""
+        return bool(getattr(self, "rendering", True))
+
+    def screenshot(self, quality=60, timeout=None):
+        if not self.can_screenshot:
+            raise RuntimeError("This background tab is not rendering; no screenshot is available.")
+        return cdp(
+            "Page.captureScreenshot", session_id=self.session,
+            _response_timeout=timeout or SCREENSHOT_TIMEOUT, format="jpeg", quality=quality,
+        )["data"]
 
     @staticmethod
     def _session_lost(error):
@@ -206,6 +246,8 @@ class Browser:
             self._known_targets.add(target)
             self.target = target
         self.session = cdp("Target.attachToTarget", targetId=target, flatten=True)["sessionId"]
+        # A screencast belongs to the session it was started on.
+        self._keep_rendering()
         return True
 
     def _browser_operation(self, request):
