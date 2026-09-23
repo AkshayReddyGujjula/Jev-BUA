@@ -21,6 +21,33 @@ from urllib.parse import parse_qs, urlparse
 
 STYLE = "font-family:system-ui;max-width:40rem;margin:3rem auto;line-height:1.6"
 
+DELEGATE = f"""<!doctype html><html><head><title>Delegation demo</title></head>
+<body style="{STYLE}">
+<h1>Delegation demo</h1>
+<section id="login">
+  <label>Demo password <input id="password" type="password"></label>
+  <button id="sign-in" type="button">Sign in</button>
+  <p>This is a local fixture. Any nonempty password unlocks the page.</p>
+</section>
+<section id="workspace" hidden>
+  <label>Project name <input id="project" type="text"></label>
+  <button id="publish" type="button">Publish demo site</button>
+  <p id="status">Ready to publish.</p>
+</section>
+<script>
+document.getElementById('sign-in').onclick = () => {{
+  if (!document.getElementById('password').value) return;
+  document.getElementById('password').value = '';
+  document.getElementById('login').hidden = true;
+  document.getElementById('workspace').hidden = false;
+}};
+document.getElementById('publish').onclick = () => {{
+  const name = document.getElementById('project').value.trim();
+  if (!name) return;
+  document.getElementById('status').textContent = 'Published demo site';
+}};
+</script></body></html>"""
+
 DEAD = f"""<!doctype html><html><head><title>Trap: dead control</title></head>
 <body style="{STYLE}">
 <h1>Account settings</h1>
@@ -139,6 +166,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if parsed.path == "/apply":
             self._send(apply_page())
+            return
+        if parsed.path == "/delegate":
+            self._send(DELEGATE)
             return
         if parsed.path == "/apply-result":
             self._send(apply_result(params))

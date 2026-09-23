@@ -33,8 +33,9 @@ class FakeBrowser:
 
 
 class FakeAgent:
-    def __init__(self, initial_page, choice):
+    def __init__(self, initial_page, choice, irreversible=0.9):
         self.choice = choice
+        self.irreversible = irreversible
         self.pending_text = None
         self.replay_plan = {"steps": []}
         self.state = {
@@ -63,7 +64,7 @@ class FakeAgent:
             self.state["started_at"] = self.state["started_at"] or time.perf_counter()
             self.state["decision"] = {
                 "choice": self.choice,
-                "irreversible": 0.9,
+                "irreversible": self.irreversible,
             }
             self.state["decisions"].append(self.state["decision"])
             self.state["status"] = "predicted"
@@ -201,6 +202,43 @@ def test_profile_fill_requires_origin_approval_once(tmp_path):
     assert agent.values == {} and agent.profile_fill is None
     assert profile.value_for("https://example.test/setup", "Password") is None
     assert ProfileStore(tmp_path).is_approved("https://example.test/another")
+
+
+def test_completed_task_surfaces_gate_refusals_for_promotion():
+    step = {
+        "id": "e1", "kind": "click", "role": "button", "label": "Continue",
+    }
+    browser = FakeBrowser(page(action=step, fingerprint="p1"))
+    agent = FakeAgent(page(action=step), "e1", irreversible=0.1)
+    agent.state["history"].append({
+        "kind": "click", "action": "Delete account", "skipped": True,
+        "recovery": "skipped: below the confidence floor", "outcome": "action failed",
+    })
+    task = DelegatedTask(agent, browser)
+    result = task.drive()
+    assert result["phase"] == "complete"
+    assert result["refusals"] == [{
+        "kind": "click", "label": "Delete account", "reason": "below the confidence floor",
+    }]
+    assert result["gate"] is None and result["stall"] is None
+
+
+def test_delegate_fixture_route_exposes_the_checkpoint_flow():
+    from urllib.request import urlopen
+
+    from scripts.trap_server import serve
+
+    server = serve(0)
+    try:
+        port = server.server_address[1]
+        html = urlopen(f"http://127.0.0.1:{port}/delegate", timeout=5).read().decode()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert 'type="password"' in html
+    assert 'id="sign-in"' in html
+    assert 'id="workspace" hidden' in html
+    assert "Publish demo site" in html
 
 
 def test_mcp_task_tools_keep_the_same_session_across_login_and_approval(monkeypatch):

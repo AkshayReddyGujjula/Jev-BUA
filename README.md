@@ -10,11 +10,13 @@
 
 Give it one goal. [TypeSafe's Jev](https://docs.typesafe.ai/introduction) picks an operation and an element. A small LLM writes text only when the operation is `TYPE_TEXT`.
 
-**Zürich → London on Google Flights in 7.1 seconds.** One natural-language goal, actual text generation, and loading waits included.
+**Historical baseline:** Zürich → London on Google Flights in 7.1 seconds. That recording predates the delegation and profile changes; the current version still needs a fresh live benchmark.
 
 <a href="docs/demo.mp4"><img src="docs/demo.gif" alt="A real Google Flights search at 1× speed, with generated city names and dynamic operation/target decisions" width="100%" /></a>
 
 [Watch the MP4](docs/demo.mp4) · [Measurements](docs/performance.md) · [Read the loop](AgentJevUltraFast/agent.py)
+
+[Architecture and current limits](docs/architecture.md) · [Delegation demo](docs/delegation-demo.md)
 
 ## The action space
 

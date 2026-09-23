@@ -23,7 +23,9 @@ This repo is the browser engine other agents drive. Three ways in, pick by what 
   own `JEV_MCP_BU_NAME` so instances never share a daemon or tab. Tools: `browser_do` (one goal +
   assertions), `browser_state` / `browser_act` (read the indexed elements, then execute one observed
   action with no model call), `browser_assert` (check a page, no model call), `browser_checks` (many
-  checks in parallel, one browser instance each). The tab is warm and navigated fresh per call
+  checks in parallel, one browser instance each), and `browser_task` / `browser_task_resume` /
+  `browser_task_cancel` (one task-owned visible tab with login and approval checkpoints).
+  The original tools use a warm tab navigated fresh per call
   (`fresh: true` forces a new one); every run can write JSONL evidence under `artifacts/evidence/`
   (`JEV_EVIDENCE_DIR=0` disables it). Start the server directly with
   `.venv\Scripts\python.exe jev_mcp_server.py` if an agent needs it explained.

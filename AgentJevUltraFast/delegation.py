@@ -127,6 +127,20 @@ class DelegatedTask:
                 for item in (state.get("checks") or [])
             ] if self.phase == "complete" else [],
             "readback_error": state.get("readback_error") if self.phase == "complete" else None,
+            "gate": state.get("gate") if self.phase == "complete" else None,
+            "stall": state.get("stall") if self.phase == "complete" else None,
+            "failure_class": state.get("failure_class") if self.phase == "complete" else None,
+            # Gate refusals executed nothing; surface them so a caller can promote a
+            # standing instruction with `run_task.py --mode <slug> --remember`.
+            "refusals": [
+                {
+                    "kind": item.get("kind"),
+                    "label": item.get("action"),
+                    "reason": str(item.get("recovery") or "").removeprefix("skipped: ") or None,
+                }
+                for item in state.get("history", [])
+                if item.get("skipped")
+            ][-5:],
             "active_seconds": round(active_seconds, 3),
             "wall_seconds": round(time.time() - self.created_at, 3),
             "evidence": state.get("evidence"),
