@@ -33,11 +33,13 @@ Jev API, so it is a manual demo, not part of `pytest`.
 
 For a portfolio video, record the visible Chrome tab, the terminal's three
 checkpoints, and the final JSON at original speed. Report the task's Jev input
-tokens and time from that run. Compare at least four alternating cold/warm
-runs against the original browser loop and the orchestrator's own browser
-tool, using the same fixture and assertions. Save raw runs before publishing
-a latency or cost claim. The historical Flights numbers in this repository do
-not measure the new task interface.
+tokens and time from that run. For a repeatable cold/warm comparison on a
+login-free fixture, run
+`uv run --env-file .env python scripts/measure_delegation.py --pairs 3`: it
+alternates cache-off and cache-on arms, verifies every run, and writes raw runs
+plus medians to `artifacts/delegation-measurement/`. Save raw runs before
+publishing a latency or cost claim. The historical Flights numbers in this
+repository do not measure the new task interface.
 
 Known demo limits: the fixture uses a simple same-tab login; OAuth popups and
 native passkey dialogs are not covered. The approval answer is obtained by

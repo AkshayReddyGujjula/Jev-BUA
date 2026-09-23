@@ -90,6 +90,7 @@ so use a trusted orchestrator and inspect live actions for sensitive work.
 | Learned-value origin scope and verified-only replay | Implemented and offline-tested |
 | Jev mode router | Shadow by default; enforcement requires independent labels |
 | Real Chrome end-to-end delegation demo | Scripted; live verification pending |
+| Checkout folder rename to `AgentJevUltraFast` | Run `scripts/migrate_folder.ps1` with every agent closed |
 | Resume after server restart, OAuth popup/new-tab journeys | Pending |
 | Shadow DOM, iframe controls, native passkey dialogs | Pending |
 | Windows DPAPI secret vault | Separate later feature |
