@@ -44,7 +44,9 @@ RECOVERY_LIMIT = 6
 # rarely waits on the helper (measured 2026-09-23: two waits of ~1.35 s on the Flights path).
 PREFETCH_ENABLED = os.environ.get("JEV_TEXT_PREFETCH", "1") not in {"0", "off", "false"}
 PREFETCH_FIELDS = 12
-_PREFETCH_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="jev-prefetch")
+# Shared by every agent in the process: parallel checks (up to 10 workers) must not queue
+# their drafts behind each other, or TYPE_TEXT waits on a draft that has not started.
+_PREFETCH_POOL = ThreadPoolExecutor(max_workers=12, thread_name_prefix="jev-prefetch")
 # A supervisor sub-goal steers this many actions, then Jev is back on the caller's goal alone.
 GUIDANCE_STEPS = 6
 DEAD_OUTCOMES = {"no visible change", "action failed", "loop detected"}
