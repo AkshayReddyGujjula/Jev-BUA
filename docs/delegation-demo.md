@@ -31,6 +31,19 @@ Jev API, so it is a manual demo, not part of `pytest`.
    site**. Inspect `active_seconds`, `usage`, and the evidence file path in the
    final JSON. A `done` without `verified` is not a pass.
 
+The script creates a `delegation-demo` mode on first run (under
+`~/.jev-ultrafast/modes/`) whose owner-set `specialist.irreversible_floor` is
+0.6. The fixture publishes nothing real, and without that override the
+confidence gate correctly withholds the publish click — its target confidence
+lands around 0.86 against the default 0.9 irreversible floor — which is a good
+safety demonstration but not a completed task. The floor is user config, never
+model-set.
+
+For an automated version of the same flow (the script plays the human through
+CDP), run `uv run --env-file .env python scripts/verify_delegation.py`. It
+asserts the same three checkpoints and exits non-zero unless the outcome is
+`verified`.
+
 For a portfolio video, record the visible Chrome tab, the terminal's three
 checkpoints, and the final JSON at original speed. Report the task's Jev input
 tokens and time from that run. For a repeatable cold/warm comparison on a

@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from AgentJevUltraFast import Agent  # noqa: E402
 from AgentJevUltraFast.browser import Browser  # noqa: E402
 from AgentJevUltraFast.delegation import DelegatedTask  # noqa: E402
+from scripts.demo_mode import DEMO_GOAL, DEMO_SLUG, ensure_demo_mode  # noqa: E402
 
 
 def main():
@@ -26,13 +27,14 @@ def main():
         parser.error("TYPESAFE_API_KEY is required; load your local .env before running")
 
     os.environ["JEV_TAB_MODE"] = "foreground"
+    ensure_demo_mode()
     browser = Browser(args.url, follow_tabs=False)
     agent = None
     task = None
     try:
         agent = Agent(
-            args.url, "After I sign in, name the project and publish the demo site.",
-            browser=browser, mode="off", values={"Project name": args.project},
+            args.url, DEMO_GOAL,
+            browser=browser, mode=DEMO_SLUG, values={"Project name": args.project},
             expect={"text_contains": ["Published demo site"]},
             evidence_dir=Path("artifacts") / "delegation-demo",
         )
