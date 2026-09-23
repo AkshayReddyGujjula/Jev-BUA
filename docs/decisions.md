@@ -105,6 +105,23 @@ as `{"values": ...}` (measured: the model drops the wrapper on some real pages).
 Measured on Flights (background tab, 4 runs): both text waits 0 ms, 10.5-12.8 s verified
 4/4, 3 batch calls per run instead of 2 single calls.
 
+## ADR-012 — Review hardening of the supervisor and the ungated clicks (2026-09-23)
+
+An independent adversarial review (OpenCode, deepseek-v4.1-flash) of ADR-007..011 found,
+and this fixes: the supervisor could press Enter (key actions are not gated) - key actions
+are no longer supervisor-executable; it judged a click with Jev's *previous* irreversible
+reading, possibly from another page - the reading now counts only when its fingerprint is
+the current page's, and a missing one is treated as possibly irreversible; a link labelled
+"Unsubscribe" or "Deactivate account" escaped both the supervisor's commit check and the
+delegation boundary - the shared commit/security vocabulary now lives in gates.py, gains
+`deactivate` and `unsubscribe`, and is checked before the role exemption (toggles excepted);
+in delegated tasks a supervisor action is always re-entered as a hint so the approval
+boundary judges it with a fresh reading. With reversible actions ungated (ADR-008), a click
+whose own label names a commit keeps a 0.5 floor (`JEV_GATE_LABELLED`) even when the page-
+level `irreversible` noul reads low or is malformed - a "Delete" at 0.4 is refused, a
+"Search" at 0.4 is not. `passphrase`, `passkey` and `token` joined the sensitive labels, and
+supervision records are redacted like every other result field.
+
 ## ADR-003 — No secret store; the profile holds non-secret data
 
 `~/.jev-ultrafast/profile/` stores identity fields and site usernames as

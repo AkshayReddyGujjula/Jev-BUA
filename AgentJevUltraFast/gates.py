@@ -15,6 +15,7 @@ low reading the loop re-observes once, and if the second reading is still low th
 """
 
 import os
+import re
 
 # Kinds that change the page. WAIT, SCROLL, BACK and key presses are reversible by nature.
 GATED_KINDS = {"click", "fill", "select", "seek"}
@@ -45,6 +46,37 @@ REVERSIBLE_MIN = _threshold("JEV_GATE_REVERSIBLE", 0.0)
 IRREVERSIBLE_MIN = _threshold("JEV_GATE_IRREVERSIBLE", 0.9)
 # The lowest a mode may set its committable-click floor (user config, never model-set).
 MODE_FLOOR_MIN = 0.5
+# A click whose own label names a commit keeps a floor even when Jev's page-level
+# `irreversible` reading is low, stale or malformed (it rates "the most consequential offered
+# action", not the chosen one). Code-owned: a "Delete" at 0.4 confidence is refused whatever
+# the noul said. Plain clicks (Search, One way, a city) stay ungated.
+LABELLED_MIN = _threshold("JEV_GATE_LABELLED", 0.5)
+COMMIT_LABEL = re.compile(
+    r"\b(publish|deploy|launch|go live|buy|purchase|pay|checkout|place order|"
+    r"delete|remove|destroy|terminate|close account|deactivate|unsubscribe|submit|send|"
+    r"transfer|save changes|apply changes|archive|unpublish|revoke|disconnect|refund|confirm|"
+    r"activate|connect domain|cancel subscription|change password|"
+    r"disable (?:2fa|mfa)|enable (?:2fa|mfa))\b",
+    re.IGNORECASE,
+)
+SECURITY_LABEL = re.compile(r"\b(password|passkey|2fa|mfa|security|recovery code)\b", re.IGNORECASE)
+
+
+TOGGLE_ROLES = {"checkbox", "radio", "switch"}
+
+
+def commit_labelled(action):
+    """True for a click whose own label names a commit or an account-security change.
+
+    Toggles are exempt ("I confirm the information is accurate" is a checkbox, and ticking
+    it commits nothing); links are not ("Unsubscribe" is usually a link).
+    """
+    label = str(action.get("label") or "")
+    return (
+        action.get("kind") in COMMITTABLE_KINDS
+        and (action.get("role") or "").lower() not in TOGGLE_ROLES
+        and bool(COMMIT_LABEL.search(label) or SECURITY_LABEL.search(label))
+    )
 IRREVERSIBLE_NOUL = _threshold("JEV_IRREVERSIBLE_THRESHOLD", 0.5)
 
 
@@ -77,7 +109,10 @@ def check(decision, action, irreversible_floor=None):
         and action.get("kind") in COMMITTABLE_KINDS
         and (action.get("role") or "").lower() not in REVERSIBLE_ROLES
     )
+    labelled = commit_labelled(action)
     floor = IRREVERSIBLE_MIN if high_stakes else REVERSIBLE_MIN
+    if labelled and not high_stakes:
+        floor = max(floor, LABELLED_MIN)
     if high_stakes and irreversible_floor is not None:
         try:
             floor = min(IRREVERSIBLE_MIN, max(MODE_FLOOR_MIN, float(irreversible_floor)))
@@ -87,8 +122,9 @@ def check(decision, action, irreversible_floor=None):
         return None
     return {
         "reason": (
-            "irreversible action below its confidence floor"
-            if high_stakes else "action below its confidence floor"
+            "irreversible action below its confidence floor" if high_stakes
+            else "commit-labelled action below its confidence floor" if labelled
+            else "action below its confidence floor"
         ),
         "confidence": round(float(confidence), 3),
         "target_confidence": target_confidence,

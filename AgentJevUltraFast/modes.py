@@ -34,7 +34,8 @@ from urllib.parse import urlsplit
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 SENSITIVE_RE = re.compile(
-    r"(password|passcode|passwd|one[- ]?time|otp|verification code|security code|"
+    r"(password|passphrase|passkey|passcode|passwd|(?<![a-z0-9])token(?![a-z0-9])|"
+    r"one[- ]?time|otp|verification code|security code|"
     r"recovery code|backup code|auth(?:enticator| code)|2fa|two[- ]?factor|"
     r"cvv|cvc|card number|credit card|ssn|social security|secret|api key|access token|"
     r"passport|iban|national insurance|bank account|routing number|sort code|seed phrase|"

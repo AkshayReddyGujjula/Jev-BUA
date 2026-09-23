@@ -889,3 +889,10 @@ def test_retry_context_changes_with_mode_memory():
     second = model.field_context("g", action, page_state, [],
                                  mode_state={"name": "m", "memory": "Bob"})
     assert first != second
+
+
+@pytest.mark.parametrize("label", ["Passphrase", "Passkey", "API token", "Token"])
+def test_more_secret_labels_are_sensitive(label):
+    from AgentJevUltraFast import modes as m
+
+    assert m.is_sensitive(label)

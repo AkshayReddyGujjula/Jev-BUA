@@ -25,15 +25,15 @@ import json
 import os
 import time
 
-from .gates import IRREVERSIBLE_NOUL, REVERSIBLE_ROLES
+from .gates import IRREVERSIBLE_NOUL, REVERSIBLE_ROLES, commit_labelled
 from .model import TEXT_SESSION, post_json
 from .questions import SUPERVISOR
 
 VERDICTS = {"hint", "act", "needs_human", "done", "impossible"}
 NEEDS = {"login", "captcha", "one_time_code", "missing_information", "decision"}
 # Element kinds the supervisor may execute directly. A click is allowed only when it cannot
-# commit anything (see committable()).
-ACT_KINDS = {"click", "fill", "select", "scroll", "key"}
+# commit anything (see committable()). No key presses: Enter submits forms and is not gated.
+ACT_KINDS = {"click", "fill", "select", "scroll"}
 MAX_ELEMENTS = 150
 
 
@@ -96,12 +96,17 @@ def committable(action, irreversible=None):
     """Could clicking this element commit something? Then the supervisor may only hint it."""
     if action.get("kind") != "click":
         return False
+    if commit_labelled(action):
+        # Checked before the role exemption: a link labelled "Unsubscribe" commits too.
+        return True
     if (action.get("role") or "").lower() in REVERSIBLE_ROLES:
         return False
     if action.get("form_submit"):
         return True
+    if irreversible is None:
+        return True
     try:
-        return float(irreversible or 0.0) >= IRREVERSIBLE_NOUL
+        return float(irreversible) >= IRREVERSIBLE_NOUL
     except (TypeError, ValueError):
         return True
 
@@ -158,8 +163,9 @@ def consult(page, goal, history, *, trigger, plan=None, guidance=None, screensho
             irreversible=None, config=None):
     """One bounded supervisor call. Returns (verdict or None, telemetry). Never raises.
 
-    `irreversible` is Jev's latest page-level reading; it decides whether a proposed click
-    is committable and must therefore be downgraded to a hint.
+    `irreversible` is Jev's page-level reading for THIS page (None when there is none, which
+    counts as possibly irreversible); it decides whether a proposed click is committable and
+    must therefore be downgraded to a hint.
     """
     config = config or settings()
     telemetry = {"trigger": trigger, "latency_ms": 0, "model": None, "usage": {},

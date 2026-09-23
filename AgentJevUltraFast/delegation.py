@@ -4,7 +4,7 @@ The Agent owns decisions and outcomes. This module owns pauses, human handoffs,
 budgets and the lifetime of its browser. A checkpoint is not a successful run.
 """
 
-import re
+
 import secrets
 import threading
 import time
@@ -12,20 +12,12 @@ import time
 from .agent import TERMINAL_STATUS, progress_key
 from .browser import StalePage
 from .cost import summarize as cost_summary
+from .gates import COMMIT_LABEL, SECURITY_LABEL
 from .modes import normalize_label, origin
 
 TASK_TTL_S = 30 * 60
 MAX_SLICE_S = 15.0
 MAX_TICKS_PER_SLICE = 8
-COMMIT_LABEL = re.compile(
-    r"\b(publish|deploy|launch|go live|buy|purchase|pay|checkout|place order|"
-    r"delete|remove|destroy|terminate|close account|submit|send|transfer|"
-    r"save changes|apply changes|archive|unpublish|revoke|disconnect|refund|confirm|"
-    r"activate|connect domain|cancel subscription|change password|"
-    r"disable (?:2fa|mfa)|enable (?:2fa|mfa))\b",
-    re.IGNORECASE,
-)
-SECURITY_LABEL = re.compile(r"\b(password|passkey|2fa|mfa|security|recovery code)\b", re.IGNORECASE)
 
 
 def human_boundary(page):
@@ -90,6 +82,9 @@ class DelegatedTask:
         # per-step preflight hook.
         self.agent.replay_plan = None
         self.agent._private_pixels = True
+        # A supervisor action must re-enter as a Jev decision with a fresh irreversible
+        # reading, so this boundary judges it like any other step.
+        self.agent._delegated = True
         if isinstance(self.agent.state.get("replay"), dict):
             self.agent.state["replay"]["available"] = False
 

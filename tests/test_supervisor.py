@@ -16,6 +16,8 @@ PAGE = {
         {"id": "e4", "kind": "click", "role": "checkbox", "label": "I agree"},
         {"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560},
         {"id": "wait", "kind": "wait", "label": "Wait for the page to update"},
+        {"id": "key_enter", "kind": "key", "key": "Enter", "label": "Press Enter"},
+        {"id": "e5", "kind": "click", "role": "link", "label": "Unsubscribe"},
     ],
 }
 
@@ -102,3 +104,19 @@ def test_consult_sends_named_trigger_and_screenshot_and_never_raises(monkeypatch
     monkeypatch.setattr(supervisor, "post_json", boom)
     verdict, telemetry = supervisor.consult(PAGE, "goal", [], trigger="stall_deadline")
     assert verdict is None and "RuntimeError" in telemetry["error"]
+
+
+def test_key_presses_are_never_supervisor_actions():
+    # Enter submits forms and key presses are not confidence-gated.
+    assert supervisor.validate({"verdict": "act", "element_id": "key_enter"}, PAGE,
+                               irreversible=0.0) is None
+
+
+def test_commit_labelled_link_is_downgraded_whatever_its_role():
+    v = supervisor.validate({"verdict": "act", "element_id": "e5"}, PAGE, irreversible=0.0)
+    assert v["verdict"] == "hint" and v["downgraded_from"] == "e5"
+
+
+def test_unknown_reading_counts_as_possibly_irreversible():
+    v = supervisor.validate({"verdict": "act", "element_id": "e2"}, PAGE, irreversible=None)
+    assert v["verdict"] == "hint"

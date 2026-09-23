@@ -469,8 +469,11 @@ def test_dead_streak_supervisor_action_executes_through_act(runner, consult, mon
 
 def test_pending_supervisor_action_is_dropped_when_the_page_moved(runner, consult, monkeypatch):
     calls, script = consult
+    fp = runner.state["page"]["fingerprint"]
+    runner.state["decisions"] = [{"irreversible": 0.1, "fingerprint": fp}]
     script["verdict"] = {"verdict": "act", "element_id": "e2", "reason": "open"}
     _dead_streak(runner)
+    assert runner.state["supervisor_decision"]["choice"] == "e2"
     moved = page()
     moved["url"] = "https://example.test/elsewhere"
     moved["fingerprint"] = "moved"
@@ -1126,7 +1129,7 @@ def test_explicit_budget_stop_is_terminal_and_finalized(runner):
 @pytest.mark.parametrize("confidence,irreversible,gated", [
     (0.9, 0.0, False),
     (0.7, 0.0, False),
-    (0.4, 0.0, False),          # reversible actions are not gated by default
+    (0.4, 0.0, True),           # a click labelled "Pay" keeps a floor whatever the noul says
     (0.7, 0.9, True),           # irreversible floor is 0.9
     (0.95, 0.9, False),
 ])
@@ -1982,3 +1985,58 @@ def test_plan_reaches_the_supervisor(runner, consult):
     runner.steps = ["Open settings", "Open billing"]
     runner._supervise("dead_streak")
     assert calls[0]["plan"] == ["Open settings", "Open billing"]
+
+
+@pytest.mark.parametrize("label,role,gated", [
+    ("Search", "button", False),                # plain clicks execute Jev's argmax
+    ("London", "option", False),
+    ("Delete project", "button", True),         # a destructive label keeps the 0.5 floor
+    ("Deactivate account", "link", True),       # role does not exempt a commit label
+    ("Unsubscribe", "link", True),
+    ("Change password", "button", True),
+    ("I confirm the information is accurate", "checkbox", False),   # a toggle commits nothing
+])
+def test_commit_labels_keep_a_floor_when_the_noul_reads_low(label, role, gated):
+    from AgentJevUltraFast import gates
+
+    verdict = gates.check({"confidence": 0.4, "irreversible": 0.1},
+                          {"kind": "click", "label": label, "role": role})
+    assert (verdict is not None) is gated
+
+
+def test_supervisor_act_is_downgraded_when_jevs_reading_is_from_another_page(runner, consult):
+    calls, script = consult
+    runner.state["decisions"] = [{"irreversible": 0.1, "fingerprint": "some-other-page"}]
+    script["verdict"] = {"verdict": "act", "element_id": "e2", "reason": "open it"}
+    runner._supervise("dead_streak")
+    assert calls[0]["irreversible"] is None
+    assert "supervisor_decision" not in runner.state and runner.state["guidance"]
+
+
+def test_supervisor_act_uses_a_fresh_reading_from_this_page(runner, consult):
+    calls, script = consult
+    fp = runner.state["page"]["fingerprint"]
+    runner.state["decisions"] = [{"irreversible": 0.1, "fingerprint": fp}]
+    script["verdict"] = {"verdict": "act", "element_id": "e2", "reason": "open it"}
+    runner._supervise("dead_streak")
+    assert runner.state["supervisor_decision"]["choice"] == "e2"
+
+
+def test_delegated_tasks_turn_supervisor_actions_into_hints(runner, consult):
+    calls, script = consult
+    fp = runner.state["page"]["fingerprint"]
+    runner.state["decisions"] = [{"irreversible": 0.1, "fingerprint": fp}]
+    runner._delegated = True
+    script["verdict"] = {"verdict": "act", "element_id": "e2", "reason": "open it"}
+    runner._supervise("dead_streak")
+    assert "supervisor_decision" not in runner.state
+    assert "Open Search" in runner.state["guidance"]["subgoal"]
+    assert runner.state["supervision"][-1]["verdict"] == "hint"
+
+
+def test_supervision_records_are_redacted(runner, consult):
+    calls, script = consult
+    runner.private_values = {"hunter22secret"}
+    script["verdict"] = {"verdict": "impossible", "reason": "typed hunter22secret but no luck"}
+    runner._supervise("dead_streak")
+    assert "hunter22secret" not in json.dumps(runner.state["supervision"])

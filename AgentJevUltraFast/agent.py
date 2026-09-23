@@ -630,28 +630,39 @@ class Agent:
             except Exception:
                 shot = None
         last = state["decisions"][-1] if state["decisions"] else {}
+        # Jev's irreversible reading counts only if it was taken on THIS page; a stale or
+        # missing one is unknown, and supervisor.committable treats unknown as committable.
+        reading = (last.get("irreversible")
+                   if last.get("fingerprint") == page.get("fingerprint") else None)
         asked = time.monotonic()
         try:
             verdict, telemetry = supervisor.consult(
                 redact(page, private), redact(state["goal"], private),
                 redact(state["history"], private), trigger=trigger,
                 plan=getattr(self, "steps", None), guidance=self._guidance(),
-                screenshot=shot, irreversible=last.get("irreversible"), config=config,
+                screenshot=shot, irreversible=reading, config=config,
             )
         finally:
             state["supervising"] = False
             self._credit_wait(asked)
-        record = {
+        if verdict and verdict["verdict"] == "act" and getattr(self, "_delegated", False):
+            # A delegated task's approval boundary must judge this step with a fresh Jev
+            # reading, so the supervisor's pick re-enters as advice, never as an action.
+            chosen = next(a for a in page["actions"] if a["id"] == verdict["element_id"])
+            verdict = {"verdict": "hint", "reason": verdict["reason"],
+                       "subgoal": f"Next, use the control labelled '{chosen.get('label')}'.",
+                       "downgraded_from": verdict["element_id"]}
+        record = redact({
             "trigger": trigger, "verdict": verdict["verdict"] if verdict else None,
             "step": len(state["history"]), "latency_ms": telemetry["latency_ms"],
             "model": telemetry["model"], "screenshot": telemetry["screenshot"],
             "error": telemetry["error"], "reason": (verdict or {}).get("reason"),
-        }
+        }, private)
         state.setdefault("supervision", []).append(record)
         evidence = getattr(self, "evidence", None)
         if evidence is not None:
             evidence.record("supervision", **record, usage=telemetry.get("usage"),
-                            subgoal=(verdict or {}).get("subgoal"),
+                            subgoal=redact((verdict or {}).get("subgoal"), private),
                             element_id=(verdict or {}).get("element_id"))
         if verdict is None:
             return False
@@ -674,7 +685,7 @@ class Agent:
             state["supervisor_decision"] = {
                 "choice": action["id"], "operation": operation, "target": None,
                 "confidence": 1.0, "probability": 1.0, "probabilities": {action["id"]: 1.0},
-                "irreversible": float(last.get("irreversible") or 0.0),
+                "irreversible": float(reading or 0.0),
                 "goal_done": 0.0, "stuck": 0.0, "cached": False, "supervisor": True,
                 "supervisor_text": verdict["text"], "model": telemetry["model"],
                 "latency_ms": telemetry["latency_ms"], "usage": telemetry.get("usage", {}),
