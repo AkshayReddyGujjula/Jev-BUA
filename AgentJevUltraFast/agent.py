@@ -212,10 +212,19 @@ def choice_probability(decision, alt):
 class Agent:
     def __init__(self, url, goals, *, record_dir=None, screenshots=False, values=None, find=None,
                  expect=None, browser=None, evidence_dir=None, replay_dir=None, mode=None,
-                 collect_steps=None):
+                 collect_steps=None, steps=None):
         task = goals.strip() if isinstance(goals, str) else "\n".join(goals).strip()
         if not task:
             raise ValueError("Supply a task")
+        # The orchestrator's optional step list. It is context for the supervisor when the
+        # loop is stuck, not a script: Jev's per-step request is unchanged by it.
+        if steps is not None and (
+            not isinstance(steps, (list, tuple))
+            or not all(isinstance(step, str) and step.strip() for step in steps)
+            or len(steps) > 30
+        ):
+            raise ValueError("plan must be a list of at most 30 non-empty strings")
+        self.steps = [" ".join(step.split())[:300] for step in steps] if steps else None
         plan = [task]
         self.pending_text = None
         self.start_url = url

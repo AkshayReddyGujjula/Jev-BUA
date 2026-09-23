@@ -9,6 +9,7 @@ Tab modes (env JEV_TAB_MODE, or --tab):
 """
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -84,15 +85,20 @@ def run_once(args):
     status, stall, outcome = None, None, None
     with Agent(args.url, args.goal, values=args.values, find=args.find, expect=args.expect,
                evidence_dir=args.evidence_dir, replay_dir=args.replay_dir,
-               mode=args.mode or None, collect_steps=args.collect_steps) as agent:
-        for state in agent.run():
-            trail.append(summarize(state))
-            if len(trail) > args.max_steps:
-                trail.append(summarize(agent.stop_budget(f"{args.max_steps}-step caller budget")))
-                return trail, f"stopped after {args.max_steps} actions", 2
-            if time.monotonic() - started > args.max_seconds:
-                trail.append(summarize(agent.stop_budget(f"{args.max_seconds}s caller budget")))
-                return trail, f"stopped after the {args.max_seconds}s budget", 2
+               mode=args.mode or None, collect_steps=args.collect_steps,
+               steps=args.plan) as agent:
+        try:
+            for state in agent.run():
+                trail.append(summarize(state))
+                if len(trail) > args.max_steps:
+                    trail.append(summarize(agent.stop_budget(f"{args.max_steps}-step caller budget")))
+                    return trail, f"stopped after {args.max_steps} actions", 2
+                if time.monotonic() - started > args.max_seconds:
+                    trail.append(summarize(agent.stop_budget(f"{args.max_seconds}s caller budget")))
+                    return trail, f"stopped after the {args.max_seconds}s budget", 2
+        finally:
+            if args.screenshot:
+                _save_screenshot(agent, args.screenshot)
         status = agent.state.get("status")
         stall = agent.state.get("stall")
         outcome = agent.state.get("outcome")
@@ -111,6 +117,17 @@ def run_once(args):
         reason = agent.state.get("blocked_reason")
         return trail, f"ended as {status} ({outcome})" + (f": {reason}" if reason else ""), 2
     return trail, None, 0
+
+
+def _save_screenshot(agent, path):
+    """Write the final page to `path` as JPEG, unless a private value is on the page."""
+    if getattr(agent, "_private_pixels", False):
+        print("screenshot skipped: a private value is on the page", file=sys.stderr)
+        return
+    try:
+        Path(path).write_bytes(base64.b64decode(agent.browser.screenshot(quality=70)))
+    except Exception as error:
+        print(f"screenshot unavailable: {type(error).__name__}", file=sys.stderr)
 
 
 def _json_arg(parser, raw, flag):
@@ -157,6 +174,13 @@ def main():
                              "({selector, text}) and harvest_at_least (collected items; pair it "
                              "with a page check). Accepts @path/to/file.json. "
                              "Without it the run's outcome is unknown: a DONE is not proof.")
+    parser.add_argument("--plan", default="",
+                        help="Optional JSON list of steps from the orchestrator (or @file). Given "
+                             "to the on-demand supervisor if the run gets stuck; Jev still "
+                             "decides every step from --goal.")
+    parser.add_argument("--screenshot", default="",
+                        help="Write the final page to this path as JPEG (skipped when a private "
+                             "value is on the page).")
     parser.add_argument("--evidence-dir", default=str(Path("artifacts") / "evidence"),
                         help="Directory for this run's JSONL evidence: every offered candidate, "
                              "answer, confidence, answering model and execution.")
@@ -189,6 +213,9 @@ def main():
     args.values = _json_arg(parser, args.values, "--values")
     if not isinstance(args.values, dict):
         parser.error("--values must be a JSON object mapping label -> text")
+    args.plan = _json_arg(parser, args.plan, "--plan") if args.plan else None
+    if args.plan is not None and not isinstance(args.plan, list):
+        parser.error("--plan must be a JSON list of step strings")
     args.expect = _json_arg(parser, args.expect, "--expect")
     if not isinstance(args.expect, dict):
         parser.error("--expect must be a JSON object of assertions")

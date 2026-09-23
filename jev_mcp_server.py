@@ -180,6 +180,15 @@ TOOLS = [
                                           "A recorded run repeats without a model call per step, "
                                           "falling back to Jev on the first mismatched step; the "
                                           "outcome is still decided by `expect`."},
+                "plan": {"type": "array", "items": {"type": "string"}, "maxItems": 30,
+                         "description": "Optional orchestrator step list. Given to the on-demand "
+                                        "supervisor if the run gets stuck; Jev still decides "
+                                        "every step from the goal. Put steps in `goal` to steer "
+                                        "Jev directly."},
+                "screenshot": {"type": "boolean", "default": False,
+                               "description": "Return the final page as an image (JPEG) with the "
+                                              "result - for 'navigate there and show me'. Skipped "
+                                              "when a private value is on the page."},
             },
             "required": ["goal", "url"],
         },
@@ -397,9 +406,11 @@ def tool_browser_do(args):
             "replay_dir": _replay_dir(args.get("replay")),
             "mode": args.get("mode") or None,
             "collect_steps": args.get("collect_steps"),
+            "steps": args.get("plan") or None,
         }
         if browser is not None:
             kwargs["browser"] = browser
+        image = None
         with Agent(args["url"], args["goal"], **kwargs) as agent:
             deadline = float(args.get("max_seconds", 60))
             started = time.monotonic()
@@ -419,6 +430,8 @@ def tool_browser_do(args):
                     )
                 except Exception:
                     location = None
+            if args.get("screenshot"):
+                image = _final_screenshot(agent, browser or agent.browser)
     finally:
         if max_steps:
             if previous_steps is None:
@@ -434,7 +447,7 @@ def tool_browser_do(args):
         budget_exhausted=state["status"] == "stalled",
     )
     verified = {"verified": True, "refuted": False}.get(outcome) if expect else None
-    return redact({
+    result = redact({
         "status": state["status"],
         "outcome": outcome,
         "verified": verified,
@@ -465,6 +478,21 @@ def tool_browser_do(args):
             for h in state["history"][-12:]
         ],
     }, getattr(agent, "private_values", ()))
+    if args.get("screenshot"):
+        result["screenshot"] = image["note"]
+        if image.get("data"):
+            result["_image"] = image["data"]
+    return result
+
+
+def _final_screenshot(agent, browser):
+    """The final page as base64 JPEG, or a note saying why not. Never raises."""
+    if getattr(agent, "_private_pixels", False):
+        return {"note": "skipped: a private value is on the page"}
+    try:
+        return {"note": "attached", "data": browser.screenshot(quality=70)}
+    except Exception as error:
+        return {"note": f"unavailable: {type(error).__name__}"}
 
 
 ACT_KINDS = {"CLICK": "click", "TYPE_TEXT": "fill", "SELECT": "select", "SEEK": "seek"}
@@ -821,8 +849,12 @@ def handle(request):
                 "content": [{"type": "text", "text": f"{type(error).__name__}: {error}"}],
                 "isError": True,
             }}
+        image = result.pop("_image", None) if isinstance(result, dict) else None
+        content = [{"type": "text", "text": json.dumps(result, indent=2, default=str)}]
+        if image:
+            content.append({"type": "image", "data": image, "mimeType": "image/jpeg"})
         return {"jsonrpc": "2.0", "id": rid, "result": {
-            "content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}],
+            "content": content,
             "isError": isinstance(result, dict) and bool(result.get("error")),
         }}
     if method and method.startswith("notifications/"):

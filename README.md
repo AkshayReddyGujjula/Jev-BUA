@@ -132,6 +132,21 @@ Jev decides every step. A second, slower model (DeepSeek v4.1 Flash by default, 
 
 No coordinates, selectors or scripts are ever accepted. At most `JEV_SUPERVISOR_LIMIT` (2) consults per run, each bounded by `JEV_SUPERVISOR_TIMEOUT` (8 s); every consult is returned in `supervision` and written to evidence. `JEV_SUPERVISOR=off` disables it.
 
+## Navigate there and show me
+
+A coding agent testing its own app can hand over the navigation and get facts plus a picture back in one call:
+
+```json
+{"name": "browser_do", "arguments": {
+  "goal": "Open Settings, then Billing, and show the current plan",
+  "url": "http://localhost:3000",
+  "plan": ["Open Settings", "Open Billing"],
+  "expect": {"text_contains": "Current plan"},
+  "screenshot": true}}
+```
+
+The result carries `status`, the code-owned `outcome`, the check details, the final URL and title, and — with `screenshot: true` — the final page as a JPEG image content block (rendered even from a background tab; skipped when a private value is on the page). `plan` is optional orchestrator context for the supervisor if the run gets stuck; Jev still decides every step from the goal. `run_task.py --plan '[...]' --screenshot final.jpg` does the same from the CLI. Measured on the local fixture through the real MCP server: verified in 2.3 s of agent time, 5.0 s wall including browser setup.
+
 ## Delegate a browser goal from another agent
 
 The MCP server offers `browser_task(goal, url, expect?, mode?)`. It returns a task ID

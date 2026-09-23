@@ -1967,3 +1967,18 @@ def test_a_finished_older_draft_is_used_without_waiting(runner, monkeypatch):
     gate.set()
     assert text == "dune" and meta["waited_ms"] == 0
     assert time.monotonic() - started < 1.0
+
+
+@pytest.mark.parametrize("steps", [["ok", ""], "one string", [3], ["x"] * 31])
+def test_plan_must_be_a_short_list_of_steps(steps):
+    browser = Mock(observe=Mock(return_value=page()), private_values=[])
+    with pytest.raises(ValueError):
+        loop.Agent("https://example.test/", "goal", browser=browser, steps=steps)
+
+
+def test_plan_reaches_the_supervisor(runner, consult):
+    calls, script = consult
+    script["verdict"] = {"verdict": "hint", "subgoal": "Open billing"}
+    runner.steps = ["Open settings", "Open billing"]
+    runner._supervise("dead_streak")
+    assert calls[0]["plan"] == ["Open settings", "Open billing"]

@@ -481,3 +481,38 @@ def test_mcp_does_not_expire_while_a_worker_is_fenced(monkeypatch):
     finally:
         release.set()
         worker.join(2)
+
+
+def test_browser_do_returns_the_final_page_as_an_image_and_passes_the_plan(monkeypatch):
+    seen = {}
+
+    class ShotAgent(FakeAgent):
+        def __init__(self, url, goal, **kwargs):
+            super().__init__(page(), "e1")
+            seen.update(kwargs)
+            self.browser = FakeBrowser(page())
+            self.browser.screenshot = lambda quality=60: "QUJD"
+            self.expect = None
+            self.state["text_calls"] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def run(self):
+            self.state["status"] = "done"
+            yield self.state
+
+        def snapshot(self):
+            return self.state
+
+    monkeypatch.setenv("JEV_WARM", "0")
+    _, call = _mcp(monkeypatch, ShotAgent)
+    result = call("browser_do", {"goal": "g", "url": "https://x.test/", "screenshot": True,
+                                 "plan": ["Open settings", "Open billing"]})
+    assert seen["steps"] == ["Open settings", "Open billing"]
+    assert result["content"][1] == {"type": "image", "data": "QUJD", "mimeType": "image/jpeg"}
+    assert '"screenshot": "attached"' in result["content"][0]["text"]
+    assert "_image" not in result["content"][0]["text"]
