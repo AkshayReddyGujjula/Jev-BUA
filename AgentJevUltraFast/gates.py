@@ -36,8 +36,15 @@ def _threshold(name, default):
         return default
 
 
-REVERSIBLE_MIN = _threshold("JEV_GATE_REVERSIBLE", 0.5)
+# Reversible actions are not gated by default (2026-09-23). Refusing one does not make a run
+# safer - it can be undone - but it does cost a re-observe, a second decision and, on a
+# confidently-split page, a loop: a plain Search click at 0.47 was refused twice and the
+# trap form never submitted. The original loop always executed Jev's argmax; this restores
+# that for everything that cannot commit. Set JEV_GATE_REVERSIBLE to re-enable a floor.
+REVERSIBLE_MIN = _threshold("JEV_GATE_REVERSIBLE", 0.0)
 IRREVERSIBLE_MIN = _threshold("JEV_GATE_IRREVERSIBLE", 0.9)
+# The lowest a mode may set its committable-click floor (user config, never model-set).
+MODE_FLOOR_MIN = 0.5
 IRREVERSIBLE_NOUL = _threshold("JEV_IRREVERSIBLE_THRESHOLD", 0.5)
 
 
@@ -45,7 +52,7 @@ def check(decision, action, irreversible_floor=None):
     """None when the action may execute, else the gate verdict (a dict for evidence).
 
     `irreversible_floor` is a mode's own floor for committable actions. A mode may lower it
-    for work the operator trusts (never below the reversible floor); lowering it is a
+    for work the operator trusts (never below MODE_FLOOR_MIN); lowering it is a
     deliberate, user-authored choice recorded in the mode file, not a model decision.
     """
     if action.get("kind") not in GATED_KINDS:
@@ -73,7 +80,7 @@ def check(decision, action, irreversible_floor=None):
     floor = IRREVERSIBLE_MIN if high_stakes else REVERSIBLE_MIN
     if high_stakes and irreversible_floor is not None:
         try:
-            floor = min(IRREVERSIBLE_MIN, max(REVERSIBLE_MIN, float(irreversible_floor)))
+            floor = min(IRREVERSIBLE_MIN, max(MODE_FLOOR_MIN, float(irreversible_floor)))
         except (TypeError, ValueError):
             floor = IRREVERSIBLE_MIN
     if confidence >= floor:

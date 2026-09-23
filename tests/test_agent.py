@@ -416,30 +416,150 @@ def test_key_action_dispatches_key_down_and_up(monkeypatch):
     assert cdp.call_args_list[0].args[0] == "Input.dispatchKeyEvent"
 
 
-def test_dead_actions_escalate_before_blocking(runner, monkeypatch):
+def _dead_streak(runner):
     runner.state["history"] = [
         {"step": i, "choice": f"x{i}", "kind": "click", "outcome": "no visible change"} for i in (1, 2)
     ]
-    runner.state["browser"].screenshot = Mock(return_value="img")
-    monkeypatch.setattr(loop, "propose_action", lambda *args, **kwargs: {
-        "action": {"kind": "key", "key": "f", "code": "KeyF", "vk": 70, "label": "Recovery key f"},
-        "label": "Recovery: press f", "latency_ms": 5, "reason": "stuck",
-    })
     runner.state["decision"] = decision("e3")
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
-    assert runner.state["status"] == "ready"
-    assert runner.state["history"][-1]["kind"] == "escalation"
-    assert runner.state["escalations"] == 1
 
 
-def test_dead_actions_block_when_escalations_exhausted(runner, monkeypatch):
-    runner.state["history"] = [
-        {"step": i, "choice": f"x{i}", "kind": "click", "outcome": "no visible change"} for i in (1, 2)
-    ]
-    runner.state["escalations"] = 2
-    runner.state["decision"] = decision("e3")
-    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+@pytest.fixture
+def consult(monkeypatch):
+    """The supervisor switched on, with a scripted verdict and a record of every call."""
+    calls = []
+    script = {"verdict": None}
+    monkeypatch.setattr(loop.supervisor, "settings", lambda: {
+        "key": "k", "base": "http://x", "model": "sup", "timeout": 1.0, "limit": 2,
+        "reasoning": "none"})
+
+    def fake(page, goal, history, **kwargs):
+        calls.append({"page": page, "goal": goal, "history": history, **kwargs})
+        raw = script["verdict"]
+        verdict = loop.supervisor.validate(raw, page, irreversible=kwargs.get("irreversible"))
+        return verdict, {"trigger": kwargs["trigger"], "latency_ms": 5, "model": "sup",
+                         "usage": {}, "screenshot": bool(kwargs.get("screenshot")), "error": None}
+
+    monkeypatch.setattr(loop.supervisor, "consult", fake)
+    return calls, script
+
+
+def test_dead_streak_blocks_when_the_supervisor_is_off(runner):
+    _dead_streak(runner)
     assert runner.state["status"] == "blocked"
+    assert not runner.state.get("supervision")
+
+
+def test_dead_streak_supervisor_action_executes_through_act(runner, consult, monkeypatch):
+    calls, script = consult
+    script["verdict"] = {"verdict": "act", "element_id": "e1", "text": "laptops", "reason": "fill it"}
+    _dead_streak(runner)
+    assert calls[0]["trigger"] == "dead_streak"
+    assert runner.state["status"] == "ready"
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: pytest.fail("no Jev call for a pending action"))
+    runner.state["browser"].act.reset_mock()
+    runner.command("predict")
+    assert runner.state["decision"]["supervisor"] is True
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    executed = runner.state["browser"].act.call_args
+    assert executed.args[0]["id"] == "e1"
+    assert "laptops" in executed.args + tuple(executed.kwargs.values())
+    assert runner.state["text_calls"][-1]["model"] == "supervisor"
+
+
+def test_pending_supervisor_action_is_dropped_when_the_page_moved(runner, consult, monkeypatch):
+    calls, script = consult
+    script["verdict"] = {"verdict": "act", "element_id": "e2", "reason": "open"}
+    _dead_streak(runner)
+    moved = page()
+    moved["url"] = "https://example.test/elsewhere"
+    moved["fingerprint"] = "moved"
+    runner.state["page"] = moved
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: decision("e1"))
+    runner.command("predict")
+    assert not runner.state["decision"].get("supervisor")
+
+
+def test_committable_supervisor_click_becomes_a_hint_not_an_action(runner, consult, monkeypatch):
+    calls, script = consult
+    runner.state["decisions"] = [{"irreversible": 0.95}]
+    script["verdict"] = {"verdict": "act", "element_id": "e3", "reason": "submit"}
+    _dead_streak(runner)
+    assert "supervisor_decision" not in runner.state
+    assert "Go" in runner.state["guidance"]["subgoal"]
+
+
+def test_hint_steers_jev_then_expires(runner, consult, monkeypatch):
+    calls, script = consult
+    script["verdict"] = {"verdict": "hint", "subgoal": "Open the search box first"}
+    _dead_streak(runner)
+    seen = []
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: seen.append(k.get("guidance")) or decision("e1"))
+    runner.command("predict")
+    assert seen == ["Open the search box first"]
+    runner.state["history"] += [{"step": 9, "kind": "click", "outcome": "navigated"}] * loop.GUIDANCE_STEPS
+    runner.command("predict")
+    assert seen[-1] is None
+
+
+def test_guidance_rides_the_operation_heads_only(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "offline")
+    body = {}
+
+    def fake_post(url, key, payload, **kwargs):
+        body.update(payload)
+        raise RuntimeError("stop after capturing the request")
+
+    import AgentJevUltraFast.model as m
+    original = m.post_json
+    m.post_json = fake_post
+    try:
+        with pytest.raises(RuntimeError):
+            m.choose(page(), "Find a book", [], use_cache=False, guidance="Open the menu")
+    finally:
+        m.post_json = original
+    questions = body["questions"]
+    assert questions["operation"]["instructions"]["subgoal"] == "Open the menu"
+    assert "subgoal" not in questions["goal_done"]["instructions"]
+    assert "subgoal" not in questions["irreversible"]["instructions"]
+
+
+def test_stall_consults_once_per_limit_then_stops(runner, consult):
+    calls, script = consult
+    script["verdict"] = {"verdict": "hint", "subgoal": "Scroll to the form"}
+    runner.state["progress_at"] = time.monotonic() - 30.0
+    state = runner._stop_stalled()
+    assert state["status"] == "ready" and calls[-1]["trigger"] == "no_progress_deadline"
+    assert not runner.stalled()                     # a fresh window was opened
+    runner.state["supervisions"] = 2                # the limit is spent
+    runner.state["progress_at"] = time.monotonic() - 30.0
+    assert runner._stop_stalled()["status"] == "stalled"
+    assert len(calls) == 1
+
+
+def test_model_blocked_can_be_overruled_by_supervisor_done(runner, consult):
+    calls, script = consult
+    script["verdict"] = {"verdict": "done", "reason": "results are shown"}
+    runner.state["decision"] = {**decision("BLOCKED"), "choice": "BLOCKED", "operation": "BLOCKED"}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert calls[0]["trigger"] == "model_blocked"
+    assert runner.state["status"] == "done"
+    assert runner.state["outcome"] == "unknown"      # a supervisor DONE is not proof
+
+
+def test_supervisor_never_sees_private_values_or_their_pixels(runner, consult):
+    calls, script = consult
+    script["verdict"] = {"verdict": "impossible", "reason": "no"}
+    runner.private_values = {"hunter22secret"}
+    runner._private_pixels = True
+    runner.state["goal"] = "Log in with hunter22secret"
+    runner.state["browser"].screenshot = Mock(return_value="img")
+    runner._supervise("dead_streak")
+    assert "hunter22secret" not in json.dumps(calls[0]["goal"])
+    assert calls[0]["screenshot"] is None
+    runner.state["browser"].screenshot.assert_not_called()
+    assert runner.state["status"] == "blocked"
+    assert "impossible" in runner.state["blocked_reason"]
 
 
 def test_reattach_adopts_a_replaced_target(monkeypatch):
@@ -1005,8 +1125,8 @@ def test_explicit_budget_stop_is_terminal_and_finalized(runner):
 
 @pytest.mark.parametrize("confidence,irreversible,gated", [
     (0.9, 0.0, False),
-    (0.7, 0.0, False),          # reversible floor is 0.5
-    (0.4, 0.0, True),
+    (0.7, 0.0, False),
+    (0.4, 0.0, False),          # reversible actions are not gated by default
     (0.7, 0.9, True),           # irreversible floor is 0.9
     (0.95, 0.9, False),
 ])
@@ -1022,7 +1142,24 @@ def test_confidence_gate_floors(confidence, irreversible, gated):
                        {"kind": "scroll", "label": "Scroll down"}) is None
 
 
-def test_low_confidence_mutation_reobserves_then_skips(runner):
+@pytest.fixture
+def reversible_floor(monkeypatch):
+    """Opt back in to a reversible floor (JEV_GATE_REVERSIBLE=0.5) to test the machinery."""
+    from AgentJevUltraFast import gates
+
+    monkeypatch.setattr(gates, "REVERSIBLE_MIN", 0.5)
+
+
+def test_reversible_floor_is_opt_in(monkeypatch):
+    from AgentJevUltraFast import gates
+
+    click = {"kind": "click", "label": "Search", "role": "button"}
+    assert gates.check({"confidence": 0.47, "irreversible": 0.1}, click) is None
+    monkeypatch.setattr(gates, "REVERSIBLE_MIN", 0.5)
+    assert gates.check({"confidence": 0.47, "irreversible": 0.1}, click) is not None
+
+
+def test_low_confidence_mutation_reobserves_then_skips(runner, reversible_floor):
     runner.state["decision"] = {**decision(), "confidence": 0.2}
     state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert state["status"] == "ready"
@@ -1051,7 +1188,7 @@ def test_second_low_confidence_irreversible_reading_abstains(runner):
     runner.state["browser"].act.assert_not_called()
 
 
-def test_a_refusal_reveals_content_below_the_fold(runner):
+def test_a_refusal_reveals_content_below_the_fold(runner, reversible_floor):
     page = runner.state["page"]
     page["actions"].append({"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560})
     runner.state["decision"] = {**decision("e3"), "confidence": 0.2}
@@ -1125,7 +1262,7 @@ def test_a_mode_may_lower_the_irreversible_floor():
     verdict = gates.check({"confidence": 0.6, "irreversible": 0.9}, click, irreversible_floor=0.7)
     assert verdict is not None and verdict["floor"] == 0.7
     clamped = gates.check({"confidence": 0.4, "irreversible": 0.9}, click, irreversible_floor=0.1)
-    assert clamped["floor"] == 0.5                    # never below the reversible floor
+    assert clamped["floor"] == 0.5                    # never below MODE_FLOOR_MIN
 
 
 def test_reversible_roles_do_not_inherit_a_submit_buttons_risk():
@@ -1658,3 +1795,45 @@ def test_text_helper_disables_reasoning_with_the_field_the_endpoint_honours(monk
     output, _ = model.text_call("system", {"field": "Where to?"})
     assert output == {"text": "London"}
     assert seen["reasoning_effort"] == "none" and "reasoning" not in seen
+
+
+def test_goal_literals_are_not_masked_but_secrets_are():
+    browser = Mock(observe=Mock(return_value=page()), private_values=[])
+    agent = loop.Agent(
+        "https://example.test/", "Search the catalogue for laptops, then sign in",
+        values={"Search the catalogue": "laptops", "Password": "laptops-2",
+                "Email": "ada@example.test"},
+        browser=browser,
+    )
+    # "laptops" is already in the goal every model receives; hiding it on the page only
+    # hid the evidence of success. A value absent from the goal, or under a sensitive
+    # label, stays masked.
+    assert "laptops" not in agent.private_values
+    assert {"laptops-2", "ada@example.test"} <= agent.private_values
+
+
+def test_a_sensitive_label_stays_private_even_when_the_goal_names_it():
+    browser = Mock(observe=Mock(return_value=page()), private_values=[])
+    agent = loop.Agent("https://example.test/", "Log in with password hunter22",
+                       values={"Password": "hunter22"}, browser=browser)
+    assert "hunter22" in agent.private_values
+
+
+def test_generated_text_stays_visible_to_jev(runner, monkeypatch):
+    # A value the text model derived from the goal is already known to the provider;
+    # masking it hid the typed query and every autocomplete option that echoed it.
+    monkeypatch.setattr(loop, "field_text", Mock(return_value=("Zurich", {"model": "t", "latency_ms": 5})))
+    runner.private_values = set()
+    runner.state["decision"] = decision("e1")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert "Zurich" not in runner.private_values
+    assert not getattr(runner, "_private_pixels", False)
+
+
+def test_private_sources_are_still_masked_once_typed(runner):
+    runner.private_values = {"ada@example.test"}
+    runner.values = {"Search": "ada@example.test"}
+    runner.state["decision"] = decision("e1")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner._private_pixels is True
+    assert "ada@example.test" in runner.state["browser"].private_values

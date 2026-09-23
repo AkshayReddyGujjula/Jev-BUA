@@ -23,6 +23,7 @@ from .questions import (
     NEXT_ACTION,
     REOBSERVE,
     STUCK,
+    SUBGOAL,
     TARGET,
     TEXT_VALUE,
 )
@@ -225,7 +226,7 @@ def action_space(actions):
 
 
 def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=True,
-           model_id=None, mode_state=None):
+           model_id=None, mode_state=None, guidance=None):
     elements, targets, controls = action_space(state["actions"])
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
@@ -255,8 +256,14 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
     # answers between runs. Sorting by the candidate's own text removes that input instead of
     # hoping the model ignores it.
     operations = dict(sorted(operations.items()))
+    # A supervisor sub-goal steers the NEXT action only; goal_done/stuck/irreversible keep
+    # judging the caller's goal, so reaching a sub-goal can never read as finishing the task.
+    steer = {"subgoal": guidance, "subgoal_rule": SUBGOAL} if guidance else {}
     questions = {
-        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}},
+        "operation": {
+            "type": "choice", "criteria": operations,
+            "instructions": {"goal": goal, **steer, "rules": NEXT_ACTION},
+        },
         "goal_done": {"type": "noul", "instructions": {"goal": goal, "rules": GOAL_DONE}},
         "stuck": {"type": "noul", "instructions": {"goal": goal, "rules": STUCK}},
         # Rides the same request: no extra round trip for the risk gate.
@@ -284,7 +291,9 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
                 }
                 for index, a in ordered
             },
-            "instructions": {"goal": goal, "operation": operation, "rules": [NEXT_ACTION, TARGET]},
+            "instructions": {
+                "goal": goal, **steer, "operation": operation, "rules": [NEXT_ACTION, TARGET],
+            },
         }
     body = {
         "model": model_id or os.environ.get("TYPESAFE_MODEL", "jev-latest"),

@@ -54,8 +54,9 @@ have reached Chrome even if no reply arrived.
   `~/.jev-ultrafast/profile/`. A first fill on each origin pauses. Password,
   one-time-code, payment, and recovery fields are never read from the profile.
   Known fill literals are masked in Chrome's snapshot before the page object
-  reaches Python. Returned traces omit the literal, and screenshot recovery
-  and recording stop once a private fill is present.
+  reaches Python. Returned traces omit the literal, and supervisor screenshots
+  and recording stop once a private fill is present; the supervisor's text
+  context is redacted of every known private literal.
 - The page receives any text typed into it. Literal masking cannot recognise
   a site that transforms or splits an echoed value; the profile is data
   minimization rather than a secret vault. A Windows DPAPI vault is deferred.

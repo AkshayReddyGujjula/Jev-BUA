@@ -62,6 +62,7 @@ def summarize(state):
         "actions": sum(1 for h in history if not h.get("skipped")),
         "skipped": sum(1 for h in history if h.get("skipped")),
         "text_calls": state.get("text_calls") or [],
+        "supervision": state.get("supervision") or [],
         "history": [
             {k: h.get(k) for k in HISTORY_FIELDS}
             for h in history
@@ -97,8 +98,9 @@ def run_once(args):
         outcome = agent.state.get("outcome")
     if status == "stalled":
         return trail, (
-            f"stalled: no new page state for {stall['seconds_without_progress']}s "
-            f"(limit {stall['limit_s']}s) after {stall['repeated_rounds']} repeated rounds"
+            f"stalled: {stall['reason']} ({stall['seconds_without_progress']}s browser-side, "
+            f"{stall.get('wall_seconds_without_progress')}s wall, "
+            f"{stall['repeated_rounds']} repeated rounds)"
         ), 2
     if status == "done" and outcome == "refuted":
         # The agent claimed completion and the readback disagreed. The readback wins.
@@ -106,7 +108,8 @@ def run_once(args):
     if status != "done":
         # Only "done" is the agent's success. Reporting 0 for a blocked or abandoned run
         # hid failures. The outcome says whether anything was actually verified.
-        return trail, f"ended as {status} ({outcome})", 2
+        reason = agent.state.get("blocked_reason")
+        return trail, f"ended as {status} ({outcome})" + (f": {reason}" if reason else ""), 2
     return trail, None, 0
 
 

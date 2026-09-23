@@ -450,6 +450,10 @@ def tool_browser_do(args):
         # What each caller-directed scan did, so the caller can see how far it had to look.
         "scans": [h["scan"] for h in state["history"] if h.get("scan")],
         "stall": state.get("stall"),
+        "blocked_reason": state.get("blocked_reason"),
+        # Every on-demand supervisor consult: which check fired, what it answered, how long.
+        "supervision": state.get("supervision") or [],
+        "needs_human": state.get("needs_human"),
         "gate": state.get("gate"),
         "failure_class": state.get("failure_class"),
         "actions": sum(1 for h in state["history"] if not h.get("skipped")),

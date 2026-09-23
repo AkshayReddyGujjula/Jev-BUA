@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import cache, modes, replay
+from . import cache, modes, replay, supervisor
 from .assertions import (
     evaluate_expectations,
     normalize_expect,
@@ -32,14 +32,14 @@ from .model import (
 from .outcomes import resolve
 from .privacy import redact
 from .questions import MAX_STEPS
-from .recovery import PLANNER_TIMEOUT, propose_action
 
 TERMINAL = {"DONE", "BLOCKED", "ABSTAIN"}
 # "stalled" and "abstained" are terminal too: the anti-loop bound fired, or a risk gate
 # refused to act. Both end the run honestly instead of taking another lap.
 TERMINAL_STATUS = {"done", "blocked", "stalled", "abstained", "budget_exhausted"}
 RECOVERY_LIMIT = 6
-ESCALATION_LIMIT = 2
+# A supervisor sub-goal steers this many actions, then Jev is back on the caller's goal alone.
+GUIDANCE_STEPS = 6
 DEAD_OUTCOMES = {"no visible change", "action failed", "loop detected"}
 
 # How many times one run may choose REOBSERVE before the option is withdrawn. Re-observing
@@ -262,9 +262,16 @@ class Agent:
         # agent must never close it out from under the next call.
         self.browser = browser or Browser(url)
         self._owns_browser = browser is None
+        # A supplied value that appears verbatim in the goal is not private: the goal already
+        # carries it to every model in plain text, and masking it on the page only hid the
+        # evidence of success (a "Results for laptops" page read "Results for [private]", so
+        # Jev could not see its search had worked and chose BACK). Sensitive labels stay
+        # private whatever the goal says.
+        goal_text = "\n".join(plan)
         self.private_values = {
-            str(value) for value in self.values.values()
+            str(value) for label, value in self.values.items()
             if isinstance(value, (str, int, float)) and str(value).strip()
+            and (modes.is_sensitive(label) or str(value) not in goal_text)
         }
         self.private_values.update(getattr(self.browser, "private_values", ()))
         if self.mode is not None:
@@ -302,7 +309,7 @@ class Agent:
         if self.private_values:
             self.screenshots = False
             self.record_dir = None
-            self._delegation_no_vision = True
+            self._private_pixels = True
         try:
             page = self.browser.observe(screenshot=self.screenshots)
         except Exception:
@@ -431,8 +438,16 @@ class Agent:
         return (time.monotonic() - started) > STALL_LIMIT_S
 
     def _stop_stalled(self):
-        """Terminate deterministically instead of taking another lap."""
+        """Terminate deterministically instead of taking another lap.
+
+        The supervisor gets one look first (bounded by JEV_SUPERVISOR_LIMIT per run); a
+        usable verdict continues the run with a fresh window instead of ending it.
+        """
         state = self.state
+        trigger = ("repeated_no_progress_rounds" if state["stall_rounds"] >= STALL_MAX_ROUNDS
+                   else "no_progress_deadline")
+        if self._supervise(trigger):
+            return self.snapshot()
         now = time.monotonic()
         waited = round(now - state["progress_at"], 1)
         wall = state.get("progress_wall_at") or state["progress_at"]
@@ -477,6 +492,110 @@ class Agent:
             state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
         self._finalize()
         return self.snapshot()
+
+    def _guidance(self):
+        """The supervisor's current sub-goal, or None once it has steered GUIDANCE_STEPS actions."""
+        guidance = self.state.get("guidance")
+        if not guidance:
+            return None
+        if len(self.state["history"]) >= guidance["until_step"]:
+            self.state["guidance"] = None
+            return None
+        return guidance["subgoal"]
+
+    def _supervise(self, trigger):
+        """Consult the on-demand supervisor once. True when it handled the situation.
+
+        Called only when code-owned telemetry says the loop is stuck (`trigger` names the
+        check), never on the fast path. At most JEV_SUPERVISOR_LIMIT consults per run, each
+        bounded by its own timeout; a usable hint or action opens one fresh stall window,
+        so the worst case a run can be extended by is limit x (timeout + one window).
+        Returns False - leaving the caller's own ending in place - whenever the supervisor
+        is off, spent, failed, or answered something code could not validate.
+        """
+        state = self.state
+        if getattr(self, "_strategy", "decide") == "collect" or state.get("supervising"):
+            return False
+        config = supervisor.settings()
+        if config is None or state.get("supervisions", 0) >= config["limit"]:
+            return False
+        state["supervisions"] = state.get("supervisions", 0) + 1
+        state["supervising"] = True
+        page = state["page"]
+        private = getattr(self, "private_values", ())
+        shot = None
+        browser = state["browser"]
+        # Pixels can show a typed secret that text redaction cannot reach.
+        if not getattr(self, "_private_pixels", False) and getattr(browser, "can_screenshot", False):
+            try:
+                shot = browser.screenshot(quality=60)
+            except Exception:
+                shot = None
+        last = state["decisions"][-1] if state["decisions"] else {}
+        asked = time.monotonic()
+        try:
+            verdict, telemetry = supervisor.consult(
+                redact(page, private), redact(state["goal"], private),
+                redact(state["history"], private), trigger=trigger,
+                plan=getattr(self, "steps", None), guidance=self._guidance(),
+                screenshot=shot, irreversible=last.get("irreversible"), config=config,
+            )
+        finally:
+            state["supervising"] = False
+            self._credit_wait(asked)
+        record = {
+            "trigger": trigger, "verdict": verdict["verdict"] if verdict else None,
+            "step": len(state["history"]), "latency_ms": telemetry["latency_ms"],
+            "model": telemetry["model"], "screenshot": telemetry["screenshot"],
+            "error": telemetry["error"], "reason": (verdict or {}).get("reason"),
+        }
+        state.setdefault("supervision", []).append(record)
+        evidence = getattr(self, "evidence", None)
+        if evidence is not None:
+            evidence.record("supervision", **record, usage=telemetry.get("usage"),
+                            subgoal=(verdict or {}).get("subgoal"),
+                            element_id=(verdict or {}).get("element_id"))
+        if verdict is None:
+            return False
+        kind = verdict["verdict"]
+        if state.get("started_at") is not None:
+            state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+        if kind in {"hint", "act"}:
+            # New advice is a new active segment; the consult limit bounds how often.
+            self._mark_progress()
+            state["stall_rounds"] = 0
+            state["status"] = "ready"
+        if kind == "hint":
+            state["guidance"] = {"subgoal": verdict["subgoal"],
+                                 "until_step": len(state["history"]) + GUIDANCE_STEPS}
+            return True
+        if kind == "act":
+            action = next(a for a in page["actions"] if a["id"] == verdict["element_id"])
+            operation = {"click": "CLICK", "fill": "TYPE_TEXT", "select": "SELECT"}.get(
+                action["kind"], action["id"].upper())
+            state["supervisor_decision"] = {
+                "choice": action["id"], "operation": operation, "target": None,
+                "confidence": 1.0, "probability": 1.0, "probabilities": {action["id"]: 1.0},
+                "irreversible": float(last.get("irreversible") or 0.0),
+                "goal_done": 0.0, "stuck": 0.0, "cached": False, "supervisor": True,
+                "supervisor_text": verdict["text"], "model": telemetry["model"],
+                "latency_ms": telemetry["latency_ms"], "usage": telemetry.get("usage", {}),
+                "recovery": f"supervisor ({trigger}): {verdict['reason']}"[:200],
+                "fingerprint": page["fingerprint"],
+            }
+            return True
+        # done / impossible / needs_human end the run; the outcome still comes from the
+        # independent readback, so a supervisor "done" is no more proof than Jev's.
+        state["decision"] = None
+        if kind == "done":
+            state["status"] = "done"
+        else:
+            state["status"] = "blocked"
+            state["blocked_reason"] = f"supervisor: {kind}: {verdict.get('reason')}"[:300]
+            if kind == "needs_human":
+                state["needs_human"] = {"need": verdict["need"], "reason": verdict.get("reason")}
+        self._finalize()
+        return True
 
     def _finalize(self):
         """Resolve the run's outcome from an independent readback, exactly once.
@@ -1139,8 +1258,9 @@ class Agent:
                 return self.snapshot()
             try:
                 self.command("predict", {})
-                if state["status"] in TERMINAL_STATUS:
-                    # A watcher or the anti-loop deadline stopped the run during prediction.
+                if state["status"] != "predicted":
+                    # A watcher or the anti-loop deadline stopped the run during prediction,
+                    # or the supervisor handed back a sub-goal: nothing to execute this tick.
                     return self.snapshot()
                 return self.command("act", {"fingerprint": state["page"]["fingerprint"]})
             except StalePage:
@@ -1165,6 +1285,17 @@ class Agent:
             state["decision"] = None
             if state["status"] in TERMINAL_STATUS:
                 raise ValueError("This run has stopped. Start a fresh demo.")
+            pending = state.pop("supervisor_decision", None)
+            if pending and pending["fingerprint"] == state["page"]["fingerprint"]:
+                # The supervisor already chose an observed, reversible element on THIS page;
+                # it goes through act() - freshness, gates, approval - like any decision. A
+                # page that moved on since the consult drops it: Jev decides afresh.
+                state["decisions"].append(
+                    {**pending, "elapsed_ms": round((time.perf_counter() - state["started_at"]) * 1000)}
+                )
+                state["decision"] = pending
+                state["status"] = "predicted"
+                return self.snapshot()
             if len(state["decisions"]) >= self.step_budget() * 2:
                 return self.stop_budget("model-call budget")
             # The decision's wait is credited back to the browser-side clock, so it is bounded
@@ -1200,6 +1331,7 @@ class Agent:
                         mode_state=(
                             self.mode.decision_state() if getattr(self, "mode", None) else None
                         ),
+                        guidance=self._guidance(),
                     )
                     break
                 except ValueError as error:
@@ -1408,6 +1540,8 @@ class Agent:
                 if not state["browser"].fresh(page):
                     state["status"] = "ready"
                     raise StalePage("Page changed since the decision. Choose again.")
+                if selected == "BLOCKED" and self._supervise("model_blocked"):
+                    return self.snapshot()
                 state["status"] = "done" if selected == "DONE" else "blocked"
                 state["plan_index"] = int(selected == "DONE")
                 state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
@@ -1557,6 +1691,15 @@ class Agent:
                             "value": "[redacted]",
                         }
                     )
+                elif decision.get("supervisor_text"):
+                    # The supervisor supplied the value with the element; user data from the
+                    # caller and learned memory above still outrank it.
+                    text = decision["supervisor_text"]
+                    text_source = "supervisor"
+                    state["text_calls"].append({
+                        "model": "supervisor", "latency_ms": 0, "usage": {},
+                        "field": action["label"], "value": "[redacted]",
+                    })
                 else:
                     text_source = "model"
                     if not state["browser"].fresh(page):
@@ -1637,7 +1780,16 @@ class Agent:
                     error = str(exc) or type(exc).__name__
                     dispatch_error = True
                 finally:
-                    if action["kind"] in {"fill", "seek"} and text:
+                    # Mask only what came from a private source. A value generated from the
+                    # goal, or a goal literal, must stay visible: masking every typed value
+                    # turned "Zurich" into "[private]" in the field and in every autocomplete
+                    # option, so Jev chose blind (introduced in 7fa3ced, fixed 2026-09-23).
+                    private_fill = bool(text) and (
+                        text_source in {"profile", "mode-memory"}
+                        or modes.is_sensitive(action.get("label"))
+                        or text in getattr(self, "private_values", ())
+                    )
+                    if action["kind"] in {"fill", "seek"} and private_fill:
                         self.private_values = getattr(self, "private_values", set())
                         self.private_values.add(text)
                         state["browser"].private_values = sorted(
@@ -1646,7 +1798,7 @@ class Agent:
                         self.screenshots = False
                         self.record_dir = None
                         state["record"] = False
-                        self._delegation_no_vision = True
+                        self._private_pixels = True
             state["scan"] = scan
             self.pending_text = None
             state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
@@ -1835,19 +1987,11 @@ class Agent:
                 state["page"] = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
                 self.note_progress(state["page"])
                 state["status"] = "ready"
+            elif dead and self._supervise("dead_streak"):
+                # The supervisor set the next step (or ended the run); act() is done.
+                return self.snapshot()
             else:
-                # The classification cost time; the planner is bounded by what is LEFT,
-                # not by the room computed before the classification call.
-                room = self._model_room()
-                if (
-                    dead
-                    and state.get("escalations", 0) < ESCALATION_LIMIT
-                    and room > 1.0
-                    and self._escalation_step(state["page"], min(PLANNER_TIMEOUT, max(1.0, room - 0.5)))
-                ):
-                    state["status"] = "ready"
-                else:
-                    state["status"] = "blocked" if dead else "ready"
+                state["status"] = "blocked" if dead else "ready"
             if state["status"] == "blocked":
                 self._finalize()
         else:
@@ -1881,86 +2025,6 @@ class Agent:
                     state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
                 self._finalize()
                 yield self.snapshot()
-
-    def _escalation_step(self, page, timeout=None):
-        """One bounded recovery action from the vision planner. True when it executed."""
-        if getattr(self, "_delegation_no_vision", False):
-            # The vision planner can click coordinates without going through a
-            # selected DOM action. Delegated tasks need every click to pass the
-            # approval boundary first.
-            return False
-        state = self.state
-        browser = state["browser"]
-        try:
-            screenshot = browser.screenshot()
-        except Exception:
-            return False
-        asked = time.monotonic()
-        try:
-            proposal = propose_action(page, state["goal"], state["history"],
-                                      screenshot=screenshot, timeout=timeout)
-        finally:
-            self._credit_wait(asked)
-        if not proposal:
-            return False
-        state["escalations"] = state.get("escalations", 0) + 1
-        error = None
-        try:
-            browser.act(proposal["action"], page)
-        except StalePage:
-            return False
-        except Exception as exc:
-            error = str(exc) or type(exc).__name__
-        state["history"].append(
-            {
-                "step": len(state["history"]) + 1,
-                "action": proposal["action"].get("label", "Recovery"),
-                "kind": "escalation",
-                "choice": "ESCALATION",
-                "probability": 0.0,
-                "confidence": None,
-                "latency_ms": proposal.get("latency_ms", 0),
-                "text": None,
-                "text_helper": None,
-                "text_latency_ms": 0,
-                "operation": "ESCALATION",
-                "target": None,
-                "recovery": proposal.get("reason"),
-                "error": error,
-                "outcome": None,
-                "page_changed": None,
-                "url": page["url"],
-                "usage": {},
-                "executed_ms": round((time.perf_counter() - state["started_at"]) * 1000),
-                "elapsed_ms": state["elapsed_ms"],
-            }
-        )
-        evidence = getattr(self, "evidence", None)
-        if evidence is not None:
-            record = state["history"][-1]
-            evidence.record(
-                "execution",
-                step=record["step"],
-                action=record["action"],
-                kind="escalation",
-                choice="ESCALATION",
-                operation="ESCALATION",
-                recovery=record.get("recovery"),
-                error=error,
-                url=page["url"],
-            )
-        state["page"] = browser.observe(screenshot=self.screenshots, deadline=self.read_deadline())
-        self.note_progress(state["page"])
-        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
-        outcome = action_outcome(page, state["page"], error)
-        state["history"][-1].update(
-            outcome=outcome,
-            page_changed=outcome != "no visible change",
-            fingerprint=state["page"]["fingerprint"],
-            url=state["page"]["url"],
-            elapsed_ms=state["elapsed_ms"],
-        )
-        return True
 
     def close(self):
         if getattr(self, "_owns_browser", True):

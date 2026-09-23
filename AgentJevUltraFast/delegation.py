@@ -89,7 +89,7 @@ class DelegatedTask:
         # and learned values, but disable descriptor replay until it has a
         # per-step preflight hook.
         self.agent.replay_plan = None
-        self.agent._delegation_no_vision = True
+        self.agent._private_pixels = True
         if isinstance(self.agent.state.get("replay"), dict):
             self.agent.state["replay"]["available"] = False
 

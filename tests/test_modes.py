@@ -568,6 +568,9 @@ def test_an_unambiguous_memory_fill_skips_the_confidence_gate(monkeypatch, root)
 
 
 def test_an_ambiguous_memory_fill_still_faces_the_gate(monkeypatch, root):
+    from AgentJevUltraFast import gates
+
+    monkeypatch.setattr(gates, "REVERSIBLE_MIN", 0.5)      # a floor must be on to be faced
     """Two fields with the same label are exactly the wrong-field risk: gate them."""
     mode = internship_mode(root)
     mode.learn("Email", "ada@example.test", url="http://x/feed")

@@ -119,7 +119,17 @@ Every executed target is resolved from an observed node. The executor rechecks p
 
 Pass `expect` (`url_contains`, `url_matches`, `title_contains`, `text_contains`, `text_absent`, `selector_count`, `value_contains` for an input's value, `harvest_at_least` for collected items) to `browser_do`, `run_task.py --expect` or `Agent(expect=...)` to get a verdict. Without one, a completed run reports `unknown`, never `verified`. `text_contains` / `text_absent` take a phrase or a list of phrases (a bare string is one phrase). An unknown key, a malformed value, or a vacuous one (`at_least: 0`, an empty `value_contains` text) is rejected before the browser starts, because a check that cannot fail must not produce `verified`.
 
-Three v2 properties go with it: a low-confidence mutation is re-observed once and then refused rather than executed (per-risk confidence floors, with an `irreversible` question riding the same request); repeated decisions are served from a disk cache keyed on the entire request; and a run can write append-only JSONL evidence — offered candidates, raw answers, confidences, the answering model, executions, outcome.
+Three v2 properties go with it: a low-confidence *commit* (a click Jev marks irreversible — pay, send, submit an application) is re-observed once and then refused rather than executed, with the `irreversible` question riding the same request; repeated decisions are served from a disk cache keyed on the entire request; and a run can write append-only JSONL evidence — offered candidates, raw answers, confidences, the answering model, executions, outcome. Reversible actions (search, open, fill, scroll) execute Jev's top choice as the original loop did; `JEV_GATE_REVERSIBLE=0.5` re-enables a floor for them.
+
+## When Jev gets stuck: the on-demand supervisor
+
+Jev decides every step. A second, slower model (DeepSeek v4.1 Flash by default, through the text-model endpoint) is consulted **only** when code-owned telemetry says the loop is stuck, and the result names the check that fired: `no_progress_deadline`, `repeated_no_progress_rounds`, `dead_streak` (three actions in a row changed nothing), or `model_blocked` (Jev chose BLOCKED). It sees the goal, the recent trail, the numbered elements, the page text and — unless a private value is on the page — one screenshot, and it may answer:
+
+- `hint`: a one-sentence sub-goal that rides Jev's next requests (operation and target heads only, never `goal_done`) for up to six actions;
+- `act`: one element id from the current table, executed through the normal `act()` path with its freshness check and delegated approval. A click that could commit is downgraded to a hint;
+- `done`, `impossible`, `needs_human`: end the run. `done` is no more proof than Jev's own DONE — the outcome still comes from the `expect` readback.
+
+No coordinates, selectors or scripts are ever accepted. At most `JEV_SUPERVISOR_LIMIT` (2) consults per run, each bounded by `JEV_SUPERVISOR_TIMEOUT` (8 s); every consult is returned in `supervision` and written to evidence. `JEV_SUPERVISOR=off` disables it.
 
 ## Delegate a browser goal from another agent
 
@@ -140,9 +150,9 @@ in bounded slices and the result distinguishes `paused`, `needs_human`,
 independent `expect` readback can produce `verified`; an uncertain dispatched
 action stops the task with `unknown` rather than repeating it. Login and
 approval signals are based on visible DOM controls and labels, so callers must
-still review the proposed action. Descriptor replay and screenshot-based
-recovery are disabled for delegated tasks while they lack per-step approval
-preflight. New-tab journeys are not yet supported by this task interface.
+still review the proposed action. Descriptor replay is disabled for delegated
+tasks while it lacks per-step approval preflight; a supervisor action goes
+through the same approval boundary as any Jev decision. New-tab journeys are not yet supported by this task interface.
 
 Delegated tasks can fill exact, unique field labels from the local profile at
 `~/.jev-ultrafast/profile/`. The first profile fill on a web origin yields a

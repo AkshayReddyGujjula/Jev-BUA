@@ -17,7 +17,8 @@ def _offline_defaults(monkeypatch):
     monkeypatch.setenv("JEV_MODES", "off")
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     monkeypatch.delenv("TEXT_MODEL_API_KEY", raising=False)
-    monkeypatch.delenv("ESCALATION_MODEL_API_KEY", raising=False)
+    monkeypatch.delenv("SUPERVISOR_API_KEY", raising=False)
+    monkeypatch.setenv("JEV_SUPERVISOR", "off")
     # The recorded flights task date must stay pinned in tests, whatever the shell has.
     monkeypatch.delenv("JEV_FLIGHTS_DATE", raising=False)
 

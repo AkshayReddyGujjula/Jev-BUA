@@ -117,6 +117,8 @@ def run_worker(job, out_path):
                     location = {}
             result["status"] = state["status"]
             result["stall"] = state.get("stall")
+            result["blocked_reason"] = state.get("blocked_reason")
+            result["supervision"] = state.get("supervision") or []
             result["actions"] = sum(1 for h in state["history"] if not h.get("skipped"))
             result["skipped"] = sum(1 for h in state["history"] if h.get("skipped"))
             result["decisions"] = len(state["decisions"])
