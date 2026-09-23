@@ -276,6 +276,8 @@ TOOLS.extend([
                 "url": {"type": "string"},
                 "expect": {"type": "object", "description": "Independent page assertions; required for verified."},
                 "values": {"type": "object", "additionalProperties": {"type": "string"}},
+                "profile": {"type": "boolean", "default": True,
+                            "description": "Use approved local profile fields, if configured."},
                 "mode": {"type": "string", "description": "Existing task-class slug or auto."},
                 "max_steps": {"type": "integer", "minimum": 1, "maximum": 60},
                 "max_active_seconds": {"type": "number", "minimum": 1, "maximum": 600, "default": 120},
@@ -374,6 +376,7 @@ def tool_browser_do(args):
         value_selectors_for,
     )
     from jev_ultrafast.outcomes import resolve
+    from jev_ultrafast.privacy import redact
 
     mode = args.get("tab", "background")
     os.environ["JEV_TAB_MODE"] = mode
@@ -432,7 +435,7 @@ def tool_browser_do(args):
         state["status"], checks=detail if expect else None,
         abstained=state["status"] == "abstained",
     )
-    return {
+    return redact({
         "status": state["status"],
         "outcome": outcome,
         "verified": verified,
@@ -458,7 +461,7 @@ def tool_browser_do(args):
             {"action": h.get("action"), "outcome": h.get("outcome"), "error": h.get("error")}
             for h in state["history"][-12:]
         ],
-    }
+    }, getattr(agent, "private_values", ()))
 
 
 ACT_KINDS = {"CLICK": "click", "TYPE_TEXT": "fill", "SELECT": "select", "SEEK": "seek"}
@@ -594,6 +597,7 @@ def tool_browser_task(args):
     _load_env()
     from jev_ultrafast import Agent
     from jev_ultrafast.browser import Browser
+    from jev_ultrafast.profile import ProfileStore
 
     if not args.get("goal") or not args.get("url"):
         raise ValueError("browser_task needs a goal and start URL")
@@ -603,9 +607,12 @@ def tool_browser_task(args):
     browser = None
     agent = None
     try:
+        profile = ProfileStore() if args.get("profile", True) else None
         with _WARM_LOCK:
             _drop_warm()
         browser = Browser(args["url"], follow_tabs=False)
+        if profile is not None:
+            browser.private_values = profile.protected_values()
         if reservation.is_set():
             raise ValueError("Browser task setup was abandoned")
         agent = Agent(
@@ -619,6 +626,7 @@ def tool_browser_task(args):
             agent, browser,
             max_active_seconds=max(1, min(600, float(args.get("max_active_seconds", 120)))),
             keep_open=bool(args.get("keep_open")),
+            profile=profile,
         )
         _TASKS.add(task, reservation=reservation)
     except Exception:

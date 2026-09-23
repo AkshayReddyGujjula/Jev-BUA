@@ -641,6 +641,18 @@ def test_repeated_no_effect_action_switches_to_next_best(runner, monkeypatch):
     assert runner.state["recoveries"] == 1
 
 
+def test_repeated_no_effect_action_without_alternative_stops(runner, monkeypatch):
+    runner.state["history"] = [{
+        "step": 1, "choice": "e2", "kind": "click", "outcome": "no visible change",
+        "irreversible": 0.95,
+    }]
+    proposal = {**decision("e2"), "operation": "CLICK", "candidate_map": {"CLICK": {"1": "e2"}}}
+    monkeypatch.setattr(loop, "choose", lambda *args, **kwargs: proposal)
+    state = runner.command("predict")
+    assert state["status"] == "blocked" and state["uncertain_execution"] is True
+    runner.state["browser"].act.assert_not_called()
+
+
 def test_goal_watcher_stops_the_tick_loop(runner, monkeypatch):
     runner.state["history"] = [{"step": 1, "choice": "e1", "kind": "click", "outcome": "page changed"}]
     monkeypatch.setattr(loop, "choose", lambda *args, **kwargs: {
@@ -725,7 +737,7 @@ def test_supplied_value_skips_the_text_model(runner, monkeypatch):
     runner.values = {"search": "Python programming language"}
     state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     helper.assert_not_called()
-    assert state["history"][-1]["text"] == "Python programming language"
+    assert state["history"][-1]["text"] == "[redacted]"
     assert state["text_calls"][-1]["model"] == "supplied"
     assert state["text_calls"][-1]["latency_ms"] == 0
 
@@ -1318,6 +1330,19 @@ def test_replay_executes_a_recorded_step_without_the_model(runner, monkeypatch):
     runner.state["browser"].act.assert_called_once()
 
 
+def test_replay_fill_uses_recorded_literal_without_text_model(runner, monkeypatch):
+    monkeypatch.setattr(loop, "field_text", Mock(side_effect=AssertionError("text model called")))
+    runner.replay_plan = {"steps": [{
+        "kind": "fill", "label": "Search", "role": "textbox",
+        "operation": "TYPE_TEXT", "text": "Ada Lovelace",
+    }]}
+    runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
+    runner.state["decision"] = None
+    runner._replay_step()
+    assert runner.state["browser"].act.call_args.kwargs["text"] == "Ada Lovelace"
+    assert runner.state["text_calls"][-1]["model"] == "replay"
+
+
 def test_replay_never_repeats_an_irreversible_step(runner):
     runner.replay_plan = {
         "steps": [{"kind": "click", "label": "Pay", "operation": "CLICK", "irreversible": 0.95}]
@@ -1366,12 +1391,26 @@ def test_executed_steps_become_descriptors(runner):
 
 def test_completed_run_records_a_replay_plan(runner, tmp_path):
     runner.replay_dir = tmp_path
+    runner.expect = {"url_contains": "example.test"}
+    runner.state["browser"].evaluate = Mock(return_value={
+        "url": "https://example.test/", "title": "Example", "text": "Done",
+        "selector_counts": {}, "values": {},
+    })
     runner.state["replay"] = _replay_state([])
     runner.state["status"] = "done"
     runner.state["descriptors"] = [{"kind": "click", "label": "Go", "operation": "CLICK"}]
     runner._finalize()
     recorded = runner.state["replay"]["recorded"]
     assert recorded and Path(recorded).exists()
+
+
+def test_unknown_run_never_records_replay(runner, tmp_path):
+    runner.replay_dir = tmp_path
+    runner.state["replay"] = _replay_state([])
+    runner.state["status"] = "done"
+    runner.state["descriptors"] = [{"kind": "click", "label": "Go", "operation": "CLICK"}]
+    runner._finalize()
+    assert runner.state["replay"]["recorded"] is None
 
 
 def test_a_replay_run_does_not_rerecord_a_plan(runner, tmp_path):

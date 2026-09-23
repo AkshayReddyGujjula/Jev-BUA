@@ -22,6 +22,7 @@ class FakeBrowser:
         self.next_page = next_page
         self.observations = 0
         self.closed = False
+        self.private_values = []
 
     def observe(self, screenshot=False):
         self.observations += 1
@@ -51,6 +52,11 @@ class FakeAgent:
         }
         self.closed = False
         self.acts = 0
+        self.values = {}
+        self.private_values = set()
+
+    def supplied_text(self, action):
+        return self.values.get(action.get("label"))
 
     def command(self, name, body=None):
         if name == "predict":
@@ -170,6 +176,31 @@ def test_approval_boundary_covers_submit_and_security_but_not_selects():
     assert approval_boundary({}, {"kind": "click", "role": "button", "label": "Change password"})
     assert approval_boundary({}, {"kind": "key", "key": "Enter"}) == "submit_key"
     assert approval_boundary({}, {"kind": "select", "label": "Theme"}) is None
+
+
+def test_profile_fill_requires_origin_approval_once(tmp_path):
+    import json
+
+    from jev_ultrafast.profile import ProfileStore
+
+    (tmp_path / "identity.json").write_text(
+        json.dumps({"fields": {"Email": "ada@example.test", "Password": "not-stored"}}),
+        encoding="utf-8",
+    )
+    profile = ProfileStore(tmp_path)
+    fill = {"id": "e1", "kind": "fill", "role": "textbox", "label": "Email"}
+    browser = FakeBrowser(page(action=fill))
+    agent = FakeAgent(page(action=fill), "e1")
+    task = DelegatedTask(agent, browser, profile=profile)
+    prompt = task.drive()
+    assert prompt["reason"] == "confirm_fill" and agent.acts == 0
+    assert prompt["proposed_action"]["source"] == "local_profile"
+    done = task.resume(prompt["checkpoint"], approve_action=True)
+    assert done["phase"] == "complete" and agent.acts == 1
+    assert "ada@example.test" in agent.private_values
+    assert agent.values == {} and agent.profile_fill is None
+    assert profile.value_for("https://example.test/setup", "Password") is None
+    assert ProfileStore(tmp_path).is_approved("https://example.test/another")
 
 
 def test_mcp_task_tools_keep_the_same_session_across_login_and_approval(monkeypatch):

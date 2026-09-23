@@ -143,6 +143,13 @@ still review the proposed action. Descriptor replay and screenshot-based
 recovery are disabled for delegated tasks while they lack per-step approval
 preflight. New-tab journeys are not yet supported by this task interface.
 
+Delegated tasks can fill exact, unique field labels from the local profile at
+`~/.jev-ultrafast/profile/`. The first profile fill on a web origin yields a
+`confirm_fill` checkpoint; subsequent fills on that origin use the recorded
+approval. [Profile setup and privacy limits](docs/profile.md) explain the JSON
+format. The profile stores no passwords or payment details; type those into
+Chrome yourself. A Windows DPAPI vault is a separate future feature.
+
 ## Modes: memory and specialists per task class
 
 A mode is a folder for one repeated kind of work — internship applications, scrolling a feed — with its own memory, learned field values and settings. The agent gets that context before it decides anything:
@@ -158,7 +165,7 @@ uv run --env-file .env python run_task.py --mode internship-application --forget
 
 - Folders live in `JEV_MODES_DIR` (default `~/.jev-ultrafast/modes`, outside git). Each holds `mode.json`, a human-editable `AGENTS.md` (about me / standing instructions / interests), `learned/` field values, `harvest/` collected items and `replay/` plans.
 - `--mode auto` (or `JEV_MODES=auto`) matches existing modes by keyword; only a durable task class gets a new folder, and creation is printed, recorded in evidence and named in the mode's own file. One-off errands stay mode-less.
-- A fill with an exact label match in learned memory is typed with no model call; memory is also given to the text helper for fields it has not seen. Caller-supplied `values` outrank memory.
+- A fill with an exact label and web-origin match in learned memory is typed with no model call. Caller-supplied `values` outrank memory. Learned literals stay out of model prompts.
 - Sensitive labels (password, passcode, OTP, card, CVV, SSN, passport, IBAN, bank, national insurance, routing/sort code, PIN) are never learned, never injected into a prompt, and never persisted in a replay plan.
 - A collect-strategy mode scrolls and harvests only — it never clicks anything — and stores an item only if its title appears verbatim in the page text. Live results for the internship, local-feed and real-x.com scenarios are in [docs/modes-scenarios.json](docs/modes-scenarios.json).
 

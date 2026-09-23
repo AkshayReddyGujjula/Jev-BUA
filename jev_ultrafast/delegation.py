@@ -11,6 +11,7 @@ import time
 
 from .agent import TERMINAL_STATUS, progress_key
 from .browser import StalePage
+from .modes import normalize_label, origin
 
 TASK_TTL_S = 30 * 60
 MAX_SLICE_S = 15.0
@@ -18,8 +19,9 @@ MAX_TICKS_PER_SLICE = 8
 COMMIT_LABEL = re.compile(
     r"\b(publish|deploy|launch|go live|buy|purchase|pay|checkout|place order|"
     r"delete|remove|destroy|terminate|close account|submit|send|transfer|"
-    r"save changes|apply changes|confirm|activate|connect domain|"
-    r"change password|disable (?:2fa|mfa)|enable (?:2fa|mfa))\b",
+    r"save changes|apply changes|archive|unpublish|revoke|disconnect|refund|confirm|"
+    r"activate|connect domain|cancel subscription|change password|"
+    r"disable (?:2fa|mfa)|enable (?:2fa|mfa))\b",
     re.IGNORECASE,
 )
 SECURITY_LABEL = re.compile(r"\b(password|passkey|2fa|mfa|security|recovery code)\b", re.IGNORECASE)
@@ -42,29 +44,30 @@ def approval_boundary(decision, action):
     kind = action.get("kind")
     if kind == "key" and action.get("key") == "Enter":
         return "submit_key"
-    if kind != "click" or (action.get("role") or "").lower() in {
-        "checkbox", "radio", "switch"
-    }:
+    if kind != "click":
         return None
     label = str(action.get("label") or "")
     if SECURITY_LABEL.search(label):
         return "account_security"
     if COMMIT_LABEL.search(label) or action.get("form_submit"):
         return "consequential_action"
+    if (action.get("role") or "").lower() in {"checkbox", "radio", "switch"}:
+        return None
     try:
         irreversible = float(decision.get("irreversible") or 0)
     except (TypeError, ValueError):
         irreversible = 0.0
-    if irreversible >= 0.8 and (action.get("role") or "").lower() == "button":
+    if irreversible >= 0.8:
         return "possibly_irreversible"
     return None
 
 
 class DelegatedTask:
-    def __init__(self, agent, browser, *, max_active_seconds=120, keep_open=False):
+    def __init__(self, agent, browser, *, max_active_seconds=120, keep_open=False, profile=None):
         self.id = secrets.token_urlsafe(24)
         self.agent = agent
         self.browser = browser
+        self.profile = profile
         self.max_active_seconds = float(max_active_seconds)
         self.keep_open = bool(keep_open)
         self.created_at = time.time()
@@ -74,6 +77,7 @@ class DelegatedTask:
         self.phase = "ready"
         self.reason = None
         self.pending_action = None
+        self.pending_profile_value = None
         self.checkpoint = 0
         self.wait_started = None
         self.cancel_requested = threading.Event()
@@ -140,6 +144,7 @@ class DelegatedTask:
                 "kind": action.get("kind"),
                 "label": action.get("label"),
                 "role": action.get("role"),
+                "source": "local_profile" if reason == "confirm_fill" else "browser",
             }
         return result
 
@@ -181,6 +186,25 @@ class DelegatedTask:
             (action for action in state["page"]["actions"] if action["id"] == selected),
             None,
         )
+
+    def _profile_value(self, action, page):
+        if self.profile is None or action.get("kind") != "fill":
+            return None
+        same_label = [
+            item for item in page.get("actions", [])
+            if item.get("kind") == "fill"
+            and normalize_label(item.get("label")) == normalize_label(action.get("label"))
+        ]
+        if len(same_label) != 1 or self.agent.supplied_text(action) is not None:
+            return None
+        return self.profile.value_for(page.get("url"), action.get("label"))
+
+    def _use_profile_value(self, action, value):
+        self.agent.profile_fill = (
+            origin(self.agent.state["page"].get("url")), normalize_label(action["label"]), value
+        )
+        self.agent.private_values.add(value)
+        self.browser.private_values = sorted(self.agent.private_values, key=len, reverse=True)
 
     def drive(self, *, slice_seconds=12):
         """Run at most one bounded active segment and return a checkpoint or result."""
@@ -238,19 +262,31 @@ class DelegatedTask:
                     self._refresh_after_human(after_wait=False)
                     ticks += 1
                     continue
+                profile_value = self._profile_value(action, state["page"])
+                if profile_value is not None:
+                    if not self.profile.is_approved(state["page"].get("url")):
+                        self.pending_profile_value = profile_value
+                        return self._pause("needs_human", "confirm_fill", action)
+                    self._use_profile_value(action, profile_value)
                 risk = approval_boundary(state["decision"], action)
                 if risk:
                     return self._pause("needs_human", risk, action)
+                if self.cancel_requested.is_set():
+                    continue
                 try:
                     self.agent.command("act", {"fingerprint": state["page"]["fingerprint"]})
                 except StalePage:
                     self._refresh_after_human(after_wait=False)
+                finally:
+                    self.agent.profile_fill = None
                 ticks += 1
         finally:
             self.active_seconds += time.perf_counter() - segment_started
             self.segment_started = None
 
     def resume(self, checkpoint, *, approve_action=False, slice_seconds=12):
+        if self.cancel_requested.is_set():
+            raise ValueError("Task was abandoned")
         if self.phase not in {"paused", "needs_human"}:
             raise ValueError("Task is not waiting at a checkpoint")
         if int(checkpoint) != self.checkpoint:
@@ -281,20 +317,28 @@ class DelegatedTask:
                 state["status"] = "ready"
                 self.agent.note_progress(fresh)
                 self.pending_action = None
+                self.pending_profile_value = None
                 return self.drive(slice_seconds=slice_seconds)
             if self.active_seconds >= self.max_active_seconds:
                 self.agent.stop_budget(f"{self.max_active_seconds:g}s active task budget")
                 return self._finish()
+            if self.cancel_requested.is_set():
+                raise ValueError("Task was abandoned before approved input")
+            if self.pending_profile_value is not None:
+                self.profile.approve(previous.get("url"))
+                self._use_profile_value(self.pending_action, self.pending_profile_value)
             action_started = time.perf_counter()
             try:
                 self.agent.command("act", {"fingerprint": state["page"]["fingerprint"]})
             except StalePage:
                 self._refresh_after_human(after_wait=False)
             finally:
+                self.agent.profile_fill = None
                 self.active_seconds += time.perf_counter() - action_started
             # A successful approved action is consumed exactly once. A later
             # checkpoint has a new generation and requires a new approval.
             self.pending_action = None
+            self.pending_profile_value = None
         else:
             self._refresh_after_human()
         return self.drive(slice_seconds=slice_seconds)
@@ -324,6 +368,10 @@ class TaskRegistry:
 
     def reserve(self):
         with self.lock:
+            if self.current is not None and time.monotonic() > self.current.expires_at \
+                    and self.current.phase in {"paused", "needs_human"}:
+                self.current.cancel()
+                self.current = None
             if self.current is not None or self.reservation is not None:
                 raise ValueError("A browser task is already active in this MCP server")
             self.reservation = threading.Event()

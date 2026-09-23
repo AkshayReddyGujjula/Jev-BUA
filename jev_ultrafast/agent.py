@@ -24,6 +24,7 @@ from .model import (
     harvest_items,
 )
 from .outcomes import resolve
+from .privacy import redact
 from .questions import MAX_STEPS
 from .recovery import PLANNER_TIMEOUT, propose_action
 
@@ -246,13 +247,21 @@ class Agent:
         # agent must never close it out from under the next call.
         self.browser = browser or Browser(url)
         self._owns_browser = browser is None
+        self.private_values = {
+            str(value) for value in self.values.values()
+            if isinstance(value, (str, int, float)) and str(value).strip()
+        }
+        self.private_values.update(getattr(self.browser, "private_values", ()))
+        if self.mode is not None:
+            self.private_values.update(value for _, value in self.mode.learned_entries(url=url))
+        self.browser.private_values = sorted(self.private_values, key=len, reverse=True)
         # The independent readback, when the caller supplied one. finalize() evaluates it
         # against the live page; without it the run's outcome is "unknown", never "verified".
         self.expect = expect or None
         self.evidence = Evidence(
             evidence_dir,
             time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}",
-            goal="\n".join(plan),
+            goal=redact("\n".join(plan), self.private_values),
             url=url,
             tab_mode=os.environ.get("JEV_TAB_MODE", "foreground"),
             model=os.environ.get("TYPESAFE_MODEL", "jev-latest"),
@@ -273,6 +282,10 @@ class Agent:
             )
         self.record_dir = Path(record_dir) if record_dir else None
         self.screenshots = screenshots or bool(record_dir) or bool(spec.get("screenshots"))
+        if self.private_values:
+            self.screenshots = False
+            self.record_dir = None
+            self._delegation_no_vision = True
         try:
             page = self.browser.observe(screenshot=self.screenshots)
         except Exception:
@@ -433,10 +446,11 @@ class Agent:
                     "file": (state.get("harvest") or {}).get("file"),
                 }
                 _, checks = evaluate_expectations(expect, facts)
+                checks = redact(checks, getattr(self, "private_values", ()))
                 state["checks"] = checks
                 state["readback"] = {
-                    "url": facts.get("url"),
-                    "title": facts.get("title"),
+                    "url": redact(facts.get("url"), getattr(self, "private_values", ())),
+                    "title": redact(facts.get("title"), getattr(self, "private_values", ())),
                     "text_chars": len(facts.get("text") or ""),
                 }
         state["outcome"] = resolve(
@@ -475,7 +489,7 @@ class Agent:
         replay_state = state.get("replay")
         if not replay_dir or replay_state is None:
             return
-        if state.get("status") != "done" or replay_state.get("used"):
+        if state.get("status") != "done" or state.get("outcome") != "verified" or replay_state.get("used"):
             return
         if replay_state.get("recorded") or not state.get("descriptors"):
             return
@@ -550,6 +564,7 @@ class Agent:
             "latency_ms": 0,
             "usage": {},
             "replay": True,
+            "replay_text": text,
         }
         state["decision"] = decision
         state["status"] = "predicted"
@@ -669,8 +684,7 @@ class Agent:
             )
         return True
 
-    @staticmethod
-    def _value_present(action, page, text):
+    def _value_present(self, action, page, text):
         """Did the field actually accept the typed value? Learning must not poison later runs."""
         wanted = " ".join(str(text).split()).lower()
         label = (action.get("label") or "").strip().lower()
@@ -679,6 +693,12 @@ class Agent:
                 continue
             if (candidate.get("label") or "").strip().lower() != label:
                 continue
+            direct = getattr(self.browser, "value_present", None)
+            if direct is not None:
+                try:
+                    return bool(direct(candidate.get("node"), text))
+                except Exception:
+                    return False
             value = " ".join(str(candidate.get("value") or "").split()).lower()
             if value and (wanted in value or value in wanted):
                 return True
@@ -950,9 +970,15 @@ class Agent:
         a seek control) so a bad literal fails loudly here rather than as an opaque
         "Seek target is not actionable" at execution time.
         """
-        if not self.values:
-            return None
-        picked = self._matching_value(action.get("label"))
+        picked = self._matching_value(action.get("label")) if self.values else None
+        if picked is None:
+            profile_fill = getattr(self, "profile_fill", None)
+            if (
+                profile_fill is not None
+                and profile_fill[0] == modes.origin(self.state["page"].get("url"))
+                and profile_fill[1] == modes.normalize_label(action.get("label"))
+            ):
+                picked = profile_fill[2]
         if picked is None:
             return None
         return self._validated_supplied(picked, action)
@@ -1005,10 +1031,10 @@ class Agent:
         return text
 
     def snapshot(self):
-        return {
+        return redact({
             **{k: v for k, v in self.state.items() if k != "browser"},
             "elements": action_space(self.state["page"]["actions"])[0],
-        }
+        }, getattr(self, "private_values", ()))
 
     def step_budget(self):
         """Action budget for this run. A mode may lower the run's cap, never raise it."""
@@ -1112,9 +1138,9 @@ class Agent:
                 last
                 and last.get("outcome") in {"no visible change", "action failed"}
                 and last.get("choice") == decision["choice"]
-                and state.get("recoveries", 0) < RECOVERY_LIMIT
             ):
-                alternate = next_best(decision, {last["choice"]})
+                alternate = (next_best(decision, {last["choice"]})
+                             if state.get("recoveries", 0) < RECOVERY_LIMIT else None)
                 if alternate:
                     state["recoveries"] = state.get("recoveries", 0) + 1
                     decision = {
@@ -1123,6 +1149,13 @@ class Agent:
                         "probability": choice_probability(decision, alternate),
                         "recovery": "repeated a no-effect action; switched to the next-best option",
                     }
+                else:
+                    # The last mutation may have committed server-side even if
+                    # Chrome showed no immediate change. Never dispatch it twice.
+                    state["status"] = "blocked"
+                    state["uncertain_execution"] = True
+                    self._finalize()
+                    return self.snapshot()
             if (
                 decision.get("stuck", 0.0) > 0.85
                 and not decision.get("recovery")
@@ -1308,7 +1341,8 @@ class Agent:
                     and modes.normalize_label(a.get("label")) == wanted
                 ] if wanted else []
                 memory_fill = (
-                    len(same_label) == 1 and self.mode.value_for(action.get("label")) is not None
+                    len(same_label) == 1
+                    and self.mode.value_for(action.get("label"), page.get("url")) is not None
                 )
             verdict = None if memory_fill else gate_check(
                 decision, action,
@@ -1365,47 +1399,60 @@ class Agent:
                 state["status"] = "ready"
                 state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
                 return self.snapshot()
-            text, helper = None, None
+            text, helper, text_source = None, None, None
             if action["kind"] in {"fill", "seek"}:
-                supplied = self.supplied_text(action)
+                supplied = self.supplied_text(action) if not decision.get("replay") else None
                 remembered = None
-                if supplied is None and action["kind"] == "fill" and getattr(self, "mode", None):
+                if (
+                    supplied is None and not decision.get("replay")
+                    and action["kind"] == "fill" and getattr(self, "mode", None)
+                ):
                     # Exact normalized-label hit only: an approximate match could type one
                     # person's value into another field, so anything fuzzier goes to the
                     # text model with the memory in context instead.
-                    remembered = self.mode.value_for(action["label"])
-                if supplied is not None:
+                    remembered = self.mode.value_for(action["label"], page.get("url"))
+                if decision.get("replay"):
+                    text = decision.get("replay_text")
+                    text_source = "replay"
+                    state["text_calls"].append({
+                        "model": "replay", "latency_ms": 0, "usage": {},
+                        "field": action["label"], "value": "[redacted]",
+                    })
+                elif supplied is not None:
                     # No model call and nothing to cache: a supplied literal cannot go
                     # stale, and Browser.act re-checks freshness immediately before input.
                     text = supplied
+                    text_source = "profile" if getattr(self, "profile_fill", None) else "supplied"
                     state["text_calls"].append(
                         {
                             "model": "supplied",
                             "latency_ms": 0,
                             "usage": {},
                             "field": action["label"],
-                            "value": text,
+                            "value": "[redacted]",
                         }
                     )
                 elif remembered is not None:
                     # Learned memory, not a model call. The gate, step budget and freshness
                     # checks around this branch are the same as for any other execution.
                     text = remembered
+                    text_source = "mode-memory"
                     state["text_calls"].append(
                         {
                             "model": "mode-memory",
                             "latency_ms": 0,
                             "usage": {},
                             "field": action["label"],
-                            "value": text,
+                            "value": "[redacted]",
                         }
                     )
                 else:
+                    text_source = "model"
                     if not state["browser"].fresh(page):
                         raise StalePage("Page changed before text generation. Choose again.")
                     context = field_context(
                         state["goal"], action, page, state["history"],
-                        mode_state=self.mode.text_state() if getattr(self, "mode", None) else None,
+                        mode_state=self.mode.text_state(page.get("url")) if getattr(self, "mode", None) else None,
                     )
                     if self.pending_text and self.pending_text[0] == context:
                         _, text, helper = self.pending_text
@@ -1440,7 +1487,7 @@ class Agent:
                         else:
                             self.pending_text = (context, text, helper)
                             state["text_calls"].append(
-                                {**(helper or {}), "field": action["label"], "value": text}
+                                {**(helper or {}), "field": action["label"], "value": "[redacted]"}
                             )
             # Browser.act checks freshness immediately before input, including after text generation.
             error = None
@@ -1475,6 +1522,17 @@ class Agent:
                 except Exception as exc:
                     error = str(exc) or type(exc).__name__
                     dispatch_error = True
+                finally:
+                    if action["kind"] in {"fill", "seek"} and text:
+                        self.private_values = getattr(self, "private_values", set())
+                        self.private_values.add(text)
+                        state["browser"].private_values = sorted(
+                            self.private_values, key=len, reverse=True
+                        )
+                        self.screenshots = False
+                        self.record_dir = None
+                        state["record"] = False
+                        self._delegation_no_vision = True
             state["scan"] = scan
             self.pending_text = None
             state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
@@ -1491,7 +1549,7 @@ class Agent:
                     "cached": decision.get("cached"),
                     "model": decision.get("model"),
                     "latency_ms": decision["latency_ms"],
-                    "text": text,
+                    "text": "[redacted]" if text is not None else None,
                     "text_helper": helper["model"] if helper else None,
                     "text_latency_ms": helper["latency_ms"] if helper else 0,
                     "operation": decision["operation"],
@@ -1589,13 +1647,15 @@ class Agent:
                 state["descriptors"].append(
                     replay.descriptor(
                         action, decision, outcome,
-                        modes.redact_for_replay(action.get("label"), text),
+                        modes.redact_for_replay(action.get("label"), text)
+                        if text_source == "model" else None,
                     )
                 )
             if (
                 getattr(self, "mode", None) is not None
                 and action["kind"] == "fill"
                 and text
+                and text_source == "model"
                 and not decision.get("replay")
                 and error is None
                 and outcome not in DEAD_OUTCOMES
@@ -1608,8 +1668,6 @@ class Agent:
                     if writer is not None:
                         writer.record(
                             "mode_learned", label=action["label"],
-                            value_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest()[:16],
-                            value_chars=len(text),
                             url=state["page"].get("url"),
                         )
             if state["record"]:

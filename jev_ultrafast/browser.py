@@ -12,7 +12,15 @@ from browser_harness.helpers import activate_tab, cdp
 
 # Atomically read visible content and controls, preserving actual DOM node identity.
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text(encoding="utf-8")
-MARKER = f"(() => {{ const state={READ_STATE}; return state?.marker ?? null; }})()"
+
+
+def private_snapshot(values, *, marker=False):
+    """Keep private literals inside one CDP evaluation, off the returned page."""
+    tail = "return state?.marker ?? null;" if marker else "return state;"
+    return (
+        "((privateValues) => { const state=" + READ_STATE + "; " + tail + " })"
+        "(" + json.dumps(list(values), ensure_ascii=False) + ")"
+    )
 
 TAB_MODES = ("foreground", "background", "active")
 INTERNAL_URL_PREFIXES = ("chrome://", "chrome-untrusted://", "devtools://", "chrome-extension://", "about:")
@@ -89,6 +97,7 @@ def _visible_page_target():
 class Browser:
     def __init__(self, url, *, follow_tabs=None):
         ensure_daemon()
+        self.private_values = []
         self.follow_tabs = follow_tabs
         self.mode = os.environ.get("JEV_TAB_MODE", "foreground").strip().lower()
         if self.mode not in TAB_MODES:
@@ -404,7 +413,9 @@ class Browser:
         for attempt in range(10):
             try:
                 page = self._browser_operation(
-                    {"operation": "observe", "session": self.session, "screenshot": screenshot}
+                    {"operation": "observe", "session": self.session,
+                     "screenshot": screenshot,
+                     "private_values": getattr(self, "private_values", [])}
                 )
                 self.last_url = page.get("url", getattr(self, "last_url", ""))
                 return page
@@ -428,7 +439,7 @@ class Browser:
                 f"return c ? [c.pageKey(),c.guard(c.nodes.get({node}))] : null; }})()"
             )
             return current == [page["page_key"], page["guards"].get(str(node))]
-        return self.evaluate(MARKER) == page["marker"]
+        return self.evaluate(private_snapshot(getattr(self, "private_values", []), marker=True)) == page["marker"]
 
     def fresh(self, page, action=None):
         try:
@@ -437,6 +448,17 @@ class Browser:
             if not self._session_lost(error) or not self.reattach():
                 raise
             return self._fresh(page, action)
+
+    def value_present(self, node, text):
+        """Read only a boolean from Chrome; never return the private DOM value."""
+        if type(node) is not int or not isinstance(text, str):
+            return False
+        payload = json.dumps({"node": node, "text": text}, ensure_ascii=False)
+        return bool(self.evaluate(
+            "(query => { const e=window.__jevFast?.nodes.get(query.node); "
+            "return !!e?.isConnected && String(e.value ?? e.innerText).trim() === query.text.trim(); "
+            "})(" + payload + ")"
+        ))
 
     def act(self, action, page, text=None):
         if not self.fresh(page, action):
@@ -586,7 +608,7 @@ def browser_operation(request):
                     call("Input.insertText", text=request["text"])
         return {"executed": action["id"]}
 
-    info = evaluate(READ_STATE)
+    info = evaluate(private_snapshot(request.get("private_values") or []))
     if info is None:
         raise StalePage("Document is navigating")
     info["fingerprint"] = fingerprint(info)

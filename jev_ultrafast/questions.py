@@ -89,7 +89,7 @@ Return JSON with exactly one of these shapes:
  "strategy": "decide" | "collect"}
 
 Rules: slug is 2-40 characters, lowercase letters, digits and dashes only, and must not
-collide with an existing mode (reuse the existing mode's slug instead). "collect" is only
+collide with an existing mode. "collect" is only
 for tasks whose goal is to scroll a feed and save items; everything else is "decide".
 Never include personal data in any field. Return only the JSON object."""
 

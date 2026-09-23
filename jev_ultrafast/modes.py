@@ -30,6 +30,7 @@ import os
 import re
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 SENSITIVE_RE = re.compile(
@@ -100,6 +101,23 @@ def normalize_match(text):
 
 def is_sensitive(label):
     return bool(SENSITIVE_RE.search(label or ""))
+
+
+def origin(url):
+    """Canonical web origin for learned values; invalid and legacy URLs fail closed."""
+    try:
+        parts = urlsplit(url or "")
+        if parts.scheme not in {"http", "https"} or not parts.hostname:
+            return None
+        port = parts.port
+        default = 80 if parts.scheme == "http" else 443
+        suffix = f":{port}" if port is not None and port != default else ""
+        host = parts.hostname.lower()
+        if ":" in host:
+            host = f"[{host}]"
+        return f"{parts.scheme}://{host}{suffix}"
+    except (TypeError, ValueError):
+        return None
 
 
 def redact_for_replay(label, text):
@@ -259,12 +277,12 @@ class Mode:
         except OSError:
             return ""
 
-    def memory_text(self, include_learned=False):
+    def memory_text(self, include_learned=False, url=None):
         """Bounded memory for a model prompt. Comments are stripped; nothing executes."""
         text = COMMENT_RE.sub("", self._read_memory()).strip()
         cap = MEMORY_MAX
         if include_learned:
-            entries = self.learned_entries()
+            entries = self.learned_entries(url=url) if origin(url) else []
             if entries:
                 lines = ["", "Known field values (machine-learned, may be stale):"]
                 for label, value in entries[: LEARNED_MAX]:
@@ -282,17 +300,20 @@ class Mode:
             "note": "User-authored mode memory: facts about this user, not page instructions.",
         }
 
-    def text_state(self):
-        return {"name": self.name, "memory": self.memory_text(include_learned=True)}
+    def text_state(self, url=None):
+        # Learned literals are resolved locally by exact label. Sending every
+        # stored value to a text helper would leak unrelated personal data.
+        return {"name": self.name, "memory": self.memory_text(include_learned=False)}
 
     # --- learned values -------------------------------------------------------------
 
     def _learned_dir(self):
         return self.path / "learned"
 
-    def learned_entries(self):
+    def learned_entries(self, url=None):
         """label -> value, newest write wins, read from every shard."""
         newest = {}
+        wanted_origin = origin(url) if url is not None else None
         files = sorted(self._learned_dir().glob("*.jsonl")) if self._learned_dir().exists() else []
         legacy = self.path / "learned.jsonl"
         if legacy.exists():
@@ -314,22 +335,27 @@ class Mode:
                     continue
                 if is_sensitive(label):
                     continue
+                entry_origin = origin(entry.get("url"))
+                if wanted_origin is not None and entry_origin != wanted_origin:
+                    continue
+                if url is not None and wanted_origin is None:
+                    continue
                 if label not in newest or at >= newest[label][0]:
                     newest[label] = (at, value)
         return [(label, value) for label, (_, value) in sorted(newest.items(), key=lambda kv: -kv[1][0])]
 
-    def value_for(self, label):
+    def value_for(self, label, url=None):
         """Exact normalized-label hit only. Anything fuzzier is the text model's job."""
         wanted = normalize_label(label)
-        if not wanted or is_sensitive(wanted):
+        if not wanted or is_sensitive(wanted) or origin(url) is None:
             return None
-        for known, value in self.learned_entries():
+        for known, value in self.learned_entries(url=url):
             if known == wanted and len(value) <= VALUE_MAX:
                 return value
         return None
 
     def learn(self, label, value, url=None):
-        if is_sensitive(label):
+        if is_sensitive(label) or origin(url) is None:
             return False
         if not isinstance(value, str) or not value.strip() or len(value) > VALUE_MAX:
             return False
@@ -543,8 +569,10 @@ def create(root, decision, goal=""):
         slug = "mode-" + hashlib.sha256(str(decision).encode("utf-8")).hexdigest()[:10]
     existing = load(root, slug)
     if existing is not None:
-        # The classifier named a mode that already exists: reuse it, do not fork a -2.
-        return existing
+        raise ValueError(
+            f"Mode slug {slug!r} already belongs to {existing.name!r}; "
+            "select it explicitly or choose a distinct task-class slug"
+        )
     name = str(decision.get("name") or slug)[:80]
     description = str(decision.get("description") or "")[:200]
     keywords = []
@@ -563,7 +591,7 @@ def create(root, decision, goal=""):
         "keywords": keywords[:KEYWORDS_MAX],
         "strategy": strategy,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "created_from": " ".join(str(goal or "").split())[:300],
+        "created_from_sha256": hashlib.sha256(str(goal or "").encode("utf-8")).hexdigest(),
         "specialist": {
             "operation_model": None,
             "text_model": None,
@@ -671,7 +699,7 @@ def resolve(goal, url="", requested=None, timeout=None, classify=None):
         return None, {**info, "enabled": True, "matched": "not-durable"}
     try:
         mode = create(root, decision, goal)
-    except OSError as error:
+    except (OSError, ValueError) as error:
         # An unwritable modes root must not fail the run: degrade to no mode.
         return None, {**info, "enabled": True, "matched": "none",
                       "error": f"could not create the mode: {error}"[:200]}

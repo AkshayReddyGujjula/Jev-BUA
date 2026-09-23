@@ -56,7 +56,8 @@ def test_create_writes_memory_and_config_without_the_goal(root):
     assert "Acme" not in memory                      # goal text never becomes memory
     assert "## About me" in memory and "## Standing instructions" in memory
     data = json.loads((mode.path / "mode.json").read_text(encoding="utf-8"))
-    assert data["created_from"].startswith("Apply to the internship")
+    assert len(data["created_from_sha256"]) == 64
+    assert "Apply to the internship" not in json.dumps(data)
     assert data["strategy"] == "decide"
     assert data["specialist"]["collect"]["harvest"] is False
     assert (mode.path / "learned").is_dir() and (mode.path / "harvest").is_dir()
@@ -69,10 +70,11 @@ def test_create_for_collect_defaults(root):
     assert mode.specialist["replay"] is False
 
 
-def test_creating_an_existing_slug_reuses_the_mode(root):
+def test_creating_an_existing_slug_fails_loudly(root):
     first = modes.create(root, DECISION, "one")
-    second = modes.create(root, {**DECISION, "name": "Other"}, "two")
-    assert second.slug == first.slug
+    with pytest.raises(ValueError, match="already belongs"):
+        modes.create(root, {**DECISION, "name": "Other"}, "two")
+    assert modes.load(root, first.slug).name == first.name
     assert not list(root.glob("internship-applications-2"))
 
 
@@ -175,37 +177,52 @@ def test_memory_strips_comments_and_caps(root):
 
 def test_learned_values_are_exact_and_sensitive_are_refused(root):
     mode = modes.create(root, DECISION, "x")
-    assert mode.learn("Full name", "Ada Lovelace")
+    assert mode.learn("Full name", "Ada Lovelace", url="https://jobs.example/apply")
     assert mode.learn("Password", "hunter2") is False
-    assert mode.value_for("Full name") == "Ada Lovelace"
-    assert mode.value_for("  FULL NAME * ") == "Ada Lovelace"
-    assert mode.value_for("Name") is None
-    assert mode.value_for("Password") is None
+    assert mode.value_for("Full name", "https://jobs.example/other") == "Ada Lovelace"
+    assert mode.value_for("  FULL NAME * ", "https://jobs.example/apply") == "Ada Lovelace"
+    assert mode.value_for("Full name", "https://other.example/apply") is None
+    assert mode.value_for("Name", "https://jobs.example/apply") is None
+    assert mode.value_for("Password", "https://jobs.example/apply") is None
+    assert "Ada Lovelace" not in mode.text_state("https://other.example/")["memory"]
+    assert "Ada Lovelace" not in mode.text_state("https://jobs.example/")["memory"]
+
+
+def test_legacy_or_missing_origin_never_autofills(root):
+    mode = modes.create(root, DECISION, "x")
+    assert mode.learn("Full name", "Ada") is False
+    path = mode.path / "learned"
+    path.mkdir(exist_ok=True)
+    (path / "legacy.jsonl").write_text(
+        json.dumps({"at": time.time(), "label": "Full name", "value": "Ada"}) + "\n",
+        encoding="utf-8",
+    )
+    assert mode.value_for("Full name", "https://jobs.example/apply") is None
 
 
 def test_learned_memory_never_crosses_modes(root):
     first = modes.create(root, DECISION, "x")
     second = modes.create(root, {**DECISION, "slug": "job-applications", "keywords": []}, "y")
-    first.learn("Email", "ada@example.com")
-    assert second.value_for("Email") is None
+    first.learn("Email", "ada@example.com", url="https://jobs.example/apply")
+    assert second.value_for("Email", "https://jobs.example/apply") is None
 
 
 def test_last_learned_value_wins_and_forget_removes(root):
     mode = modes.create(root, DECISION, "x")
-    mode.learn("Email", "old@example.com")
-    mode.learn("Email", "new@example.com")
-    assert mode.value_for("Email") == "new@example.com"
+    mode.learn("Email", "old@example.com", url="https://jobs.example/apply")
+    mode.learn("Email", "new@example.com", url="https://jobs.example/apply")
+    assert mode.value_for("Email", "https://jobs.example/apply") == "new@example.com"
     assert mode.forget("Email") == 2       # both writes are removed, not just the newest
-    assert mode.value_for("Email") is None
+    assert mode.value_for("Email", "https://jobs.example/apply") is None
 
 
 def test_sensitive_entries_are_filtered_at_read_time(root):
     mode = modes.create(root, DECISION, "x")
-    mode.learn("Full name", "Ada")
+    mode.learn("Full name", "Ada", url="https://jobs.example/apply")
     path = mode.path / "learned" / f"{os.getpid()}.jsonl"
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({"at": time.time() + 1, "label": "Card number", "value": "4111"}) + "\n")
-    text = mode.memory_text(include_learned=True)
+    text = mode.memory_text(include_learned=True, url="https://jobs.example/apply")
     assert "Ada" in text and "4111" not in text
 
 
@@ -281,12 +298,17 @@ def test_page_facts_reads_values_through_the_browser():
     from jev_ultrafast.assertions import page_facts
 
     class Browser:
+        calls = 0
+
         def evaluate(self, script):
+            self.calls += 1
             assert "location.href" in script and "#name" in script
             return {"url": "http://x/apply", "title": "Apply", "text": "body",
                     "selector_counts": {}, "values": {"#name": "Ada"}}
 
-    facts = page_facts(Browser(), [], ["#name"])
+    browser = Browser()
+    facts = page_facts(browser, [], ["#name"])
+    assert browser.calls == 1
     assert facts["values"]["#name"] == "Ada"
 
 
@@ -468,7 +490,7 @@ def test_text_context_includes_mode_memory(root):
 
 def test_learned_value_is_typed_without_a_model_call(monkeypatch, root):
     mode = internship_mode(root)
-    mode.learn("Full name", "Ada Lovelace")
+    mode.learn("Full name", "Ada Lovelace", url="http://x/feed")
     agent = make_agent(page(), mode=mode)
     calls = []
     monkeypatch.setattr(
@@ -537,7 +559,7 @@ def test_mcp_tool_calls_are_bounded_by_a_deadline():
 def test_an_unambiguous_memory_fill_skips_the_confidence_gate(monkeypatch, root):
     """Both element (unique exact label) and value (user memory) are code-validated."""
     mode = internship_mode(root)
-    mode.learn("Full name", "Ada Lovelace")
+    mode.learn("Full name", "Ada Lovelace", url="http://x/feed")
     agent = make_agent(page(), mode=mode)
     agent.state["decision"] = decision(confidence=0.1)
     agent.command("act", {"fingerprint": agent.state["page"]["fingerprint"]})
@@ -548,7 +570,7 @@ def test_an_unambiguous_memory_fill_skips_the_confidence_gate(monkeypatch, root)
 def test_an_ambiguous_memory_fill_still_faces_the_gate(monkeypatch, root):
     """Two fields with the same label are exactly the wrong-field risk: gate them."""
     mode = internship_mode(root)
-    mode.learn("Email", "ada@example.test")
+    mode.learn("Email", "ada@example.test", url="http://x/feed")
     ambiguous = page(actions=[
         SCROLL,
         {"id": "e1", "kind": "fill", "label": "Email", "role": "textbox", "value": "", "node": 1},
@@ -564,7 +586,7 @@ def test_an_ambiguous_memory_fill_still_faces_the_gate(monkeypatch, root):
 
 def test_memory_fill_executes_above_the_floor(monkeypatch, root):
     mode = internship_mode(root)
-    mode.learn("Full name", "Ada Lovelace")
+    mode.learn("Full name", "Ada Lovelace", url="http://x/feed")
     agent = make_agent(page(), mode=mode)
     agent.state["decision"] = decision(confidence=0.9)
     agent.command("act", {"fingerprint": agent.state["page"]["fingerprint"]})
@@ -588,7 +610,7 @@ def test_learning_requires_the_field_to_have_accepted_the_value(monkeypatch, roo
     )
     agent.state["decision"] = decision()
     agent.command("act", {"fingerprint": agent.state["page"]["fingerprint"]})
-    assert mode.value_for("Full name") == "Ada Lovelace"
+    assert mode.value_for("Full name", "http://x/feed") == "Ada Lovelace"
 
 
 def test_a_rejected_fill_is_not_learned(monkeypatch, root):

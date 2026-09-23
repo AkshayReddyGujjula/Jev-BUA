@@ -1,5 +1,14 @@
 (() => {
   if (!document.body) return null;
+  const secrets = typeof privateValues === 'undefined' ? [] : privateValues;
+  const mask = raw => {
+    let value=String(raw ?? '');
+    for (const secret of secrets) if (secret) {
+      if (secret.length<4) { if (value===secret) value='[private]'; }
+      else value=value.split(secret).join('[private]');
+    }
+    return value;
+  };
   const cache = window.__jevFast ||= {ids:new WeakMap(), nodes:new Map(), next:1};
   const identity = e => {
     if (!cache.ids.has(e)) cache.ids.set(e,cache.next++);
@@ -47,14 +56,14 @@
   };
   cache.pageKey=()=>[performance.timeOrigin,location.href,scrollX,scrollY,innerWidth,innerHeight,
     [...document.querySelectorAll('input,textarea,select')].filter(safe)
-      .map(e=>[identity(e),e.value,e.checked,e.selectedIndex,e.disabled,e.readOnly])];
+      .map(e=>[identity(e),mask(e.value),e.checked,e.selectedIndex,e.disabled,e.readOnly])];
   cache.guard=e=>{
     if (!e?.isConnected || !visible(e)) return null;
     const scope=e.closest('form,dialog,[role="dialog"],article,li,tr,[role="row"]') || e.parentElement;
-    return [identity(e),role(e),name(e),e.value??null,e.checked??null,e.selectedIndex??null,
+    return [identity(e),role(e),mask(name(e)),mask(e.value??null),e.checked??null,e.selectedIndex??null,
       e.readOnly??null,e.matches(':disabled'),e.getAttribute('aria-disabled'),
       e.getAttribute('aria-expanded'),e.getAttribute('aria-checked'),e.getAttribute('aria-selected'),
-      e.getAttribute('href'),scope?.innerText?.slice(0,6000)||''];
+      mask(e.getAttribute('href')),mask(scope?.innerText?.slice(0,6000)||'')];
   };
   const actions=[];
   for (const e of document.querySelectorAll(selector)) {
@@ -62,7 +71,7 @@
     const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2, rname=role(e);
     if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
-    const base={node:identity(e),role:rname,label:name(e)||rname,
+    const base={node:identity(e),role:rname,label:mask(name(e)||rname),
       form_submit:(!!e.form && e.type==='submit'),
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
     for (const key of ['checked','selected','expanded']) {
@@ -80,14 +89,14 @@
     }
     if (e.tagName==='SELECT') {
       for (const o of e.options) if (!o.selected && !o.disabled && !o.closest('optgroup[disabled]'))
-        actions.push({...base,kind:'select',value:o.value,
-          current_value:[...e.selectedOptions].map(o=>o.label).join(', '),label:base.label+' → '+o.label});
+        actions.push({...base,kind:'select',value:mask(o.value),
+          current_value:mask([...e.selectedOptions].map(o=>o.label).join(', ')),label:base.label+' → '+mask(o.label)});
     } else {
       const editable=!e.readOnly && e.getAttribute('aria-readonly')!=='true' &&
         (['textbox','searchbox','spinbutton'].includes(rname) ||
           (rname==='combobox' && ['INPUT','TEXTAREA'].includes(e.tagName)));
-      const value='value' in e ? String(e.value) :
-        e.isContentEditable || rname==='combobox' ? e.innerText.trim() : '';
+      const value='value' in e ? mask(e.value) :
+        e.isContentEditable || rname==='combobox' ? mask(e.innerText.trim()) : '';
       actions.push({...base,kind:editable?'fill':'click',value});
       if (editable) actions.push({...base,kind:'click',value,label:'Open '+base.label});
     }
@@ -99,16 +108,17 @@
     if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
     range.selectNodeContents(node); const r=range.getBoundingClientRect();
     if (r.width>0 && r.height>0 && r.bottom>0 && r.top<innerHeight && r.right>0 && r.left<innerWidth) {
-      words.push(value); length+=value.length;
+      words.push(mask(value)); length+=value.length;
     }
   }
-  const text=words.join('\n').slice(0,6000), height=document.documentElement.scrollHeight;
+  const text=mask(words.join('\n').slice(0,6000)), height=document.documentElement.scrollHeight;
   const page_key=cache.pageKey(), guards={};
   for (const a of actions) if (!(a.node in guards)) guards[a.node]=cache.guard(cache.nodes.get(a.node));
   // Compare meaning and identity. Geometry is always resolved and hit-tested just before input.
   const semantics=actions.map(({rect,...action})=>action);
-  const marker=[performance.timeOrigin,location.href,scrollX,scrollY,innerWidth,innerHeight,
-    document.title,text,semantics,page_key[6]];
+  const marker=[performance.timeOrigin,mask(location.href),scrollX,scrollY,innerWidth,innerHeight,
+    mask(document.title),text,semantics,page_key[6],
+    document.activeElement ? identity(document.activeElement) : null];
   const omitted_actions=Math.max(0,actions.length-250);
   actions.splice(250);
   actions.forEach((a,i)=>a.id='e'+(i+1));
@@ -136,6 +146,6 @@
       visible(e) && /recaptcha|hcaptcha|turnstile|captcha/i.test(
         (e.getAttribute('src')||'')+' '+(e.getAttribute('title')||'')+' '+(e.getAttribute('class')||''))),
   };
-  return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,
+  return {url:mask(location.href),title:mask(document.title),w:innerWidth,h:innerHeight,text,
     scroll:{y:scrollY,height},actions,marker,page_key,guards,omitted_actions,human};
 })()
