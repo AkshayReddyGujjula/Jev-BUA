@@ -223,6 +223,33 @@ def test_completed_task_surfaces_gate_refusals_for_promotion():
     assert result["gate"] is None and result["stall"] is None
 
 
+def test_mcp_server_sets_bu_name_before_browser_harness_loads():
+    """browser_harness reads BU_NAME at import time.
+
+    Regression: a top-level `delegation` import in jev_mcp_server.py imported browser.py
+    (and browser_harness) before BU_NAME was set, so every MCP server shared the "default"
+    daemon and tab -- the documented "silently wrong pages" failure.
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    env = {key: value for key, value in os.environ.items() if key != "BU_NAME"}
+    env["JEV_MCP_BU_NAME"] = "jev-bu-order-test"
+    script = (
+        "import jev_mcp_server, browser_harness.admin as admin, os; "
+        "print(os.environ.get('BU_NAME'), admin.NAME)"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", script], cwd=root, env=env,
+        capture_output=True, text=True, timeout=120,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "jev-bu-order-test jev-bu-order-test"
+
+
 def test_delegate_fixture_route_exposes_the_checkpoint_flow():
     from urllib.request import urlopen
 

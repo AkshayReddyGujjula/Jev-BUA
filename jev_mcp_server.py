@@ -35,13 +35,17 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+# Own daemon and tab per server, so a second agent cannot silently drive this one's page.
+# This must run before anything imports browser_harness: it reads BU_NAME at import time, and
+# a top-level package import here (delegation -> browser) would freeze the shared "default"
+# daemon for every server that starts with JEV_MCP_BU_NAME set.
+os.environ.setdefault("BU_NAME", os.environ.get("JEV_MCP_BU_NAME", "jev-mcp"))
+
 from AgentJevUltraFast.delegation import DelegatedTask, TaskRegistry  # noqa: E402
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "jev-browser"
 SERVER_VERSION = "1.0.0"
-# Own daemon and tab per server, so a second agent cannot silently drive this one's page.
-os.environ.setdefault("BU_NAME", os.environ.get("JEV_MCP_BU_NAME", "jev-mcp"))
 
 # Where runs write their JSONL evidence: every offered candidate, answer, confidence and
 # execution. `JEV_EVIDENCE_DIR=0` disables it; the default is repo-local and gitignored.
