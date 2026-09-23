@@ -43,6 +43,7 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -50,6 +51,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 MAX_WORKERS = 10
+# Added to a check's own max_seconds to bound its whole process: browser start-up, the final
+# readback and teardown. A worker past it is killed and reported, never waited on - one
+# instance parked behind Chrome's "Allow remote debugging?" prompt used to hang the run.
+STARTUP_GRACE_S = float(os.environ.get("JEV_CHECK_STARTUP_S", "45"))
+APPROVAL_HINT = (
+    "Chrome is waiting for 'Allow remote debugging?' for this instance's new connection; "
+    "approve it once in Chrome (it is per BU_NAME) and re-run"
+)
 
 
 def load_env():
@@ -131,10 +140,43 @@ def run_worker(job, out_path):
             ]
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
+        if "permission-blocked" in str(exc):
+            # Not an app failure: the browser connection was never approved.
+            result["status"] = "blocked"
+            result["blocked_reason"] = "chrome-approval"
+            result["error"] = f"{APPROVAL_HINT} ({exc})"
+        else:
+            frame = traceback.extract_tb(exc.__traceback__)[-1:]
+            if frame:
+                result["error_at"] = f"{Path(frame[0].filename).name}:{frame[0].lineno}"
         result["status"] = result["status"] or "error"
     result["wall_s"] = round(time.perf_counter() - started, 2)
     Path(out_path).write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
     return result
+
+
+def run_job(job, part, bu_name):
+    """Run one check in its own process under a hard bound; never wait on it forever.
+
+    Returns a CompletedProcess. A worker past its bound is killed (its browser daemon is a
+    separate process and is left alone: it holds Chrome's approval prompt, if any) and
+    comes back with returncode None and the reason in stderr.
+    """
+    env = {**os.environ, "BU_NAME": bu_name, "PYTHONIOENCODING": "utf-8"}
+    bound = float(job.get("max_seconds", 60)) + STARTUP_GRACE_S
+    command = [sys.executable, str(Path(__file__)), "--worker", "--job", json.dumps(job),
+               "--out", str(part)]
+    try:
+        return subprocess.run(command, env=env, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=bound)
+    except subprocess.TimeoutExpired as expired:
+        output = expired.stderr or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", "replace")
+        reason = f"worker killed after {bound:.0f}s without a result"
+        if "Allow remote debugging" in output or "handshake-wait" in output:
+            reason += f": {APPROVAL_HINT}"
+        return subprocess.CompletedProcess(command, None, "", reason)
 
 
 def run_parent(args):
@@ -169,17 +211,9 @@ def run_parent(args):
     def launch(index_job):
         index, job = index_job
         part = outdir / f"{index:02d}-{re.sub(r'[^a-z0-9]+', '-', job['name'].lower())[:40]}.json"
-        env = {
-            **os.environ,
-            "BU_NAME": f"jev-check-{index:02d}",
-            "PYTHONIOENCODING": "utf-8",
-        }
+        part.unlink(missing_ok=True)      # a stale part from an earlier run is not a result
         started = time.perf_counter()
-        proc = subprocess.run(
-            [sys.executable, str(Path(__file__)), "--worker", "--job", json.dumps(job),
-             "--out", str(part)],
-            env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
+        proc = run_job(job, part, f"jev-check-{index:02d}")
         return index, job, part, proc, round(time.perf_counter() - started, 2)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -194,6 +228,7 @@ def run_parent(args):
                 "name": job["name"], "url": job["url"], "status": "error",
                 "verified": False, "error": (proc.stderr or proc.stdout or "no result file")[-400:],
                 "checks": [], "wall_s": wall,
+                **({"blocked_reason": "timeout"} if proc.returncode is None else {}),
             })
 
     print(f"{'check':<44} {'agent':<9} {'assert':<7} {'wall':>7}  detail")

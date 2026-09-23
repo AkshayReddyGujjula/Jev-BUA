@@ -37,7 +37,10 @@ This repo is the browser engine other agents drive. Three ways in, pick by what 
 - **CLI, parallel app testing:** write a check file and run
   `uv run --env-file .env python scripts/run_checks.py checks.json --workers 6`
   (up to 10). Assertions in `expect` are read off the real page and are the verdict — not the agent's
-  opinion. `checks.example.json` is a working template.
+  opinion. `checks.example.json` is a working template. Each instance (`jev-check-00`..`09`) is its
+  own Chrome connection, so Chrome asks "Allow remote debugging?" once per instance the first time
+  (its daemon then persists). A worker past `max_seconds + JEV_CHECK_STARTUP_S` (45 s) is killed and
+  reported; an unapproved connection is reported as `blocked_reason: chrome-approval`, never a hang.
 
 Every run reports `status` (what the agent did) and `outcome` (the code-owned verdict:
 `verified` / `refuted` / `unknown` / `abstained` / `budget_exhausted`). Only an `expect` readback
