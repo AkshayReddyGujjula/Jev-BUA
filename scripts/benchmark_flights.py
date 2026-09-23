@@ -12,9 +12,16 @@ The baseline tree is a git worktree of the frozen commit, for example:
 
     git worktree add C:/tmp/jev-baseline 68c077bf79caca4e817b8e8a5854b2efa0c81ff6
 
-Without --baseline this is a single-arm re-baseline of the current tree. Browser setup and
-initial navigation are excluded by measure_flights.py in every arm; the clock is the run
-itself. A run that fails independent verification is reported, not dropped.
+Without --baseline this is a single-arm re-baseline of the current tree.
+
+--env-arms compares settings instead of trees: every arm runs the candidate tree and differs
+only in the environment it is given, e.g.
+
+    python scripts/benchmark_flights.py --pairs 3 \
+        --env-arms off:JEV_RENDER_KEEPALIVE=0 on:JEV_RENDER_KEEPALIVE=1
+
+Browser setup and initial navigation are excluded by measure_flights.py in every arm; the
+clock is the run itself. A run that fails independent verification is reported, not dropped.
 """
 
 import argparse
@@ -60,12 +67,12 @@ def summarize(state):
     }
 
 
-def run_arm(label, source, output, timeout):
+def run_arm(label, source, output, timeout, env=None):
     started = time.perf_counter()
     proc = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "measure_flights.py"),
          "--source", source, "--output", str(output)],
-        cwd=ROOT, env=os.environ.copy(), capture_output=True, text=True,
+        cwd=ROOT, env={**os.environ, **(env or {})}, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=timeout,
     )
     wall = round(time.perf_counter() - started, 2)
@@ -105,6 +112,8 @@ def main():
                         help="Where per-run measurement folders are written.")
     parser.add_argument("--timeout", type=int, default=180, help="Per-run process timeout.")
     parser.add_argument("--pause", type=float, default=2.0, help="Seconds between runs.")
+    parser.add_argument("--env-arms", nargs="+", default=None,
+                        help="label:KEY=VALUE[,KEY=VALUE] arms on the candidate tree.")
     args = parser.parse_args()
 
     load_env()
@@ -117,6 +126,18 @@ def main():
     arms = [("candidate", str(Path(args.candidate).resolve()))]
     if args.baseline:
         arms.insert(0, ("original", str(Path(args.baseline).resolve())))
+    arm_env = {}
+    if args.env_arms:
+        if args.baseline:
+            parser.error("--env-arms compares settings on one tree; drop --baseline")
+        arms = []
+        for spec in args.env_arms:
+            label, _, assignments = spec.partition(":")
+            pairs = [item.split("=", 1) for item in assignments.split(",") if "=" in item]
+            if not label or not pairs:
+                parser.error(f"bad --env-arms entry {spec!r}; use label:KEY=VALUE")
+            arms.append((label, str(Path(args.candidate).resolve())))
+            arm_env[label] = {key.strip(): value.strip() for key, value in pairs}
 
     root = Path(args.artifact_root)
     root.mkdir(parents=True, exist_ok=True)
@@ -127,7 +148,7 @@ def main():
             if folder.exists():
                 parser.error(f"{folder} already exists; move it aside first")
             print(f"[pair {pair}] {label}: {source}", flush=True)
-            record = run_arm(label, source, folder, args.timeout)
+            record = run_arm(label, source, folder, args.timeout, env=arm_env.get(label))
             runs.append(record)
             elapsed = record.get("elapsed_ms")
             print(
@@ -142,9 +163,12 @@ def main():
 
     summary = {label: aggregate(runs, label) for label, _ in arms}
     report = {
-        "task": "Google Flights Zurich -> London, one-way, September 20, 2026",
+        "task": "Google Flights Zurich -> London, one-way, "
+                + os.environ.get("JEV_FLIGHTS_DATE", "2026-09-20 (recorded default)"),
+        "tab_mode": os.environ.get("JEV_TAB_MODE", "foreground"),
         "pairs": args.pairs,
         "arms": {label: source for label, source in arms},
+        "arm_env": arm_env,
         "summary": summary,
         "runs": runs,
     }

@@ -1550,3 +1550,26 @@ def test_reattach_rearms_the_render_keepalive(monkeypatch):
     monkeypatch.setattr(browser, "cdp", lambda method, **k: methods.append(method) or {"sessionId": "s2"})
     assert b.reattach() is True
     assert methods == ["Target.attachToTarget", "Page.startScreencast"]
+
+
+def test_a_decision_that_changed_nothing_is_evicted_from_the_cache(runner, monkeypatch):
+    """H2: a cached no-effect click was replayed at 5 ms per lap across runs (Flights v2)."""
+    deleted = []
+    monkeypatch.setattr(loop.cache, "delete", deleted.append)
+    runner.state["decision"] = {**decision("e3"), "operation": "CLICK", "cache_key": "k-dead",
+                                "cached": True}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["history"][-1]["outcome"] == "no visible change"
+    assert deleted == ["k-dead"] and runner.state["cache_evictions"] == 1
+
+
+def test_a_productive_decision_stays_cached(runner, monkeypatch):
+    deleted = []
+    monkeypatch.setattr(loop.cache, "delete", deleted.append)
+    moved = {**page(), "url": "https://example.test/results"}
+    moved["fingerprint"] = fingerprint(moved)
+    runner.state["browser"].observe.return_value = moved
+    runner.state["decision"] = {**decision("e3"), "operation": "CLICK", "cache_key": "k-good"}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["history"][-1]["outcome"] == "navigated"
+    assert deleted == []

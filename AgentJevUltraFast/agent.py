@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import modes, replay
+from . import cache, modes, replay
 from .assertions import (
     evaluate_expectations,
     normalize_expect,
@@ -1687,6 +1687,15 @@ class Agent:
                 url=state["page"]["url"],
                 elapsed_ms=state["elapsed_ms"],
             )
+            if outcome in DEAD_OUTCOMES and decision.get("cache_key"):
+                # A decision that led nowhere must not be served again for the same request:
+                # measured, a 7-day cache replayed a no-effect click at 5 ms per lap, in this
+                # run and the next. Evicting costs at most one paid decision later.
+                cache.delete(decision["cache_key"])
+                state["cache_evictions"] = state.get("cache_evictions", 0) + 1
+                if evidence is not None:
+                    evidence.record("cache_evicted", step=state["history"][-1]["step"],
+                                    outcome=outcome, cached=bool(decision.get("cached")))
             if (
                 state.get("descriptors") is not None
                 and not decision.get("replay")
