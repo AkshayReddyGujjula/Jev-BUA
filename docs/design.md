@@ -28,7 +28,7 @@ The audit also found that treating every INPUT as editable misclassified checkbo
 
 ## Boundaries
 
-A configurable step cap (500 actions by default) and a 5 s no-progress deadline bound a run; the CLI and MCP server add wall-clock budgets. Up to 250 action candidates are retained; truncated candidates cannot be selected. The service stays loopback-only, serializes inspector actions, and checks Host, Origin, and a local request token. Credentials remain server-side. Tabs share the existing Chrome profile.
+A configurable step cap (500 actions by default) and a no-progress deadline (5 s of browser-side time, model waits excluded, with a 20 s wall-clock backstop) bound a run; the CLI and MCP server add wall-clock budgets. Up to 250 action candidates are retained; truncated candidates cannot be selected. The service stays loopback-only, serializes inspector actions, and checks Host, Origin, and a local request token. Credentials remain server-side. Tabs share the existing Chrome profile.
 
 The policy is generic, but two websites do not establish broad reliability. Name resolution covers common labels, ARIA references, and text; it is not the browser's full accessibility algorithm. Shadow roots, frames, canvas, uploads, nested scrolling, pop-ups, and complex keyboard interactions can block progress. A valid action can still be wrong. Independent checks, rather than the model's DONE choice, determine whether the demonstrated task succeeded.
 

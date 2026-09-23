@@ -1,8 +1,9 @@
 """Prove the anti-loop deadline against real browser behaviour.
 
 Runs the real agent loop against the local trap pages in scripts/trap_server.py and
-asserts that a run which cannot make progress TERMINATES instead of spinning, within a
-bounded multiple of JEV_STALL_SECONDS.
+asserts that a run which cannot make progress TERMINATES instead of spinning: within
+JEV_STALL_SECONDS of browser-side time (model waits are credited back to that clock) and
+within JEV_STALL_HARD_SECONDS of wall time whatever the time was spent on.
 
 Also asserts the happy path still works and that caller-supplied values skip the text
 model entirely.
@@ -40,7 +41,7 @@ os.environ.setdefault("JEV_CACHE", "0")
 os.environ["JEV_MODES"] = "off"
 
 from AgentJevUltraFast import Agent  # noqa: E402
-from AgentJevUltraFast.agent import STALL_LIMIT_S, TERMINAL_STATUS  # noqa: E402
+from AgentJevUltraFast.agent import STALL_HARD_S, STALL_LIMIT_S, TERMINAL_STATUS  # noqa: E402
 from AgentJevUltraFast.browser import NAV_TIMEOUT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -54,10 +55,10 @@ from trap_server import serve  # noqa: E402
 STALL_OVERSHOOT_S = 1.0
 
 # Total wall is reported, and separately capped only to prove nothing hangs: the parts are
-# browser setup (NAV_TIMEOUT), whatever time the run legitimately spent making progress,
-# the deadline, and one in-flight iteration. On these traps the page stops changing
-# immediately, so this cap is loose on purpose.
-HARD_WALL_CAP_S = 20.0
+# browser setup (NAV_TIMEOUT), the wall-clock backstop (which model waits cannot extend),
+# and one in-flight iteration. On these traps the page stops changing immediately, so this
+# cap is loose on purpose.
+HARD_WALL_CAP_S = NAV_TIMEOUT + STALL_HARD_S + STALL_OVERSHOOT_S
 
 TRAPS = [
     {
@@ -124,13 +125,15 @@ def main():
     serve(args.port)
     limit = STALL_LIMIT_S
     print(
-        f"stall limit {limit}s (+{STALL_OVERSHOOT_S}s allowance)   "
+        f"stall limit {limit}s browser-side, {STALL_HARD_S}s wall "
+        f"(+{STALL_OVERSHOOT_S}s allowance)   "
         f"wall cap {HARD_WALL_CAP_S}s (hang check only)   runs per trap {args.runs}\n"
     )
 
     failures = []
     report = {
-        "stall_limit_s": limit, "overshoot_allowance_s": STALL_OVERSHOOT_S,
+        "stall_limit_s": limit, "stall_hard_s": STALL_HARD_S,
+        "overshoot_allowance_s": STALL_OVERSHOOT_S,
         "wall_cap_s": HARD_WALL_CAP_S, "nav_timeout_s": NAV_TIMEOUT,
         "traps": [], "happy_path": None,
     }
@@ -142,7 +145,11 @@ def main():
             walls.append(out["wall_s"])
             verdicts.append(out)
             window = out["stall"]["seconds_without_progress"] if out["stall"] else None
-            stalled_in_time = window is None or window <= limit + STALL_OVERSHOOT_S
+            wall_window = (out["stall"] or {}).get("wall_seconds_without_progress")
+            stalled_in_time = (
+                (window is None or window <= limit + STALL_OVERSHOOT_S)
+                and (wall_window is None or wall_window <= STALL_HARD_S + STALL_OVERSHOOT_S)
+            )
             terminated = out["status"] in TERMINAL_STATUS and out["status"] != "done"
             no_hang = out["wall_s"] <= HARD_WALL_CAP_S
             ok = terminated and stalled_in_time and no_hang

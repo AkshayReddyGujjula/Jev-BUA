@@ -20,9 +20,22 @@ half of that across processes would weaken all three for little gain.
 
 The five-second no-progress deadline and the eight-round backstop still bound
 every active segment, but a human wait rebases the clock (`started_at`,
-`progress_at`, `stall_rounds`). Without this, any login checkpoint would end the
-next tick as `stalled`. A page that stops responding *during* active work still
-terminates within the usual window.
+`progress_at`, `progress_wall_at`, `stall_rounds`). Without this, any login
+checkpoint would end the next tick as `stalled`. A page that stops responding
+*during* active work still terminates within the usual window.
+
+## ADR-002a — Model waits are not page stalls (2026-09-23)
+
+The five-second deadline measures browser-side time only: every model wait
+(decision, text helper, failure classifier, supervisor) is credited back to
+`progress_at`. On 2026-09-23 Jev's median decision latency moved from 0.3 s to
+1.8 s for about an hour; under the old clock two slow decisions on a responsive
+page ended runs as `stalled`, which is a false diagnosis of the page. Model
+waits stay bounded by each call's own timeout, by the eight-round cap, and by a
+wall-clock backstop (`progress_wall_at`, `JEV_STALL_HARD_SECONDS`, default 20 s)
+that nothing is credited against. A model call that cannot finish inside the
+backstop is not started, and observations cap their settle wait at the earlier
+of the two deadlines.
 
 ## ADR-003 — No secret store; the profile holds non-secret data
 

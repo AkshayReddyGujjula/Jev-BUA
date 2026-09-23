@@ -163,11 +163,11 @@ artifact check rather than a live-page readback — pair it with a page check wh
 verdict must stand on the page alone.
 
 Collector bounds: `steps` (default 8), three barren scrolls, one harvest per page state,
-harvest calls bounded by the remaining anti-loop room like every other model call, and a
-bounded render wait plus a content-wheel fallback for feeds whose scroller is not the
-document. A feed that stops producing new state stops the run; the 5-second guarantee is
-measured against page progress, so total collector wall time is bounded by the run budget,
-not by 5 s.
+harvest calls bounded by the wall-clock backstop like every other model call (their wait is
+credited back to the 5 s browser-side clock), and a bounded render wait plus a content-wheel
+fallback for feeds whose scroller is not the document. A feed that stops producing new state
+stops the run; the 5-second guarantee is measured against page progress, so total collector
+wall time is bounded by the run budget, not by 5 s.
 
 ## Safety rules
 

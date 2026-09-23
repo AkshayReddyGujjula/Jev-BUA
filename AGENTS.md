@@ -42,9 +42,13 @@ produces `verified`; a `done` without one is `unknown` and must not be reported 
 Exit codes: `0` only for `done`; `2` for `blocked`/`stalled`/budget; `1` for an error. A non-zero exit
 is not a crash — read the JSON.
 
-**The loop can never spin for more than ~5 s.** Once a page stops yielding real progress (navigation,
-controls, control values — not ambient text such as a clock or a carousel) the run terminates as
-`stalled`. Do not retry a stalled run; the page did not respond to anything the agent tried.
+**The loop can never spin for more than ~5 s of browser time, or 20 s of wall time.** Once a page
+stops yielding real progress (navigation, controls, control values — not ambient text such as a clock
+or a carousel) the run terminates as `stalled`. Time spent waiting on a model is credited back to the
+5 s clock (`JEV_STALL_SECONDS`) — a slow provider is not a stuck page — and is bounded instead by each
+call's own timeout, the 8-round no-progress cap, and the uncredited wall-clock backstop
+(`JEV_STALL_HARD_SECONDS`, default 20). `stall.reason` says which bound fired. Do not retry a stalled
+run; the page did not respond to anything the agent tried.
 
 Verification tooling: `python scripts/verify_stall.py` runs the loop against local trap pages and
 asserts the deadline; `python scripts/run_checks.py --serve-traps 8803` self-tests the parallel harness

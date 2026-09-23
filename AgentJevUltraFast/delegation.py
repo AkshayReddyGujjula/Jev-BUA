@@ -185,7 +185,7 @@ class DelegatedTask:
         state["decision"] = None
         state["status"] = "ready"
         if after_wait:
-            state["progress_at"] = time.monotonic()
+            self.agent._mark_progress()
             state["stall_rounds"] = 0
             state["recent_fingerprints"] = [progress_key(page)]
         else:
@@ -324,7 +324,7 @@ class DelegatedTask:
             # A human reading a prompt is not a stalled page: rebase the anti-loop clock
             # for the active segment that starts now (ADR-002). Without this, an approval
             # that takes longer than the five-second deadline ends the run as stalled.
-            state["progress_at"] = time.monotonic()
+            self.agent._mark_progress()
             state["stall_rounds"] = 0
             # Approval applies to one observed action on one page. The human
             # may have navigated or changed the page while reading the prompt.

@@ -48,14 +48,23 @@ REOBSERVE_LIMIT = int(os.environ.get("JEV_REOBSERVE_LIMIT", "5"))
 # Bounded memory of gate attempts per page fingerprint: one re-observe, then abstain.
 GATE_MEMORY = 50
 
-# Hard anti-loop bound. After this many seconds with no NEW page state the agent stops
-# deciding on its own and terminates as "stalled". It is a deadline rather than a step
-# budget precisely so that no further lap of the loop can extend it, and it is read here
-# rather than being asked of the model, because a loop is exactly the situation in which
-# the model's own "am I stuck?" answer cannot be trusted.
+# Hard anti-loop bound. After this many seconds of BROWSER-SIDE time with no NEW page state
+# the agent stops deciding on its own and terminates as "stalled". It is a deadline rather
+# than a step budget precisely so that no further lap of the loop can extend it, and it is
+# read here rather than being asked of the model, because a loop is exactly the situation in
+# which the model's own "am I stuck?" answer cannot be trusted.
+#
+# Time spent waiting on a model is credited back to this clock (see _credit_wait): a slow
+# provider is not the page failing to respond, and counting it turned provider latency
+# spikes (Jev's median moved 0.3 s -> 1.8 s for an hour on 2026-09-23) into false stalls.
+# Model waits are bounded instead by each call's own timeout, by STALL_MAX_ROUNDS, and by
+# STALL_HARD_S below.
 STALL_LIMIT_S = float(os.environ.get("JEV_STALL_SECONDS", "5"))
-# Never start a model call with less than this much of the stall budget left: a decision
-# that cannot finish inside the deadline must not be started at all.
+# Wall-clock backstop that nothing is credited against: no new page state for this long ends
+# the run whatever the time was spent on.
+STALL_HARD_S = float(os.environ.get("JEV_STALL_HARD_SECONDS", "20"))
+# Never start a model call with less than this much of the hard window left: a decision
+# that cannot finish inside the backstop must not be started at all.
 MIN_DECIDE_S = float(os.environ.get("JEV_MIN_DECIDE_SECONDS", "0.6"))
 # Backstop for the deadline: consecutive decisions with no progress at all. The clock can
 # be held open by a page that keeps changing; a decision count cannot.
@@ -315,6 +324,8 @@ class Agent:
             started_at=None,
             record=bool(self.record_dir),
             progress_at=None,
+            progress_wall_at=None,
+            model_wait_s=0.0,
             stall_rounds=0,
             recent_fingerprints=[],
             stall=None,
@@ -368,41 +379,82 @@ class Agent:
         seen.append(key)
         del seen[:-STALL_MEMORY]
         if fresh:
-            state["progress_at"] = time.monotonic()
+            self._mark_progress()
             state["stall_rounds"] = 0
         else:
             state["stall_rounds"] += 1
         return fresh
 
+    def _mark_progress(self):
+        """Restart both stall clocks: new page state, a new run, or a human hand-back."""
+        now = time.monotonic()
+        self.state["progress_at"] = now
+        self.state["progress_wall_at"] = now
+
+    def _credit_wait(self, started):
+        """Exclude a model wait that began at `started` from the browser-side clock.
+
+        Only the 5 s clock is credited; the hard wall clock is not, so a provider that keeps
+        answering slowly still ends the run at STALL_HARD_S.
+        """
+        state = self.state
+        if state.get("progress_at") is None:
+            return
+        now = time.monotonic()
+        spent = max(0.0, now - started)
+        state["progress_at"] = min(now, state["progress_at"] + spent)
+        state["model_wait_s"] = round(state.get("model_wait_s", 0.0) + spent, 3)
+
+    def _model_room(self):
+        """Seconds a model call may still take before the hard backstop."""
+        wall = self.state.get("progress_wall_at")
+        if wall is None:
+            return STALL_HARD_S
+        return STALL_HARD_S - (time.monotonic() - wall)
+
     def stalled(self):
         """True once the loop stops making real progress.
 
-        Two independent bounds, because either alone can be evaded: a deadline (a step count
-        cannot extend it, but a page that keeps changing can hold it open) and a consecutive
-        no-progress round count (a decision count that text churn cannot reset).
+        Three independent bounds, because each alone can be evaded: a browser-side deadline
+        (a step count cannot extend it, but a page that keeps changing can hold it open), a
+        consecutive no-progress round count (a decision count that text churn cannot
+        reset), and a wall-clock backstop that model waits cannot extend.
         """
-        if self.state.get("stall_rounds", 0) >= STALL_MAX_ROUNDS:
+        state = self.state
+        if state.get("stall_rounds", 0) >= STALL_MAX_ROUNDS:
             return True
-        started = self.state.get("progress_at")
+        started = state.get("progress_at")
         if started is None:
             return False
+        if self._model_room() < 0:
+            return True
         return (time.monotonic() - started) > STALL_LIMIT_S
 
     def _stop_stalled(self):
         """Terminate deterministically instead of taking another lap."""
         state = self.state
-        waited = round(time.monotonic() - state["progress_at"], 1)
+        now = time.monotonic()
+        waited = round(now - state["progress_at"], 1)
+        wall = state.get("progress_wall_at") or state["progress_at"]
         last = state["history"][-1] if state["history"] else None
+        if state["stall_rounds"] >= STALL_MAX_ROUNDS:
+            reason = "repeated decisions with no progress"
+        elif now - state["progress_at"] > STALL_LIMIT_S:
+            # Browser-side time alone, model waits excluded, ran out: the page stopped
+            # responding to anything the agent tried.
+            reason = "no progress inside the deadline"
+        else:
+            # Only the wall clock ran out: the time went on model waits.
+            reason = "no progress inside the hard backstop (model waits included)"
         state["stall"] = {
             "seconds_without_progress": waited,
             "limit_s": STALL_LIMIT_S,
+            "wall_seconds_without_progress": round(now - wall, 1),
+            "hard_limit_s": STALL_HARD_S,
+            "model_wait_s": state.get("model_wait_s", 0.0),
             "repeated_rounds": state["stall_rounds"],
             "round_limit": STALL_MAX_ROUNDS,
-            "reason": (
-                "repeated decisions with no progress"
-                if state["stall_rounds"] >= STALL_MAX_ROUNDS
-                else "no progress inside the deadline"
-            ),
+            "reason": reason,
             "last_action": last.get("action") if last else None,
             "last_outcome": last.get("outcome") if last else None,
         }
@@ -546,7 +598,7 @@ class Agent:
             return False
         if state["started_at"] is None:
             state["started_at"] = time.perf_counter()
-            state["progress_at"] = time.monotonic()
+            self._mark_progress()
         try:
             page = state["page"]
             if not state["browser"].fresh(page):
@@ -731,7 +783,7 @@ class Agent:
         state = self.state
         if state["started_at"] is None:
             state["started_at"] = time.perf_counter()
-            state["progress_at"] = time.monotonic()
+            self._mark_progress()
         if self.stalled():
             return self._stop_stalled()
         harvest = state.setdefault(
@@ -749,7 +801,7 @@ class Agent:
         progressed = digest != state.get("collect_text_hash")
         if progressed:
             state["collect_text_hash"] = digest
-            state["progress_at"] = time.monotonic()
+            self._mark_progress()
         if getattr(self, "_harvest_enabled", False) and getattr(self, "mode", None) is not None:
             # One harvest per visited page state, keyed to the collector's own step counter.
             # Triggering on text change alone burned 19 calls in 70 s on x.com, because a
@@ -871,7 +923,7 @@ class Agent:
         content_yield = after_digest != digest
         if content_yield:
             state["collect_text_hash"] = after_digest
-            state["progress_at"] = time.monotonic()
+            self._mark_progress()
         harvest["steps"] = harvest.get("steps", 0) + 1
         harvest["barren"] = 0 if content_yield else harvest.get("barren", 0) + 1
         state["history"][-1].update(
@@ -904,11 +956,12 @@ class Agent:
         text = (page.get("text") or "")[:3000]
         if mode is None or len(text.strip()) < 80:
             return
-        left = STALL_LIMIT_S - (time.monotonic() - (state.get("progress_at") or time.monotonic()))
+        left = self._model_room()
         if left < 0.5:
             return
         harvest["calls"] = harvest.get("calls", 0) + 1
         writer = getattr(self, "evidence", None)
+        asked = time.monotonic()
         try:
             items = harvest_items(
                 text, mode.memory_text(include_learned=False), getattr(self, "_harvest_instructions", None),
@@ -920,6 +973,8 @@ class Agent:
             if writer is not None:
                 writer.record("harvest", ok=False, error=str(exc)[:200], url=page.get("url"))
             return
+        finally:
+            self._credit_wait(asked)
         offered = len(items or [])
         matched = modes.source_match(items, text)
         stored = mode.save_items(page.get("url"), matched)
@@ -1069,7 +1124,10 @@ class Agent:
         state = getattr(self, "state", None)
         if not state or state.get("progress_at") is None:
             return None
-        return state["progress_at"] + STALL_LIMIT_S
+        deadline = state["progress_at"] + STALL_LIMIT_S
+        if state.get("progress_wall_at") is not None:
+            deadline = min(deadline, state["progress_wall_at"] + STALL_HARD_S)
+        return deadline
 
     def command(self, name, body=None):
         body = body or {}
@@ -1098,7 +1156,7 @@ class Agent:
             if state["started_at"] is None:
                 state["started_at"] = time.perf_counter()
                 # The stall clock starts with the run, not with browser setup.
-                state["progress_at"] = time.monotonic()
+                self._mark_progress()
             if self.stalled():
                 return self._stop_stalled()
             if not state["browser"].fresh(state["page"]):
@@ -1109,21 +1167,22 @@ class Agent:
                 raise ValueError("This run has stopped. Start a fresh demo.")
             if len(state["decisions"]) >= self.step_budget() * 2:
                 return self.stop_budget("model-call budget")
-            # Bound the decision by the time left before the anti-loop deadline, and refuse
-            # to start one that cannot finish inside it. Without this a single slow decision
-            # could overshoot the deadline by up to the provider timeout.
-            left = STALL_LIMIT_S - (time.monotonic() - state["progress_at"])
+            # The decision's wait is credited back to the browser-side clock, so it is bounded
+            # by its own timeout and by the hard backstop instead; one that cannot finish
+            # inside the backstop is not started.
+            left = self._model_room()
             if left < MIN_DECIDE_S:
                 return self._stop_stalled()
             skip_cache = state.pop("skip_cache_once", False)
             decision = None
             for attempt in range(2):
                 if attempt:
-                    # The first attempt spent part of the window: size the retry by what is
-                    # left, and do not start one that cannot finish inside the deadline.
-                    left = STALL_LIMIT_S - (time.monotonic() - state["progress_at"])
+                    # The first attempt spent part of the backstop: size the retry by what
+                    # is left, and do not start one that cannot finish inside it.
+                    left = self._model_room()
                     if left < MIN_DECIDE_S:
                         return self._stop_stalled()
+                asked = time.monotonic()
                 try:
                     decision = choose(
                         state["page"], state["goal"], state["history"],
@@ -1166,7 +1225,9 @@ class Agent:
                         state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
                         self._finalize()
                         return self.snapshot()
-            # If the decision itself used up the budget, stop without acting. Without this
+                finally:
+                    self._credit_wait(asked)
+            # If the decision ran into the hard backstop, stop without acting. Without this
             # one more action plus its observation could run while the deadline had already
             # passed (measured: a 6.4 s window against a 5 s limit), and that action is also
             # the one least likely to be useful - it was chosen by a model that had run out
@@ -1507,11 +1568,12 @@ class Agent:
                     if self.pending_text and self.pending_text[0] == context:
                         _, text, helper = self.pending_text
                     else:
-                        # Bound the model call by the time still left before the anti-loop
-                        # deadline, so a slow text call cannot overrun the guarantee on its
-                        # own. A call that cannot fit is allowed to fail: no action is taken
-                        # and the deadline then ends the run.
-                        left = STALL_LIMIT_S - (time.monotonic() - state["progress_at"])
+                        # Bound the model call by the hard backstop, so a slow text call
+                        # cannot overrun the guarantee on its own; its wait is credited back
+                        # to the browser-side clock. A call that cannot fit is allowed to
+                        # fail: no action is taken and the backstop then ends the run.
+                        left = self._model_room()
+                        asked = time.monotonic()
                         try:
                             text, helper = field_text(
                                 context,
@@ -1539,6 +1601,8 @@ class Agent:
                             state["text_calls"].append(
                                 {**(helper or {}), "field": action["label"], "value": "[redacted]"}
                             )
+                        finally:
+                            self._credit_wait(asked)
             # Browser.act checks freshness immediately before input, including after text generation.
             error = None
             dispatch_error = False
@@ -1740,18 +1804,22 @@ class Agent:
             if dead and self.stalled():
                 # Out of time: the anti-loop deadline outranks one more repair attempt.
                 return self._stop_stalled()
-            # The vision planner is not bounded internally, so bound it by whatever room is
-            # left before the deadline rather than refusing to run it at all.
-            room = STALL_LIMIT_S - (time.monotonic() - state["progress_at"])
+            # Repair calls are model waits: bounded by the hard backstop, credited back to
+            # the browser-side clock.
+            room = self._model_room()
             failure = None
             if dead and room > MIN_DECIDE_S:
                 # Classify before paying for the vision planner: a hard wall or a page that
                 # is still loading needs no planner, and this is one cheap typed choice
                 # instead of a screenshot round trip. None on any failure to answer.
-                failure = classify_failure(
-                    state["page"], state["goal"], state["history"],
-                    timeout=min(DECIDE_TIMEOUT, max(MIN_DECIDE_S, room - 0.2)),
-                )
+                asked = time.monotonic()
+                try:
+                    failure = classify_failure(
+                        state["page"], state["goal"], state["history"],
+                        timeout=min(DECIDE_TIMEOUT, max(MIN_DECIDE_S, room - 0.2)),
+                    )
+                finally:
+                    self._credit_wait(asked)
                 if failure:
                     state["failure_class"] = failure
                     if evidence is not None:
@@ -1770,7 +1838,7 @@ class Agent:
             else:
                 # The classification cost time; the planner is bounded by what is LEFT,
                 # not by the room computed before the classification call.
-                room = STALL_LIMIT_S - (time.monotonic() - state["progress_at"])
+                room = self._model_room()
                 if (
                     dead
                     and state.get("escalations", 0) < ESCALATION_LIMIT
@@ -1827,8 +1895,12 @@ class Agent:
             screenshot = browser.screenshot()
         except Exception:
             return False
-        proposal = propose_action(page, state["goal"], state["history"], screenshot=screenshot,
-                                 timeout=timeout)
+        asked = time.monotonic()
+        try:
+            proposal = propose_action(page, state["goal"], state["history"],
+                                      screenshot=screenshot, timeout=timeout)
+        finally:
+            self._credit_wait(asked)
         if not proposal:
             return False
         state["escalations"] = state.get("escalations", 0) + 1

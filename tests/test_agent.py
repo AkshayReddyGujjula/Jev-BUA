@@ -235,6 +235,7 @@ def runner():
         "record": False,
         "text_calls": [],
         "progress_at": time.monotonic(),
+        "progress_wall_at": time.monotonic(),
         "stall_rounds": 0,
         "recent_fingerprints": [loop.progress_key(p)],
         "stall": None,
@@ -1487,15 +1488,80 @@ def test_provider_failure_recovers_on_retry(runner, monkeypatch):
     assert state["status"] == "predicted" and state["decision"]["choice"] == "e1"
 
 
-def test_provider_retry_is_not_started_past_the_deadline(runner, monkeypatch):
+def test_provider_retry_is_not_started_past_the_hard_backstop(runner, monkeypatch):
     def slow_failure(*args, **kwargs):
-        # The first attempt used up the anti-loop window.
-        runner.state["progress_at"] -= loop.STALL_LIMIT_S
+        # The first attempt used up the wall-clock backstop.
+        runner.state["progress_wall_at"] -= loop.STALL_HARD_S
         raise RuntimeError("Model call exceeded its 3s budget; no action executed.")
 
     monkeypatch.setattr(loop, "choose", slow_failure)
     state = runner.command("predict")
     assert state["status"] == "stalled"
+    assert "hard backstop" in state["stall"]["reason"]
+
+
+@pytest.fixture
+def clock(runner, monkeypatch):
+    """A controllable monotonic clock, with the runner's stall clocks started on it."""
+    now = [1000.0]
+    monkeypatch.setattr(loop.time, "monotonic", lambda: now[0])
+    runner._mark_progress()
+    return now
+
+
+def test_model_wait_is_excluded_from_the_browser_clock(runner, clock, monkeypatch):
+    # A provider latency spike is not the page failing to respond: a 6 s decision (more
+    # than the 5 s browser-side window) must not by itself end the run as stalled.
+    def slow(*args, **kwargs):
+        clock[0] += loop.STALL_LIMIT_S + 1
+        return decision("e1")
+
+    monkeypatch.setattr(loop, "choose", slow)
+    state = runner.command("predict")
+    assert state["status"] == "predicted"
+    assert runner.state["model_wait_s"] == pytest.approx(loop.STALL_LIMIT_S + 1)
+    assert runner.state["progress_at"] == clock[0]        # fully credited
+    assert runner.state["progress_wall_at"] == 1000.0     # the wall clock is not
+
+
+def test_browser_time_still_counts_after_a_credited_wait(runner, clock, monkeypatch):
+    def slow(*args, **kwargs):
+        clock[0] += 3.0
+        return decision("e1")
+
+    monkeypatch.setattr(loop, "choose", slow)
+    clock[0] += 3.0                     # browser-side time before the decision
+    runner.command("predict")
+    assert not runner.stalled()         # 3 s browser + 3 s model: only 3 s counts
+    clock[0] += loop.STALL_LIMIT_S - 2.0
+    assert runner.stalled()             # the browser-side 5 s is spent
+
+
+def test_hard_backstop_bounds_repeated_slow_model_waits(runner, clock, monkeypatch):
+    def slow(*args, **kwargs):
+        clock[0] += loop.STALL_HARD_S + 0.5
+        return decision("e1")
+
+    monkeypatch.setattr(loop, "choose", slow)
+    state = runner.command("predict")
+    assert state["status"] == "stalled"
+    assert "hard backstop" in state["stall"]["reason"]
+    assert state["stall"]["hard_limit_s"] == loop.STALL_HARD_S
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_new_page_state_restarts_both_clocks(runner, clock):
+    clock[0] += 4.0
+    fresh = page()
+    fresh["url"] = "https://example.test/next"
+    fresh["fingerprint"] = "next"
+    assert runner.note_progress(fresh)
+    assert runner.state["progress_at"] == runner.state["progress_wall_at"] == clock[0]
+
+
+def test_read_deadline_is_capped_by_the_hard_backstop(runner, clock):
+    runner.state["progress_at"] += 100.0          # as if 100 s of model waits were credited
+    assert runner.read_deadline() == 1000.0 + loop.STALL_HARD_S
 
 
 def test_malformed_expect_fails_at_construction():

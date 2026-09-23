@@ -92,6 +92,10 @@ class FakeAgent:
     def note_progress(self, observed):
         self.state["progress_at"] = time.monotonic()
 
+    def _mark_progress(self):
+        self.state["progress_at"] = time.monotonic()
+        self.state["progress_wall_at"] = self.state["progress_at"]
+
     def close(self):
         self.closed = True
 
