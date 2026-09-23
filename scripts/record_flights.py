@@ -17,8 +17,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from AgentJevUltraFast import Agent  # noqa: E402
 from examples.flights import GOALS, URL, verify  # noqa: E402
-from jev_ultrafast import Agent  # noqa: E402
 
 # A recording must show the real decision path, not a replayed cached answer.
 os.environ.setdefault("JEV_CACHE", "0")
@@ -28,7 +28,7 @@ folder = Path(sys.argv[1] if len(sys.argv) > 1 else "artifacts/flights/recorded"
 folder.mkdir(parents=True, exist_ok=False)
 source_hashes = {
     p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-    for p in (Path(__file__).resolve().parents[1] / "jev_ultrafast").iterdir()
+    for p in (Path(__file__).resolve().parents[1] / "AgentJevUltraFast").iterdir()
     if p.suffix in {".py", ".js"}
 }
 agent = Agent(URL, GOALS)

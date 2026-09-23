@@ -1,4 +1,4 @@
-# Jev Ultrafast
+# AgentJevUltraFast
 
 Read README.md before editing. Keep the loop small: page -> indexed elements -> operation + target -> execution.
 
@@ -13,7 +13,7 @@ Read README.md before editing. Keep the loop small: page -> indexed elements -> 
 - Keep examples, README claims, raw evidence, and model-call counts consistent.
 - Do not commit or push unless the user requests it.
 
-Checks: uv run ruff check ., uv run pytest, node --check jev_ultrafast/static/app.js, node --check jev_ultrafast/snapshot.js, uv build.
+Checks: uv run ruff check ., uv run pytest, node --check AgentJevUltraFast/static/app.js, node --check AgentJevUltraFast/snapshot.js, uv build.
 
 ## Browser testing from any agent
 
@@ -59,7 +59,7 @@ and a tab and the failure mode is *silently wrong pages*.
   benchmark scripts force `JEV_MODES=off`.
 - Never put goal text into a mode's `AGENTS.md`; `mode.json` keeps `created_from` only. Memory is
   sent to model providers — never store credentials, and keep the sensitive-label denylist in
-  `jev_ultrafast/modes.py` ahead of anything new you learn.
+  `AgentJevUltraFast/modes.py` ahead of anything new you learn.
 - Learned values are typed only on an exact normalized label match, only when a fresh readback
   showed the field accepted the value, and never for sensitive labels, seek controls or replays.
 - The confidence gate's `irreversible` reading is page-level, so floors apply to the chosen

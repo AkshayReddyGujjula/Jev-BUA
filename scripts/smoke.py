@@ -6,8 +6,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from jev_ultrafast import Agent
-from jev_ultrafast.demo import load_environment
+from AgentJevUltraFast import Agent
+from AgentJevUltraFast.demo import load_environment
 
 # Real page labels can contain characters the Windows console codec cannot encode (a
 # "Destination → Lisbon" label is enough). Printing must never abort a live run.

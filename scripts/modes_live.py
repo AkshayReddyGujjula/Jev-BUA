@@ -29,9 +29,9 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import trap_server  # noqa: E402
 
-from jev_ultrafast import modes  # noqa: E402
-from jev_ultrafast.agent import Agent  # noqa: E402
-from jev_ultrafast.demo import load_environment  # noqa: E402
+from AgentJevUltraFast import modes  # noqa: E402
+from AgentJevUltraFast.agent import Agent  # noqa: E402
+from AgentJevUltraFast.demo import load_environment  # noqa: E402
 
 REPORT_DIR = ROOT / "artifacts" / "modes-live"
 

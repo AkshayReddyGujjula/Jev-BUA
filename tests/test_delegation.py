@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from jev_ultrafast.delegation import DelegatedTask, TaskRegistry, approval_boundary
+from AgentJevUltraFast.delegation import DelegatedTask, TaskRegistry, approval_boundary
 
 
 def page(*, password=False, action=None, fingerprint="page-1"):
@@ -181,7 +181,7 @@ def test_approval_boundary_covers_submit_and_security_but_not_selects():
 def test_profile_fill_requires_origin_approval_once(tmp_path):
     import json
 
-    from jev_ultrafast.profile import ProfileStore
+    from AgentJevUltraFast.profile import ProfileStore
 
     (tmp_path / "identity.json").write_text(
         json.dumps({"fields": {"Email": "ada@example.test", "Password": "not-stored"}}),
@@ -206,9 +206,9 @@ def test_profile_fill_requires_origin_approval_once(tmp_path):
 def test_mcp_task_tools_keep_the_same_session_across_login_and_approval(monkeypatch):
     import json
 
+    import AgentJevUltraFast
+    import AgentJevUltraFast.browser as browser_module
     import jev_mcp_server
-    import jev_ultrafast
-    import jev_ultrafast.browser as browser_module
 
     publish = {
         "id": "e1", "kind": "click", "role": "button",
@@ -223,7 +223,7 @@ def test_mcp_task_tools_keep_the_same_session_across_login_and_approval(monkeypa
         return browser
 
     monkeypatch.setattr(browser_module, "Browser", make_browser)
-    monkeypatch.setattr(jev_ultrafast, "Agent", lambda url, goal, **kwargs:
+    monkeypatch.setattr(AgentJevUltraFast, "Agent", lambda url, goal, **kwargs:
                         FakeAgent(page(password=True), "e1"))
     monkeypatch.setattr(jev_mcp_server, "_TASKS", TaskRegistry())
     monkeypatch.setattr(jev_mcp_server, "_load_env", lambda: None)

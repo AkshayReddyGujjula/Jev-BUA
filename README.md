@@ -1,6 +1,6 @@
-<img src="docs/banner.svg" alt="Jev Ultrafast · Browser Use × TypeSafe" width="100%" />
+<img src="docs/banner.svg" alt="AgentJevUltraFast · Browser Use × TypeSafe" width="100%" />
 
-# Jev Ultrafast ⚡
+# AgentJevUltraFast ⚡
 
 > [!IMPORTANT]
 > **The Browser Use Cloud waitlist is open.** Get early access to ultrafast browser agents in the cloud.
@@ -14,7 +14,7 @@ Give it one goal. [TypeSafe's Jev](https://docs.typesafe.ai/introduction) picks 
 
 <a href="docs/demo.mp4"><img src="docs/demo.gif" alt="A real Google Flights search at 1× speed, with generated city names and dynamic operation/target decisions" width="100%" /></a>
 
-[Watch the MP4](docs/demo.mp4) · [Measurements](docs/performance.md) · [Read the loop](jev_ultrafast/agent.py)
+[Watch the MP4](docs/demo.mp4) · [Measurements](docs/performance.md) · [Read the loop](AgentJevUltraFast/agent.py)
 
 ## The action space
 
@@ -53,12 +53,11 @@ There are no site-specific action scripts or prepared field strings in the polic
 ## Try it
 
 ```bash
-git clone https://github.com/browser-use/jev-ultrafast.git
-cd jev-ultrafast
+cd AgentJevUltraFast
 uv sync
 cp .env.example .env
 # Add TYPESAFE_API_KEY and TEXT_MODEL_API_KEY.
-uv run jev
+uv run agent-jev
 ```
 
 Open **http://127.0.0.1:8766** and click **Start demo → Run automatically**. The inspector shows numbered elements, operation probabilities, target probabilities, and executed actions. **Choose next** pauses before execution.
@@ -70,7 +69,7 @@ Chrome connects through [Browser Harness](https://github.com/browser-use/browser
 ## Use the library
 
 ```python
-from jev_ultrafast import Agent
+from AgentJevUltraFast import Agent
 
 with Agent(
     "https://www.google.com/travel/flights?hl=en",
@@ -173,17 +172,17 @@ uv run --env-file .env python run_task.py --mode internship-application --forget
 
 | File | Job |
 | --- | --- |
-| [agent.py](jev_ultrafast/agent.py) | The complete loop and text-helper handoff |
-| [snapshot.js](jev_ultrafast/snapshot.js) | Atomic DOM snapshot, indexed controls, freshness guards |
-| [browser.py](jev_ultrafast/browser.py) | Browser connection, current geometry, execution |
-| [model.py](jev_ultrafast/model.py) | Dynamic operation/target heads and text generation |
-| [questions.py](jev_ultrafast/questions.py) | Model instructions |
-| [outcomes.py](jev_ultrafast/outcomes.py) | Code-owned outcome vocabulary |
-| [assertions.py](jev_ultrafast/assertions.py) | Readback assertions and page facts |
-| [gates.py](jev_ultrafast/gates.py) | Per-risk confidence gates |
-| [cache.py](jev_ultrafast/cache.py) | Decision cache keyed on the full request |
-| [evidence.py](jev_ultrafast/evidence.py) | Append-only run evidence |
-| [demo.py](jev_ultrafast/demo.py) | Local inspector |
+| [agent.py](AgentJevUltraFast/agent.py) | The complete loop and text-helper handoff |
+| [snapshot.js](AgentJevUltraFast/snapshot.js) | Atomic DOM snapshot, indexed controls, freshness guards |
+| [browser.py](AgentJevUltraFast/browser.py) | Browser connection, current geometry, execution |
+| [model.py](AgentJevUltraFast/model.py) | Dynamic operation/target heads and text generation |
+| [questions.py](AgentJevUltraFast/questions.py) | Model instructions |
+| [outcomes.py](AgentJevUltraFast/outcomes.py) | Code-owned outcome vocabulary |
+| [assertions.py](AgentJevUltraFast/assertions.py) | Readback assertions and page facts |
+| [gates.py](AgentJevUltraFast/gates.py) | Per-risk confidence gates |
+| [cache.py](AgentJevUltraFast/cache.py) | Decision cache keyed on the full request |
+| [evidence.py](AgentJevUltraFast/evidence.py) | Append-only run evidence |
+| [demo.py](AgentJevUltraFast/demo.py) | Local inspector |
 
 ## Evidence and limits
 
@@ -200,8 +199,8 @@ A `DONE` choice still requires independent outcome verification. The DOM reader 
 ```bash
 uv run ruff check .
 uv run pytest
-node --check jev_ultrafast/static/app.js
-node --check jev_ultrafast/snapshot.js
+node --check AgentJevUltraFast/static/app.js
+node --check AgentJevUltraFast/snapshot.js
 uv build
 ```
 

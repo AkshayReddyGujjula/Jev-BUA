@@ -1,6 +1,6 @@
 """Offline contracts for the vision recovery planner. No paid APIs."""
 
-from jev_ultrafast import recovery
+from AgentJevUltraFast import recovery
 
 PAGE = {"url": "https://example.test/", "title": "T", "text": "", "w": 1000, "h": 500}
 

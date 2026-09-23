@@ -9,9 +9,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from jev_ultrafast import agent as loop
-from jev_ultrafast import model
-from jev_ultrafast.browser import StalePage, browser_operation, fingerprint
+from AgentJevUltraFast import agent as loop
+from AgentJevUltraFast import model
+from AgentJevUltraFast.browser import StalePage, browser_operation, fingerprint
 
 
 def page():
@@ -304,7 +304,7 @@ def test_lost_mutation_reply_blocks_further_actions(runner):
 
 
 def test_observation_is_one_atomic_browser_read(monkeypatch):
-    import jev_ultrafast.browser as browser
+    import AgentJevUltraFast.browser as browser
 
     p = page()
     cdp = Mock(return_value={"result": {"value": p}})
@@ -316,7 +316,7 @@ def test_observation_is_one_atomic_browser_read(monkeypatch):
 
 
 def test_executor_rejects_a_stale_page_before_browser_input(monkeypatch):
-    import jev_ultrafast.browser as browser
+    import AgentJevUltraFast.browser as browser
 
     b = browser.Browser.__new__(browser.Browser)
     b.fresh = Mock(return_value=False)
@@ -329,7 +329,7 @@ def test_executor_rejects_a_stale_page_before_browser_input(monkeypatch):
 
 @pytest.mark.parametrize("response", [{"exceptionDetails": {}}, {"result": {}}])
 def test_interrupted_dropdown_mutation_cannot_be_retried_as_stale(monkeypatch, response):
-    import jev_ultrafast.browser as browser
+    import AgentJevUltraFast.browser as browser
 
     # A navigation can destroy the evaluation result after the change event already fired.
     if "exceptionDetails" in response:
@@ -403,7 +403,7 @@ def test_seek_and_key_actions_are_first_class():
 
 
 def test_key_action_dispatches_key_down_and_up(monkeypatch):
-    import jev_ultrafast.browser as browser
+    import AgentJevUltraFast.browser as browser
 
     cdp = Mock(return_value={})
     monkeypatch.setattr(browser, "cdp", cdp)
@@ -442,7 +442,7 @@ def test_dead_actions_block_when_escalations_exhausted(runner, monkeypatch):
 
 
 def test_reattach_adopts_a_replaced_target(monkeypatch):
-    import jev_ultrafast.browser as browser
+    import AgentJevUltraFast.browser as browser
 
     b = browser.Browser.__new__(browser.Browser)
     b.target = "old"
@@ -463,7 +463,7 @@ def test_reattach_adopts_a_replaced_target(monkeypatch):
 
 
 def test_reattach_fails_without_a_real_page(monkeypatch):
-    import jev_ultrafast.browser as browser
+    import AgentJevUltraFast.browser as browser
 
     b = browser.Browser.__new__(browser.Browser)
     b.target = "old"
@@ -478,7 +478,7 @@ def test_reattach_fails_without_a_real_page(monkeypatch):
 
 
 def test_reattach_never_adopts_an_existing_same_url_tab(monkeypatch):
-    import jev_ultrafast.browser as browser
+    import AgentJevUltraFast.browser as browser
 
     b = browser.Browser.__new__(browser.Browser)
     b.target = "old"
@@ -497,7 +497,7 @@ def test_reattach_never_adopts_an_existing_same_url_tab(monkeypatch):
 
 
 def test_call_never_replays_an_ambiguous_cdp_command(monkeypatch):
-    import jev_ultrafast.browser as browser
+    import AgentJevUltraFast.browser as browser
 
     b = browser.Browser.__new__(browser.Browser)
     b.session = "dead"
@@ -534,7 +534,7 @@ def test_run_task_never_retries_an_ambiguous_session_error(monkeypatch):
 
 
 def test_browser_does_not_redispatch_an_ambiguous_action(monkeypatch):
-    import jev_ultrafast.browser as browser
+    import AgentJevUltraFast.browser as browser
 
     b = browser.Browser.__new__(browser.Browser)
     calls = []
@@ -905,7 +905,7 @@ def test_a_non_scroll_action_clears_the_barren_streak(runner):
 
 
 def test_outcome_precedence():
-    from jev_ultrafast import outcomes
+    from AgentJevUltraFast import outcomes
 
     assert outcomes.resolve("blocked", checks=[{"check": "x", "pass": True}]) == "verified"
     assert outcomes.resolve("done", checks=[{"check": "x", "pass": False}]) == "refuted"
@@ -947,7 +947,7 @@ def test_a_run_without_an_expectation_is_never_verified(runner):
 
 
 def test_harvest_count_alone_is_not_a_live_page_verdict():
-    from jev_ultrafast.outcomes import resolve
+    from AgentJevUltraFast.outcomes import resolve
 
     assert resolve("done", [{"check": "harvest_at_least", "pass": True}]) == "unknown"
 
@@ -977,7 +977,7 @@ def test_explicit_budget_stop_is_terminal_and_finalized(runner):
     (0.95, 0.9, False),
 ])
 def test_confidence_gate_floors(confidence, irreversible, gated):
-    from jev_ultrafast import gates
+    from AgentJevUltraFast import gates
 
     verdict = gates.check(
         {"confidence": confidence, "irreversible": irreversible},
@@ -1065,7 +1065,7 @@ def test_irreversible_action_gates_above_the_reversible_floor(runner):
 
 def test_page_level_irreversibility_does_not_raise_a_fill_floor(runner, monkeypatch):
     """A visible Submit button must not put a text field behind the 0.9 floor."""
-    from jev_ultrafast import gates
+    from AgentJevUltraFast import gates
 
     assert gates.check({"confidence": 0.84, "irreversible": 0.9},
                        {"kind": "fill", "label": "Full name"}) is None
@@ -1082,7 +1082,7 @@ def test_page_level_irreversibility_does_not_raise_a_fill_floor(runner, monkeypa
 
 
 def test_a_mode_may_lower_the_irreversible_floor():
-    from jev_ultrafast import gates
+    from AgentJevUltraFast import gates
 
     click = {"kind": "click", "label": "Submit", "role": "button"}
     decision = {"confidence": 0.75, "irreversible": 0.9}
@@ -1095,7 +1095,7 @@ def test_a_mode_may_lower_the_irreversible_floor():
 
 
 def test_reversible_roles_do_not_inherit_a_submit_buttons_risk():
-    from jev_ultrafast import gates
+    from AgentJevUltraFast import gates
 
     assert gates.check({"confidence": 0.7, "irreversible": 0.9},
                        {"kind": "click", "label": "I confirm", "role": "checkbox"}) is None
@@ -1240,7 +1240,7 @@ def test_failure_classification_parses_a_bounded_choice(monkeypatch):
 
 
 def test_evidence_records_decisions_and_outcomes(tmp_path):
-    from jev_ultrafast.evidence import Evidence
+    from AgentJevUltraFast.evidence import Evidence
 
     evidence = Evidence(tmp_path, "run-1", goal="Find a book")
     evidence.record("decision", choice="e1", confidence=0.9)
@@ -1262,7 +1262,7 @@ def test_evidence_is_optional_and_never_breaks_a_run(runner):
 
 def test_evidence_records_through_the_act_path(runner, tmp_path):
     """Regression: the evidence event name and an action's `kind` field must not collide."""
-    from jev_ultrafast.evidence import Evidence
+    from AgentJevUltraFast.evidence import Evidence
 
     runner.evidence = Evidence(tmp_path, "run-1", goal="Find a book")
     runner.state["decision"] = {**decision("e3"), "operation": "CLICK"}
@@ -1288,7 +1288,7 @@ def _replay_state(steps):
 
 
 def test_replay_plan_roundtrip_is_bound_to_url_and_goal(tmp_path):
-    from jev_ultrafast import replay
+    from AgentJevUltraFast import replay
 
     steps = [{"kind": "click", "label": "Go", "role": "button", "operation": "CLICK"}]
     path = replay.record(tmp_path, "https://example.test/", "Find a book", steps, verified=True)
@@ -1299,7 +1299,7 @@ def test_replay_plan_roundtrip_is_bound_to_url_and_goal(tmp_path):
 
 
 def test_replay_matching_is_unique_or_a_miss():
-    from jev_ultrafast import replay
+    from AgentJevUltraFast import replay
 
     actions = [
         {"id": "a", "kind": "click", "label": "Go", "role": "button"},

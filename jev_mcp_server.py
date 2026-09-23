@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from jev_ultrafast.delegation import DelegatedTask, TaskRegistry  # noqa: E402
+from AgentJevUltraFast.delegation import DelegatedTask, TaskRegistry  # noqa: E402
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "jev-browser"
@@ -90,7 +90,7 @@ def _drop_warm():
 
 def _warm_browser(url, mode, fresh=False):
     """A live Browser for this instance, reused across calls unless `fresh`."""
-    from jev_ultrafast.browser import Browser
+    from AgentJevUltraFast.browser import Browser
 
     with _WARM_LOCK:
         browser = _WARM["browser"]
@@ -368,15 +368,15 @@ def _quiet(func):
 @_tab_env
 def tool_browser_do(args):
     _load_env()
-    from jev_ultrafast import Agent
-    from jev_ultrafast.assertions import (
+    from AgentJevUltraFast import Agent
+    from AgentJevUltraFast.assertions import (
         evaluate_expectations,
         page_facts,
         selectors_for,
         value_selectors_for,
     )
-    from jev_ultrafast.outcomes import resolve
-    from jev_ultrafast.privacy import redact
+    from AgentJevUltraFast.outcomes import resolve
+    from AgentJevUltraFast.privacy import redact
 
     mode = args.get("tab", "background")
     os.environ["JEV_TAB_MODE"] = mode
@@ -471,7 +471,7 @@ ACT_KINDS = {"CLICK": "click", "TYPE_TEXT": "fill", "SELECT": "select", "SEEK": 
 @_tab_env
 def tool_browser_state(args):
     _load_env()
-    from jev_ultrafast.model import action_space
+    from AgentJevUltraFast.model import action_space
 
     mode = args.get("tab", "background")
     os.environ["JEV_TAB_MODE"] = mode
@@ -538,8 +538,8 @@ def tool_browser_act(args):
 @_tab_env
 def tool_browser_assert(args):
     _load_env()
-    from jev_ultrafast.assertions import evaluate_expectations, page_facts, selectors_for, value_selectors_for
-    from jev_ultrafast.browser import Browser
+    from AgentJevUltraFast.assertions import evaluate_expectations, page_facts, selectors_for, value_selectors_for
+    from AgentJevUltraFast.browser import Browser
 
     expect = args.get("expect") or {}
     os.environ["JEV_TAB_MODE"] = args.get("tab", "background")
@@ -595,9 +595,9 @@ def tool_browser_checks(args):
 @_quiet
 def tool_browser_task(args):
     _load_env()
-    from jev_ultrafast import Agent
-    from jev_ultrafast.browser import Browser
-    from jev_ultrafast.profile import ProfileStore
+    from AgentJevUltraFast import Agent
+    from AgentJevUltraFast.browser import Browser
+    from AgentJevUltraFast.profile import ProfileStore
 
     if not args.get("goal") or not args.get("url"):
         raise ValueError("browser_task needs a goal and start URL")

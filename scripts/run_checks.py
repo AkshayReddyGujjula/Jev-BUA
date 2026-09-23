@@ -59,13 +59,13 @@ def load_env():
 
 # Judged by the package's assertion module so the library, the CLI and the MCP server all
 # apply exactly the same rules. Re-exported here because callers import it from run_checks.
-from jev_ultrafast.assertions import evaluate_expectations  # noqa: E402
+from AgentJevUltraFast.assertions import evaluate_expectations  # noqa: E402
 
 
 def run_worker(job, out_path):
     """One check, in this process. Its BU_NAME was set by the parent before launch."""
     load_env()
-    from jev_ultrafast import Agent
+    from AgentJevUltraFast import Agent
 
     os.environ["JEV_TAB_MODE"] = job.get("tab", "background")
     os.environ.pop("JEV_KEEP_TAB", None)

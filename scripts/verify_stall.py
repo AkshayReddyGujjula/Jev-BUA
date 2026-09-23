@@ -39,9 +39,9 @@ for line in (ROOT / ".env").read_text(encoding="utf-8-sig").splitlines():
 os.environ.setdefault("JEV_CACHE", "0")
 os.environ["JEV_MODES"] = "off"
 
-from jev_ultrafast import Agent  # noqa: E402
-from jev_ultrafast.agent import STALL_LIMIT_S, TERMINAL_STATUS  # noqa: E402
-from jev_ultrafast.browser import NAV_TIMEOUT  # noqa: E402
+from AgentJevUltraFast import Agent  # noqa: E402
+from AgentJevUltraFast.agent import STALL_LIMIT_S, TERMINAL_STATUS  # noqa: E402
+from AgentJevUltraFast.browser import NAV_TIMEOUT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from trap_server import serve  # noqa: E402

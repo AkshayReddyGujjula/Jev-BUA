@@ -126,7 +126,7 @@ def text_call(system, context, timeout=None, model=None, base_url=None, max_toke
                 {"role": "user", "content": json.dumps(context)},
             ],
         },
-        headers={"x-opencode-session": TEXT_SESSION, "User-Agent": "jev-ultrafast/0.1"},
+        headers={"x-opencode-session": TEXT_SESSION, "User-Agent": "AgentJevUltraFast/0.1"},
         timeout=limit,
     )
     output = result["choices"][0]["message"]["content"]

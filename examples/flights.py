@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from jev_ultrafast import Agent
+from AgentJevUltraFast import Agent
 
 URL = "https://www.google.com/travel/flights?hl=en"
 # The date the published 7.073 s run used. It is now in the past, and Google's date

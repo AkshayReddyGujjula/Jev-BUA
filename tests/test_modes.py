@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from jev_ultrafast import agent as agent_module
-from jev_ultrafast import modes
-from jev_ultrafast.agent import Agent
+from AgentJevUltraFast import agent as agent_module
+from AgentJevUltraFast import modes
+from AgentJevUltraFast.agent import Agent
 
 DECISION = {
     "durable": True,
@@ -279,7 +279,7 @@ def test_harvest_dedupe_and_daily_file(root):
 
 
 def test_value_and_harvest_assertions():
-    from jev_ultrafast.assertions import evaluate_expectations, selectors_for, value_selectors_for
+    from AgentJevUltraFast.assertions import evaluate_expectations, selectors_for, value_selectors_for
 
     facts = {
         "url": "http://x/apply", "title": "Apply", "text": "Ready to submit",
@@ -295,7 +295,7 @@ def test_value_and_harvest_assertions():
 
 
 def test_page_facts_reads_values_through_the_browser():
-    from jev_ultrafast.assertions import page_facts
+    from AgentJevUltraFast.assertions import page_facts
 
     class Browser:
         calls = 0
@@ -313,7 +313,7 @@ def test_page_facts_reads_values_through_the_browser():
 
 
 def test_classify_mode_validates(monkeypatch):
-    from jev_ultrafast import model
+    from AgentJevUltraFast import model
 
     monkeypatch.setattr(model, "text_call", lambda *a, **k: (
         {"durable": True, "slug": "X", "name": "N", "keywords": ["a", 3], "strategy": "weird"}, {}
@@ -330,7 +330,7 @@ def test_classify_mode_validates(monkeypatch):
 
 
 def test_classify_gets_a_longer_budget_than_the_loop_helper(monkeypatch):
-    from jev_ultrafast import model
+    from AgentJevUltraFast import model
 
     seen = {}
     monkeypatch.setenv("TEXT_MODEL_API_KEY", "offline-test")
@@ -341,7 +341,7 @@ def test_classify_gets_a_longer_budget_than_the_loop_helper(monkeypatch):
 
 
 def test_harvest_items_validates(monkeypatch):
-    from jev_ultrafast import model
+    from AgentJevUltraFast import model
 
     monkeypatch.setattr(model, "text_call", lambda *a, **k: ({"items": [
         {"title": "A real headline", "note": "why"},
@@ -477,7 +477,7 @@ def test_mode_context_reaches_the_decision_request(monkeypatch, root):
 
 
 def test_text_context_includes_mode_memory(root):
-    from jev_ultrafast import model
+    from AgentJevUltraFast import model
 
     mode = internship_mode(root)
     mode.remember("Name: Ada Lovelace")
@@ -842,7 +842,7 @@ def test_resolve_degrades_when_creation_fails(root, monkeypatch):
 
 
 def test_decision_request_carries_memory_and_changes_the_cache_key(monkeypatch):
-    from jev_ultrafast import model
+    from AgentJevUltraFast import model
 
     captured = []
 
@@ -877,7 +877,7 @@ def test_decision_request_carries_memory_and_changes_the_cache_key(monkeypatch):
 
 
 def test_retry_context_changes_with_mode_memory():
-    from jev_ultrafast import model
+    from AgentJevUltraFast import model
 
     action = {"label": "Full name", "role": "textbox", "value": ""}
     page_state = {"title": "t", "text": "x"}

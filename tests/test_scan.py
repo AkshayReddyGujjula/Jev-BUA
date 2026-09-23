@@ -3,7 +3,7 @@
 Offline - Browser.act/observe are stubbed, so no CDP and no paid APIs.
 """
 
-import jev_ultrafast.browser as browser
+import AgentJevUltraFast.browser as browser
 
 SCROLL = {"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560}
 

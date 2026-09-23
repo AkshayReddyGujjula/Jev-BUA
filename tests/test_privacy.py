@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from jev_ultrafast.privacy import redact
+from AgentJevUltraFast.privacy import redact
 
 
 def test_nested_trace_redacts_private_literal():
@@ -23,7 +23,7 @@ def test_browser_snapshot_masks_private_literal_before_python_receives_it():
     root = Path(__file__).resolve().parents[1]
     result = subprocess.run(
         ["node", str(root / "tests" / "fixtures" / "snapshot_privacy.js"),
-         str(root / "jev_ultrafast" / "snapshot.js")],
+         str(root / "AgentJevUltraFast" / "snapshot.js")],
         capture_output=True, text=True, timeout=10, check=False,
     )
     assert result.returncode == 0, result.stderr

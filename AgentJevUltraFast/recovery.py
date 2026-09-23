@@ -78,7 +78,7 @@ def _plan(screenshot, state, goal, history, timeout=None):
         headers={
             "Authorization": f"Bearer {key}",
             "x-opencode-session": os.environ.get("JEV_TEXT_SESSION", "jev-escalation"),
-            "User-Agent": "jev-ultrafast/0.1",
+            "User-Agent": "AgentJevUltraFast/0.1",
         },
         timeout=timeout or PLANNER_TIMEOUT,
     )

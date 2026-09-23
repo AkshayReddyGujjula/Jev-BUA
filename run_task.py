@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-from jev_ultrafast import Agent
+from AgentJevUltraFast import Agent
 
 TAB_MODES = ("foreground", "background", "active")
 HISTORY_FIELDS = ("step", "action", "kind", "text", "outcome", "page_changed", "confidence",
@@ -200,7 +200,7 @@ def main():
     if args.modes_dir:
         os.environ["JEV_MODES_DIR"] = args.modes_dir
     if args.remember or args.forget:
-        from jev_ultrafast import modes
+        from AgentJevUltraFast import modes
 
         setting = (args.mode or os.environ.get("JEV_MODES") or "").strip()
         if not setting or setting.lower() == "auto":
