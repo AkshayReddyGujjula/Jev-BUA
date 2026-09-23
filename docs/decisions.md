@@ -122,6 +122,19 @@ level `irreversible` noul reads low or is malformed - a "Delete" at 0.4 is refus
 "Search" at 0.4 is not. `passphrase`, `passkey` and `token` joined the sensitive labels, and
 supervision records are redacted like every other result field.
 
+## ADR-013 — A slow decision is hedged once (2026-09-24)
+
+Over 533 live Jev decisions in this week's evidence the answer arrived in a median 286 ms,
+p99 760 ms, max 929 ms. The failures were a separate population: requests that hung to the
+whole 3 s budget, and two in a row ended a Flights run `blocked`. The retry already in the
+loop only fires after that full 3 s. A decision is read-only, so when none has answered by
+`JEV_DECIDE_HEDGE` (1.0 s, above every observed success) one identical request goes out on
+its own HTTP/2 client - a stalled pooled connection would stall a hedge sharing it - and the
+first valid answer wins, inside the same total budget. Evidence records `hedged`
+(`primary`/`hedge`). Two verified Flights runs afterwards (12.4 s, 12.6 s) fired no hedge, so
+a healthy provider pays nothing. Only the decision call is hedged; nothing that mutates, and
+not the text helper, whose single-field answers are not idempotent in content.
+
 ## ADR-003 — No secret store; the profile holds non-secret data
 
 `~/.jev-ultrafast/profile/` stores identity fields and site usernames as

@@ -9,6 +9,7 @@ import math
 import os
 import time
 import uuid
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import httpx
 
@@ -36,6 +37,16 @@ CLIENT = httpx.Client(http2=True, timeout=25)
 # times over. A decision that cannot be made inside the remaining budget is not made.
 DECIDE_TIMEOUT = float(os.environ.get("JEV_DECIDE_TIMEOUT", "3"))
 
+# Decision hedging (2026-09-23). Over 533 live decisions the answer came back in a median
+# 286 ms, p99 760 ms, max 929 ms; the failures were a different population - requests that
+# hung to the whole 3 s budget, twice in a row ending a Flights run as blocked. A decision
+# is read-only, so when none has answered by DECIDE_HEDGE_S one identical request goes out
+# on its own connection (a stalled pooled HTTP/2 connection would stall a hedge sharing it)
+# and the first valid answer wins. Under 1% of decisions pay for a duplicate. 0 disables.
+DECIDE_HEDGE_S = float(os.environ.get("JEV_DECIDE_HEDGE", "1.0"))
+HEDGE_CLIENT = httpx.Client(http2=True, timeout=25)
+_HEDGE_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="jev-hedge")
+
 # The text helper is called inside the loop's anti-loop deadline (JEV_STALL_SECONDS,
 # default 5 s). Its measured tail reaches 22 s, which would blow that guarantee four
 # times over, so this call is bounded well below the deadline. A text call that cannot
@@ -60,7 +71,7 @@ def _typesafe_key():
     return key
 
 
-def post_json(url, key, body, headers=None, timeout=None):
+def post_json(url, key, body, headers=None, timeout=None, client=None):
     """POST with a TOTAL time budget, not a per-attempt one.
 
     `timeout` used to bound each of up to three attempts, so a call given 3 s could occupy
@@ -75,7 +86,7 @@ def post_json(url, key, body, headers=None, timeout=None):
         if left <= 0.05:
             raise RuntimeError(f"Model call exceeded its {budget:g}s budget; no action executed.")
         try:
-            response = CLIENT.post(
+            response = (client or CLIENT).post(
                 url,
                 json=body,
                 headers={"Authorization": f"Bearer {key}", **(headers or {})},
@@ -99,6 +110,41 @@ def post_json(url, key, body, headers=None, timeout=None):
             raise RuntimeError(f"Model provider returned HTTP {response.status_code}; no action executed.")
         return response.json()
     raise RuntimeError("Model unavailable")
+
+
+def post_hedged(url, key, body, timeout=None, hedge_after=None):
+    """post_json for a READ-ONLY call, hedged once. Returns (json, hedged).
+
+    `hedged` is None when the first request answered before `hedge_after`, else "primary" or
+    "hedge" for whichever answered first. The loser finishes in the background inside its
+    own budget and its answer is dropped. Never use this for a call with side effects.
+    """
+    budget = float(timeout or 25.0)
+    hedge_after = DECIDE_HEDGE_S if hedge_after is None else float(hedge_after)
+    if hedge_after <= 0 or hedge_after >= budget - 0.2:
+        return post_json(url, key, body, timeout=budget), None
+    deadline = time.monotonic() + budget
+    primary = _HEDGE_POOL.submit(post_json, url, key, body, timeout=budget)
+    if wait([primary], timeout=hedge_after).done:
+        return primary.result(), None
+    hedge = _HEDGE_POOL.submit(post_json, url, key, body,
+                               timeout=max(0.1, deadline - time.monotonic()), client=HEDGE_CLIENT)
+    pending = {primary: "primary", hedge: "hedge"}
+    failure = None
+    while pending:
+        done, _ = wait(pending, timeout=max(0.0, deadline - time.monotonic()),
+                       return_when=FIRST_COMPLETED)
+        if not done:
+            break
+        for future in done:
+            name = pending.pop(future)
+            try:
+                return future.result(), name
+            except RuntimeError as error:
+                failure = error          # the other request may still answer
+    if failure is not None and not pending:
+        raise failure
+    raise RuntimeError(f"Model call exceeded its {budget:g}s budget; no action executed.")
 
 
 def text_call(system, context, timeout=None, model=None, base_url=None, max_tokens=1024,
@@ -318,6 +364,7 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
     started = time.perf_counter()
     key = cache.key_for(body)
     result = None
+    hedged = None
     stored = cache.load(key) if use_cache else None
     if stored is not None and not _cached_heads_valid(stored, operations, targets):
         # A poisoned entry must not make the same state fail until its TTL expires.
@@ -326,7 +373,7 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
     if stored is not None:
         result = stored
     else:
-        result = post_json(
+        result, hedged = post_hedged(
             "https://api.typesafe.ai/v1/systemone",
             _typesafe_key(),
             body,
@@ -381,6 +428,7 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
         "usage": result.get("usage", {}) if stored is None else {},
         "latency_ms": round((time.perf_counter() - started) * 1000),
         "cached": stored is not None,
+        "hedged": hedged,
         "cache_key": key,
         "request": body,
     }

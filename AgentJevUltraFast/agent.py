@@ -1600,6 +1600,7 @@ class Agent:
                     goal_done=decision.get("goal_done"),
                     stuck=decision.get("stuck"),
                     cached=decision.get("cached"),
+                    hedged=decision.get("hedged"),
                     model=decision.get("model"),
                     latency_ms=decision.get("latency_ms"),
                     usage=decision.get("usage"),
