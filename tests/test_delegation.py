@@ -70,6 +70,10 @@ class FakeAgent:
             self.state["status"] = "predicted"
         elif name == "act":
             assert body["fingerprint"] == self.state["page"]["fingerprint"]
+            if self.stalled():
+                self.state["status"] = "stalled"
+                self.state["outcome"] = "budget_exhausted"
+                return self.state
             self.acts += 1
             self.state["history"].append({"kind": "click", "outcome": "navigated"})
             self.state["status"] = "done"
@@ -77,6 +81,9 @@ class FakeAgent:
         else:
             raise AssertionError(name)
         return self.state
+
+    def stalled(self):
+        return time.monotonic() - self.state.get("progress_at", 0) > 5
 
     def stop_budget(self, reason):
         self.state["status"] = "budget_exhausted"
@@ -266,6 +273,30 @@ def test_delegate_fixture_route_exposes_the_checkpoint_flow():
     assert 'id="sign-in"' in html
     assert 'id="workspace" hidden' in html
     assert "Publish demo site" in html
+
+
+def test_approval_resume_rebases_the_stall_clock():
+    """A human reading a prompt is not a stalled page (ADR-002).
+
+    Regression: the approval path rebased started_at but not progress_at, so any
+    approval that took longer than the five-second anti-loop deadline ended the
+    run as stalled without executing the approved action.
+    """
+    publish = {
+        "id": "e1", "kind": "click", "role": "button",
+        "label": "Publish site", "form_submit": True,
+    }
+    browser = FakeBrowser(page(action=publish, fingerprint="p1"))
+    agent = FakeAgent(page(action=publish, fingerprint="p1"), "e1")
+    task = DelegatedTask(agent, browser)
+    approval = task.drive()
+    assert approval["phase"] == "needs_human"
+
+    # The human takes a minute to read and approve the proposed action.
+    agent.state["progress_at"] = time.monotonic() - 60
+    done = task.resume(approval["checkpoint"], approve_action=True)
+    assert agent.acts == 1
+    assert done["phase"] == "complete" and done["outcome"] == "verified"
 
 
 def test_mcp_task_tools_keep_the_same_session_across_login_and_approval(monkeypatch):

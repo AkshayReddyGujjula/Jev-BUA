@@ -321,6 +321,11 @@ class DelegatedTask:
             if self.wait_started is not None and state.get("started_at") is not None:
                 state["started_at"] += time.perf_counter() - self.wait_started
             self.wait_started = None
+            # A human reading a prompt is not a stalled page: rebase the anti-loop clock
+            # for the active segment that starts now (ADR-002). Without this, an approval
+            # that takes longer than the five-second deadline ends the run as stalled.
+            state["progress_at"] = time.monotonic()
+            state["stall_rounds"] = 0
             # Approval applies to one observed action on one page. The human
             # may have navigated or changed the page while reading the prompt.
             # Re-observe before dispatch, and discard that approval if anything
