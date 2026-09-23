@@ -120,7 +120,11 @@ def text_call(system, context, timeout=None, model=None, base_url=None, max_toke
     model_name = model or os.environ.get("TEXT_MODEL", "deepseek-chat")
     reasoning = {"thinking": {"type": "disabled"}} if "api.deepseek.com/" in base else {"reasoning": {"effort": "low"}}
     if os.environ.get("TEXT_MODEL_REASONING") == "none":
-        reasoning = {"reasoning": {"enabled": False}}
+        # The OpenAI-standard field. Measured 2026-09-23 on the OpenCode Go endpoint with
+        # deepseek-v4.1-flash: {"reasoning": {"enabled": false}} was silently ignored (116-178
+        # hidden reasoning tokens, median 2.6 s per field); reasoning_effort="none" produced
+        # 0 reasoning tokens and a 1.6 s median.
+        reasoning = {"reasoning_effort": "none"}
     started = time.perf_counter()
     result = post_json(
         base + "/chat/completions",

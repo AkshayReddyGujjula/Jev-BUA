@@ -1573,3 +1573,22 @@ def test_a_productive_decision_stays_cached(runner, monkeypatch):
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert runner.state["history"][-1]["outcome"] == "navigated"
     assert deleted == []
+
+
+def test_text_helper_disables_reasoning_with_the_field_the_endpoint_honours(monkeypatch):
+    """{"reasoning": {"enabled": false}} was ignored upstream: 116-178 hidden tokens per field."""
+    from AgentJevUltraFast import model
+
+    seen = {}
+
+    def fake_post(url, key, body, headers=None, timeout=None):
+        seen.update(body)
+        return {"choices": [{"message": {"content": '{"text": "London"}'}}], "usage": {}}
+
+    monkeypatch.setattr(model, "post_json", fake_post)
+    monkeypatch.setenv("TEXT_MODEL_API_KEY", "k")
+    monkeypatch.setenv("TEXT_MODEL_BASE_URL", "https://opencode.ai/zen/go/v1")
+    monkeypatch.setenv("TEXT_MODEL_REASONING", "none")
+    output, _ = model.text_call("system", {"field": "Where to?"})
+    assert output == {"text": "London"}
+    assert seen["reasoning_effort"] == "none" and "reasoning" not in seen
