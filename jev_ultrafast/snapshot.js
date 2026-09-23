@@ -6,7 +6,11 @@
     const id=cache.ids.get(e); cache.nodes.set(id,e); return id;
   };
   for (const [id,e] of cache.nodes) if (!e.isConnected) cache.nodes.delete(id);
-  const safe = e => !['password','file','hidden'].includes(e.type);
+  const privateCode = e => e.matches?.('input[autocomplete="one-time-code"]') ||
+    /\b(otp|one[- ]?time (?:code|password)|verification code|security code|2fa|mfa)\b/i.test(
+      [e.getAttribute('aria-label'),e.getAttribute('placeholder'),e.getAttribute('name'),
+        e.getAttribute('id'),[...(e.labels||[])].map(l=>l.innerText).join(' ')].join(' '));
+  const safe = e => !['password','file','hidden'].includes(e.type) && !privateCode(e);
   const visible = e => !e.closest('[aria-hidden="true"],[inert]') &&
     e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});
   const name = (e,seen=new Set()) => {
@@ -59,6 +63,7 @@
     if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
     const base={node:identity(e),role:rname,label:name(e)||rname,
+      form_submit:(!!e.form && e.type==='submit'),
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
     for (const key of ['checked','selected','expanded']) {
       const value=e.getAttribute('aria-'+key);
@@ -122,6 +127,15 @@
     {id:'key_seek_forward',key:'l',code:'KeyL',vk:76,label:'Seek forward 10 seconds (L)'},
     {id:'key_seek_backward',key:'j',code:'KeyJ',vk:74,label:'Seek backward 10 seconds (J)'});
   for (const k of keys) actions.push({...k, kind:'key'});
+  // Only presence flags cross this boundary. Passwords, one-time codes and
+  // challenge contents stay in the user's Chrome session.
+  const human={
+    password:[...document.querySelectorAll('input[type="password"]')].some(visible),
+    one_time_code:[...document.querySelectorAll('input')].some(e=>visible(e) && privateCode(e)),
+    captcha:[...document.querySelectorAll('iframe,[data-sitekey]')].some(e=>
+      visible(e) && /recaptcha|hcaptcha|turnstile|captcha/i.test(
+        (e.getAttribute('src')||'')+' '+(e.getAttribute('title')||'')+' '+(e.getAttribute('class')||''))),
+  };
   return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,
-    scroll:{y:scrollY,height},actions,marker,page_key,guards,omitted_actions};
+    scroll:{y:scrollY,height},actions,marker,page_key,guards,omitted_actions,human};
 })()

@@ -1444,6 +1444,7 @@ class Agent:
                             )
             # Browser.act checks freshness immediately before input, including after text generation.
             error = None
+            dispatch_error = False
             scan = None
             if action["kind"] == "scroll" and self.find and not target_visible(page, self.find):
                 # One decision buys the whole scan. Every screen is still observed inside
@@ -1461,6 +1462,7 @@ class Agent:
                     raise
                 except Exception as exc:
                     error = str(exc) or type(exc).__name__
+                    dispatch_error = True
             elif action["kind"] in {"fill", "seek"} and text is None:
                 # Nothing to type: record a failed action rather than dispatching an empty
                 # insert or aborting the run.
@@ -1472,6 +1474,7 @@ class Agent:
                     raise
                 except Exception as exc:
                     error = str(exc) or type(exc).__name__
+                    dispatch_error = True
             state["scan"] = scan
             self.pending_text = None
             state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
@@ -1523,7 +1526,27 @@ class Agent:
                     error=record.get("error"),
                     url=record.get("url"),
                 )
-            state["page"] = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
+            if dispatch_error:
+                # The browser may have performed the mutation before its reply was
+                # lost. Re-observing is useful, but another model decision could
+                # dispatch the same mutation again. End this run as uncertain.
+                state["status"] = "blocked"
+                state["uncertain_execution"] = True
+                self._finalize()
+                return self.snapshot()
+            try:
+                state["page"] = state["browser"].observe(
+                    screenshot=self.screenshots, deadline=self.read_deadline()
+                )
+            except Exception as exc:
+                # The input was already dispatched. An unreadable result gives no
+                # evidence that repeating the input is safe.
+                state["history"][-1]["outcome"] = "readback failed"
+                state["history"][-1]["error"] = str(exc)[:200]
+                state["status"] = "blocked"
+                state["uncertain_execution"] = True
+                self._finalize()
+                return self.snapshot()
             state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
             outcome = action_outcome(page, state["page"], error)
             if outcome == "no visible change" and state["browser"].follow_new_tab():
@@ -1676,6 +1699,11 @@ class Agent:
 
     def _escalation_step(self, page, timeout=None):
         """One bounded recovery action from the vision planner. True when it executed."""
+        if getattr(self, "_delegation_no_vision", False):
+            # The vision planner can click coordinates without going through a
+            # selected DOM action. Delegated tasks need every click to pass the
+            # approval boundary first.
+            return False
         state = self.state
         browser = state["browser"]
         try:

@@ -120,6 +120,29 @@ Pass `expect` (`url_contains`, `url_matches`, `title_contains`, `text_contains`,
 
 Three v2 properties go with it: a low-confidence mutation is re-observed once and then refused rather than executed (per-risk confidence floors, with an `irreversible` question riding the same request); repeated decisions are served from a disk cache keyed on the entire request; and a run can write append-only JSONL evidence — offered candidates, raw answers, confidences, the answering model, executions, outcome.
 
+## Delegate a browser goal from another agent
+
+The MCP server offers `browser_task(goal, url, expect?, mode?)`. It returns a task ID
+and a checkpoint when the browser needs a human login, one-time code, CAPTCHA,
+or approval for a consequential click. After the human finishes in the same
+Chrome tab, call `browser_task_resume(task_id, checkpoint)`. If the result
+proposes a publish, purchase, deletion, account-security, or other submit
+action, show that exact proposed action to the human; only call resume with
+`approve_action=true` after they approve it. Use `browser_task_cancel` to close
+a yielded task. Every checkpoint is single-use: a changed page requires a new
+prediction and another approval. A task ID expires after 30 minutes of waiting
+or when the MCP server restarts.
+
+This is a single-process, single-task delegation interface. Active work runs
+in bounded slices and the result distinguishes `paused`, `needs_human`,
+`complete`, `cancelled`, and `abandoned`. A pause is not success. Only the
+independent `expect` readback can produce `verified`; an uncertain dispatched
+action stops the task with `unknown` rather than repeating it. Login and
+approval signals are based on visible DOM controls and labels, so callers must
+still review the proposed action. Descriptor replay and screenshot-based
+recovery are disabled for delegated tasks while they lack per-step approval
+preflight. New-tab journeys are not yet supported by this task interface.
+
 ## Modes: memory and specialists per task class
 
 A mode is a folder for one repeated kind of work — internship applications, scrolling a feed — with its own memory, learned field values and settings. The agent gets that context before it decides anything:

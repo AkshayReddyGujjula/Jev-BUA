@@ -28,6 +28,10 @@ def resolve(status, checks=None, budget_exhausted=False, abstained=False):
     the caller supplied nothing to verify against (an empty list is still "nothing").
     """
     if checks:
+        if not any(item.get("check") != "harvest_at_least" for item in checks):
+            # A local collection count is useful, but cannot prove the current
+            # page satisfies the user's goal without a live page assertion.
+            return "refuted" if any(not item.get("pass") for item in checks) else "unknown"
         return "verified" if all(item.get("pass") for item in checks) else "refuted"
     if abstained or status == "abstained":
         return "abstained"

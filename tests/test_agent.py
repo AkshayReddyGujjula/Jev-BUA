@@ -285,10 +285,22 @@ def test_loading_waits_do_not_trigger_no_progress_stop(runner):
 def test_stale_observation_preserves_executed_action(runner):
     runner.state["decision"] = decision("e3")
     runner.state["browser"].observe.side_effect = StalePage("changed")
-    with pytest.raises(StalePage):
-        runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert runner.state["history"][-1]["action"] == "Go"
+    assert state["status"] == "blocked" and state["outcome"] == "unknown"
+    assert state["uncertain_execution"] is True
     runner.state["browser"].act.assert_called_once()
+
+
+def test_lost_mutation_reply_blocks_further_actions(runner):
+    runner.state["decision"] = decision("e3")
+    runner.state["browser"].act.side_effect = RuntimeError("session lost after dispatch")
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state["status"] == "blocked"
+    assert state["uncertain_execution"] is True
+    assert state["history"][-1]["error"] == "session lost after dispatch"
+    assert state["outcome"] == "unknown"
+    runner.state["browser"].observe.assert_not_called()
 
 
 def test_observation_is_one_atomic_browser_read(monkeypatch):
@@ -465,7 +477,26 @@ def test_reattach_fails_without_a_real_page(monkeypatch):
     assert b.reattach() is False
 
 
-def test_call_heals_a_dropped_session(monkeypatch):
+def test_reattach_never_adopts_an_existing_same_url_tab(monkeypatch):
+    import jev_ultrafast.browser as browser
+
+    b = browser.Browser.__new__(browser.Browser)
+    b.target = "old"
+    b.session = "dead"
+    b.owns_target = True
+    b.owned_targets = ["old"]
+    b._known_targets = {"old", "other-user-tab"}
+    b.last_url = "https://example.test/"
+    monkeypatch.setattr(b, "_page_targets", lambda: [
+        {"targetId": "other-user-tab", "url": "https://example.test/"},
+    ])
+    attach = Mock()
+    monkeypatch.setattr(browser, "cdp", attach)
+    assert b.reattach() is False
+    attach.assert_not_called()
+
+
+def test_call_never_replays_an_ambiguous_cdp_command(monkeypatch):
     import jev_ultrafast.browser as browser
 
     b = browser.Browser.__new__(browser.Browser)
@@ -480,8 +511,9 @@ def test_call_heals_a_dropped_session(monkeypatch):
 
     monkeypatch.setattr(browser, "cdp", fake_cdp)
     monkeypatch.setattr(b, "reattach", lambda: setattr(b, "session", "fresh") or True)
-    assert b.call("Runtime.evaluate", expression="1") == {"ok": True}
-    assert sessions == ["dead", "fresh"]
+    with pytest.raises(RuntimeError, match="Session with given id"):
+        b.call("Page.navigate", url="https://example.test")
+    assert sessions == ["dead"]
 
 
 def test_run_task_never_retries_an_ambiguous_session_error(monkeypatch):
@@ -874,7 +906,10 @@ def test_outcome_precedence():
 
 def test_done_with_a_failing_readback_is_refuted(runner):
     runner.expect = {"text_contains": ["Thank you"]}
-    runner.state["browser"].evaluate = Mock(return_value="Nothing here")
+    runner.state["browser"].evaluate = Mock(return_value={
+        "url": "https://example.test", "title": "Example", "text": "Nothing here",
+        "selector_counts": {}, "values": {},
+    })
     runner.state["status"] = "done"
     runner._finalize()
     assert runner.state["outcome"] == "refuted"
@@ -884,7 +919,10 @@ def test_done_with_a_failing_readback_is_refuted(runner):
 def test_a_passing_readback_verifies_even_a_blocked_run(runner):
     """Evidence outranks the agent's own opinion: the page is what it is."""
     runner.expect = {"text_contains": ["Done"]}
-    runner.state["browser"].evaluate = Mock(return_value="Done")
+    runner.state["browser"].evaluate = Mock(return_value={
+        "url": "https://example.test", "title": "Example", "text": "Done",
+        "selector_counts": {}, "values": {},
+    })
     runner.state["status"] = "blocked"
     runner._finalize()
     assert runner.state["outcome"] == "verified"
@@ -894,6 +932,12 @@ def test_a_run_without_an_expectation_is_never_verified(runner):
     runner.state["status"] = "done"
     runner._finalize()
     assert runner.state["outcome"] == "unknown"
+
+
+def test_harvest_count_alone_is_not_a_live_page_verdict():
+    from jev_ultrafast.outcomes import resolve
+
+    assert resolve("done", [{"check": "harvest_at_least", "pass": True}]) == "unknown"
 
 
 def test_failed_live_readback_cannot_verify_a_stale_observation(runner):

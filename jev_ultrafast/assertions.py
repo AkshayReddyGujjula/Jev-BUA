@@ -87,19 +87,19 @@ def page_facts(browser, selectors=(), value_selectors=()):
     Reading again here, through the browser itself, is what makes the result independent
     of whatever the agent last observed.
     """
-    counts = {
-        selector: browser.evaluate(f"document.querySelectorAll({json.dumps(selector)}).length") or 0
-        for selector in selectors
-    }
-    values = {
-        selector: browser.evaluate(
-            f"(document.querySelector({json.dumps(selector)}) || {{}}).value ?? ''"
-        ) or ""
-        for selector in value_selectors
-    }
-    text = browser.evaluate("document.body.innerText") or ""
-    url = browser.evaluate("location.href")
-    title = browser.evaluate("document.title") or ""
-    if not url:
-        raise RuntimeError("Live readback did not return a URL")
-    return {"url": url, "title": title, "text": text, "selector_counts": counts, "values": values}
+    # One JavaScript evaluation sees one document state. Independent CDP reads
+    # could mix text from one route with a URL or form value from the next.
+    expression = (
+        "(() => {"
+        f"const counts = Object.fromEntries({json.dumps(list(selectors))}.map(s => "
+        "[s, document.querySelectorAll(s).length]));"
+        f"const values = Object.fromEntries({json.dumps(list(value_selectors))}.map(s => "
+        "[s, document.querySelector(s)?.value ?? '']));"
+        "return {url:location.href,title:document.title,text:document.body.innerText,"
+        "selector_counts:counts,values:values};"
+        "})()"
+    )
+    facts = browser.evaluate(expression)
+    if not isinstance(facts, dict) or not facts.get("url"):
+        raise RuntimeError("Live readback did not return complete page facts")
+    return facts

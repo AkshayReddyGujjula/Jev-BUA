@@ -35,6 +35,8 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from jev_ultrafast.delegation import DelegatedTask, TaskRegistry  # noqa: E402
+
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "jev-browser"
 SERVER_VERSION = "1.0.0"
@@ -69,6 +71,7 @@ def _replay_dir(wanted):
 _WARM = {"browser": None, "mode": None, "url": None}
 _WARM_LOCK = threading.Lock()
 _FENCED_WORKER = None
+_TASKS = TaskRegistry()
 
 
 def _warm_enabled():
@@ -256,6 +259,74 @@ TOOLS = [
         },
     },
 ]
+
+TOOLS.extend([
+    {
+        "name": "browser_task",
+        "description": (
+            "Start one delegated goal in its own visible Chrome tab. Runs a bounded slice, "
+            "then returns a verified terminal result or a task checkpoint. A login, one-time "
+            "code, CAPTCHA, or consequential action yields needs_human. Resume the same tab "
+            "with browser_task_resume; do not start the goal again."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string"},
+                "url": {"type": "string"},
+                "expect": {"type": "object", "description": "Independent page assertions; required for verified."},
+                "values": {"type": "object", "additionalProperties": {"type": "string"}},
+                "mode": {"type": "string", "description": "Existing task-class slug or auto."},
+                "max_steps": {"type": "integer", "minimum": 1, "maximum": 60},
+                "max_active_seconds": {"type": "number", "minimum": 1, "maximum": 600, "default": 120},
+                "slice_seconds": {"type": "number", "minimum": 1, "maximum": 15, "default": 12},
+                "keep_open": {"type": "boolean", "default": False},
+            },
+            "required": ["goal", "url"],
+        },
+    },
+    {
+        "name": "browser_task_resume",
+        "description": (
+            "Continue the same delegated task and Chrome tab from a checkpoint. Set "
+            "approve_action=true only after the user approves the exact proposed action. "
+            "A login checkpoint needs the user to finish in Chrome first."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string"},
+                "checkpoint": {"type": "integer"},
+                "approve_action": {"type": "boolean", "default": False},
+                "slice_seconds": {"type": "number", "minimum": 1, "maximum": 15, "default": 12},
+            },
+            "required": ["task_id", "checkpoint"],
+        },
+    },
+    {
+        "name": "browser_task_cancel",
+        "description": "Cancel a yielded delegated task. Already executed browser actions cannot be undone.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "string"}, "checkpoint": {"type": "integer"}},
+            "required": ["task_id", "checkpoint"],
+        },
+    },
+])
+
+# These are hints for MCP hosts, not an authorization mechanism. Even a state
+# read can navigate a tab when a URL is supplied, so it is not advertised as
+# read-only.
+for _tool in TOOLS:
+    _tool["annotations"] = {
+        "readOnlyHint": False,
+        "destructiveHint": _tool["name"] in {
+            "browser_do", "browser_act", "browser_checks", "browser_task",
+            "browser_task_resume",
+        },
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
 
 
 def _tab_env(func):
@@ -518,9 +589,95 @@ def tool_browser_checks(args):
     }
 
 
+@_quiet
+def tool_browser_task(args):
+    _load_env()
+    from jev_ultrafast import Agent
+    from jev_ultrafast.browser import Browser
+
+    if not args.get("goal") or not args.get("url"):
+        raise ValueError("browser_task needs a goal and start URL")
+    reservation = _TASKS.reserve()
+    previous_tab = os.environ.get("JEV_TAB_MODE")
+    os.environ["JEV_TAB_MODE"] = "foreground"
+    browser = None
+    agent = None
+    try:
+        with _WARM_LOCK:
+            _drop_warm()
+        browser = Browser(args["url"], follow_tabs=False)
+        if reservation.is_set():
+            raise ValueError("Browser task setup was abandoned")
+        agent = Agent(
+            args["url"], args["goal"], browser=browser,
+            values=args.get("values"), expect=args.get("expect"),
+            evidence_dir=_evidence_dir(), mode=args.get("mode") or None,
+        )
+        if args.get("max_steps") is not None:
+            agent._max_steps = max(1, min(60, int(args["max_steps"])))
+        task = DelegatedTask(
+            agent, browser,
+            max_active_seconds=max(1, min(600, float(args.get("max_active_seconds", 120)))),
+            keep_open=bool(args.get("keep_open")),
+        )
+        _TASKS.add(task, reservation=reservation)
+    except Exception:
+        if agent is not None:
+            agent.close()
+        if browser is not None:
+            browser.close()
+        raise
+    finally:
+        _TASKS.release_reservation(reservation)
+        if previous_tab is None:
+            os.environ.pop("JEV_TAB_MODE", None)
+        else:
+            os.environ["JEV_TAB_MODE"] = previous_tab
+    try:
+        result = task.drive(slice_seconds=args.get("slice_seconds", 12))
+    except Exception:
+        task.abandon()
+        task._close()
+        _TASKS.release_if_terminal(task)
+        raise
+    _TASKS.release_if_terminal(task)
+    return result
+
+
+@_quiet
+def tool_browser_task_resume(args):
+    task = _TASKS.get(args["task_id"])
+    try:
+        result = task.resume(
+            args["checkpoint"], approve_action=bool(args.get("approve_action")),
+            slice_seconds=args.get("slice_seconds", 12),
+        )
+    except Exception:
+        if task.phase not in {"paused", "needs_human"}:
+            task.abandon()
+            task._close()
+            task.phase = "abandoned"
+            _TASKS.release_if_terminal(task)
+        raise
+    _TASKS.release_if_terminal(task)
+    return result
+
+
+@_quiet
+def tool_browser_task_cancel(args):
+    task = _TASKS.get(args["task_id"])
+    if int(args["checkpoint"]) != task.checkpoint:
+        raise ValueError("Stale task checkpoint")
+    result = task.cancel()
+    _TASKS.release_if_terminal(task)
+    return result
+
+
 HANDLERS = {"browser_do": tool_browser_do, "browser_assert": tool_browser_assert,
             "browser_checks": tool_browser_checks, "browser_state": tool_browser_state,
-            "browser_act": tool_browser_act}
+            "browser_act": tool_browser_act, "browser_task": tool_browser_task,
+            "browser_task_resume": tool_browser_task_resume,
+            "browser_task_cancel": tool_browser_task_cancel}
 
 
 def send(payload):
@@ -541,6 +698,11 @@ def _bounded(handler, arguments, timeout=None):
                     "abandoned": True}
         _FENCED_WORKER = None
         _drop_warm()
+        task = _TASKS.current
+        if task is not None and task.cancel_requested.is_set():
+            task._close()
+            task.phase = "abandoned"
+            _TASKS.release_if_terminal(task)
     limit = CALL_TIMEOUT_S if timeout is None else float(timeout)
     if limit <= 0:
         return handler(arguments)
@@ -557,6 +719,7 @@ def _bounded(handler, arguments, timeout=None):
     worker.join(limit)
     if worker.is_alive():
         _FENCED_WORKER = worker
+        _TASKS.abandon_active()
         return {
             "error": (
                 f"tool call exceeded {limit:g}s and was abandoned; the page never answered. "
@@ -600,6 +763,12 @@ def handle(request):
         if handler is None:
             return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602,
                                                            "message": f"Unknown tool: {name}"}}
+        if _TASKS.current is not None and name not in {"browser_task_resume", "browser_task_cancel"}:
+            return {"jsonrpc": "2.0", "id": rid, "result": {
+                "content": [{"type": "text", "text": "A delegated browser task owns this Chrome session. "
+                             "Resume or cancel it before using another browser tool."}],
+                "isError": True,
+            }}
         try:
             result = _bounded(handler, params.get("arguments") or {})
         except Exception as error:
@@ -610,7 +779,7 @@ def handle(request):
             }}
         return {"jsonrpc": "2.0", "id": rid, "result": {
             "content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}],
-            "isError": False,
+            "isError": isinstance(result, dict) and bool(result.get("error")),
         }}
     if method and method.startswith("notifications/"):
         return None

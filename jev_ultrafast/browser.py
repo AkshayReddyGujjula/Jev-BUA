@@ -87,8 +87,9 @@ def _visible_page_target():
 
 
 class Browser:
-    def __init__(self, url):
+    def __init__(self, url, *, follow_tabs=None):
         ensure_daemon()
+        self.follow_tabs = follow_tabs
         self.mode = os.environ.get("JEV_TAB_MODE", "foreground").strip().lower()
         if self.mode not in TAB_MODES:
             raise ValueError(f"JEV_TAB_MODE must be one of {TAB_MODES}, got {self.mode!r}")
@@ -139,12 +140,9 @@ class Browser:
             self.reattach()
 
     def call(self, method, **params):
-        try:
-            return cdp(method, session_id=self.session, **params)
-        except RuntimeError as error:
-            if not self._session_lost(error) or not self.reattach():
-                raise
-            return cdp(method, session_id=self.session, **params)
+        # CDP calls include navigation and Runtime.evaluate expressions that can
+        # mutate the page. A lost reply cannot establish whether they ran.
+        return cdp(method, session_id=self.session, **params)
 
     def screenshot(self, quality=60):
         return self.call("Page.captureScreenshot", format="jpeg", quality=quality)["data"]
@@ -172,20 +170,26 @@ class Browser:
 
         if target is None:
             known_url = getattr(self, "last_url", "")
-            matches = [t for t in pages if known_url and t.get("url") == known_url]
-            if len(matches) == 1:
-                target = matches[0]["targetId"]
-            elif len(owned) == 1:
+            if len(owned) == 1:
                 target = next(iter(owned))
+            elif self.owns_target:
+                # Chrome can replace our target on navigation, but an existing
+                # same-URL tab belongs to somebody else. Only a *new* target
+                # with that URL is a candidate, and ambiguity fails closed.
+                matches = [
+                    t for t in pages
+                    if known_url and t.get("url") == known_url
+                    and t["targetId"] not in self._known_targets
+                ]
+                if len(matches) != 1:
+                    return False
+                target = matches[0]["targetId"]
             elif not self.owns_target:
                 # Active mode: the user's visible tab is ours to re-find.
                 found = _visible_page_target()
                 if not found:
                     return False
                 target = found[0]
-            else:
-                # Ambiguous. Do not guess - a wrong adoption is far worse than a failure.
-                return False
 
         if target != self.target:
             if self.owns_target and target not in self.owned_targets:
@@ -301,7 +305,7 @@ class Browser:
 
     def follow_new_tab(self, timeout=None):
         """Adopt a page target opened by the last action, if one appeared and looks like a real page."""
-        if os.environ.get("JEV_FOLLOW_TABS", "1") == "0":
+        if getattr(self, "follow_tabs", None) is False or os.environ.get("JEV_FOLLOW_TABS", "1") == "0":
             return False
         deadline = time.monotonic() + (timeout or FOLLOW_TAB_TIMEOUT)
         while True:

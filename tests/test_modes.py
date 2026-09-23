@@ -282,15 +282,9 @@ def test_page_facts_reads_values_through_the_browser():
 
     class Browser:
         def evaluate(self, script):
-            if "location.href" in script:
-                return "http://x/apply"
-            if "document.title" in script:
-                return "Apply"
-            if "innerText" in script:
-                return "body"
-            if ".value" in script:
-                return "Ada"
-            return 0
+            assert "location.href" in script and "#name" in script
+            return {"url": "http://x/apply", "title": "Apply", "text": "body",
+                    "selector_counts": {}, "values": {"#name": "Ada"}}
 
     facts = page_facts(Browser(), [], ["#name"])
     assert facts["values"]["#name"] == "Ada"
@@ -378,12 +372,9 @@ class FakeBrowser:
 
     def evaluate(self, script):
         current = self.pages[self.index]
-        if "location.href" in script:
-            return current["url"]
-        if "document.title" in script:
-            return current["title"]
-        if "innerText" in script:
-            return current["text"]
+        if "location.href" in script and "selector_counts" in script:
+            return {"url": current["url"], "title": current["title"],
+                    "text": current["text"], "selector_counts": {}, "values": {}}
         return 0
 
 
