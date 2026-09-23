@@ -680,6 +680,35 @@ def resolve(goal, url="", requested=None, timeout=None, classify=None):
         if mode is not None:
             return mode, {**info, "enabled": True, "matched": "route", "slug": mode.slug}
 
+    # Routing is deliberately behind deterministic matches and route cache.
+    # In shadow it gathers predictions only; enforcement requires independently
+    # labelled examples for the *current* candidate set.
+    from . import router
+
+    router_mode = router.setting()
+    proposal = router.propose(goal, url, known) if router_mode != "off" else None
+    if proposal is not None:
+        info["router"] = {
+            "choice": proposal["choice"], "usage": proposal.get("usage", {}),
+            "latency_ms": proposal.get("latency_ms"), "authority": router_mode,
+        }
+    enforce = False
+    if router_mode == "enforce" and proposal is not None and router.confident(proposal):
+        try:
+            enforce = router.grade(root, known)["ready"]
+        except (OSError, ValueError):
+            enforce = False
+    if enforce:
+        chosen = proposal["choice"]
+        if chosen == "one_off":
+            router.record(root, goal, url, known, proposal, "one_off")
+            return None, {**info, "enabled": True, "matched": "jev-router-one-off"}
+        selected = next((item for item in known if item.slug == chosen and not item.data.get("retired")), None)
+        allowed = selected.data.get("allowed_origins") if selected is not None else None
+        if selected is not None and (not allowed or origin(url) in allowed):
+            router.record(root, goal, url, known, proposal, selected.slug)
+            return selected, {**info, "enabled": True, "matched": "jev-router", "slug": selected.slug}
+
     if classify is None:
         from . import model as model_module
 
@@ -687,23 +716,39 @@ def resolve(goal, url="", requested=None, timeout=None, classify=None):
     try:
         decision = classify(goal, url, [m.brief() for m in known], timeout)
     except Exception as error:
+        router.record(root, goal, url, known, proposal, "classifier-error")
         return None, {**info, "enabled": True, "matched": "none",
                       "error": f"{type(error).__name__}: {error}"[:200]}
     if decision is None:
         # The classifier could not answer. Do not cache "general": a later run should get
         # another chance to recognise the task rather than inherit an outage.
+        router.record(root, goal, url, known, proposal, "classifier-unavailable")
         return None, {**info, "enabled": True, "matched": "none",
                       "error": "classifier unavailable"}
+    if decision.get("existing"):
+        selected = next((item for item in known if item.slug == decision["existing"]
+                         and not item.data.get("retired")), None)
+        if selected is None:
+            router.record(root, goal, url, known, proposal, "classifier-invalid-existing")
+            return None, {**info, "enabled": True, "matched": "none",
+                          "error": "classifier selected a missing or retired mode"}
+        route_put(root, key, selected.slug)
+        router.record(root, goal, url, known, proposal, selected.slug)
+        return selected, {**info, "enabled": True, "matched": "classifier-existing",
+                          "slug": selected.slug}
     if not decision.get("durable"):
         route_put(root, key, "general")
+        router.record(root, goal, url, known, proposal, "one_off")
         return None, {**info, "enabled": True, "matched": "not-durable"}
     try:
         mode = create(root, decision, goal)
     except (OSError, ValueError) as error:
+        router.record(root, goal, url, known, proposal, "create-error")
         # An unwritable modes root must not fail the run: degrade to no mode.
         return None, {**info, "enabled": True, "matched": "none",
                       "error": f"could not create the mode: {error}"[:200]}
     route_put(root, key, mode.slug)
+    router.record(root, goal, url, known, proposal, "new_class")
     return mode, {**info, "enabled": True, "matched": "created", "slug": mode.slug,
                   "name": mode.name, "strategy": mode.strategy}
 

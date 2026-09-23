@@ -11,6 +11,7 @@ import time
 
 from .agent import TERMINAL_STATUS, progress_key
 from .browser import StalePage
+from .cost import summarize as cost_summary
 from .modes import normalize_label, origin
 
 TASK_TTL_S = 30 * 60
@@ -129,6 +130,7 @@ class DelegatedTask:
             "active_seconds": round(active_seconds, 3),
             "wall_seconds": round(time.time() - self.created_at, 3),
             "evidence": state.get("evidence"),
+            "usage": cost_summary(state),
         }
 
     def _pause(self, phase, reason, action=None):

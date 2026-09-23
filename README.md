@@ -168,6 +168,10 @@ uv run --env-file .env python run_task.py --mode internship-application --forget
 - Sensitive labels (password, passcode, OTP, card, CVV, SSN, passport, IBAN, bank, national insurance, routing/sort code, PIN) are never learned, never injected into a prompt, and never persisted in a replay plan.
 - A collect-strategy mode scrolls and harvests only — it never clicks anything — and stores an item only if its title appears verbatim in the page text. Live results for the internship, local-feed and real-x.com scenarios are in [docs/modes-scenarios.json](docs/modes-scenarios.json).
 
+[Task-class routing](docs/routing.md) records Jev predictions in shadow mode
+after deterministic misses. It can only control routing after six active
+modes and an independently labelled accuracy gate pass.
+
 ## Small enough to read
 
 | File | Job |

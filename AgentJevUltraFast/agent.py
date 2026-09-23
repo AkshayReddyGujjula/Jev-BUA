@@ -333,6 +333,7 @@ class Agent:
             # Task-class mode: name/strategy for callers, and this run's collector state.
             mode=self.mode.summary() if self.mode else None,
             mode_matched=self._mode_info.get("matched"),
+            router=self._mode_info.get("router"),
             harvest={"items": 0, "calls": 0, "dropped": 0, "steps": 0, "barren": 0,
                      "file": None, "stopped": None, "last": []},
         )

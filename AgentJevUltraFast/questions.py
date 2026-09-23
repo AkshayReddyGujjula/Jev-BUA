@@ -84,11 +84,13 @@ kind of trip. A one-off errand - checking today's price, looking up a single fac
 
 Return JSON with exactly one of these shapes:
 {"durable": false}
+{"existing": "slug-of-one-listed-existing-mode"}
 {"durable": true, "slug": "lowercase-dashes", "name": "...", "description": "one sentence",
  "keywords": ["3 to 8 short phrases that would appear in similar future goals"],
  "strategy": "decide" | "collect"}
 
-Rules: slug is 2-40 characters, lowercase letters, digits and dashes only, and must not
+Rules: choose "existing" only when that mode's task purpose and reusable memory truly fit.
+A new slug is 2-40 characters, lowercase letters, digits and dashes only, and must not
 collide with an existing mode. "collect" is only
 for tasks whose goal is to scroll a feed and save items; everything else is "decide".
 Never include personal data in any field. Return only the JSON object."""

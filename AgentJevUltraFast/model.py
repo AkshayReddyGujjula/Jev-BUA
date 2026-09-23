@@ -470,6 +470,10 @@ def classify_mode(goal, url, existing, timeout=None):
         return None
     if not isinstance(output, dict):
         return None
+    existing_slug = output.get("existing")
+    if isinstance(existing_slug, str):
+        allowed = {item.get("slug") for item in existing or []}
+        return {"existing": existing_slug} if existing_slug in allowed else None
     durable = output.get("durable")
     if isinstance(durable, str):
         durable = durable.strip().lower() in {"true", "yes", "1"}
