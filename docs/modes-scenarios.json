@@ -2,14 +2,15 @@
   "note": "Trimmed from the scripts/modes_live.py reports (real Chrome + paid APIs); full reports and JSONL evidence stay in the gitignored artifacts/modes-live/.",
   "cases": {
     "internship": {
+      "measured": "2026-09-23 (after ADR-008 reversible gate, ADR-009 masking, ADR-011 prefetch)",
       "mode": {
         "slug": "internship-application",
-        "name": "Internship Application Filling",
+        "name": "Internship Application",
         "strategy": "decide"
       },
       "resolve": "created",
       "dry_run_1": {
-        "status": "abstained",
+        "status": "done",
         "outcome": "verified",
         "checks": [
           {
@@ -23,21 +24,13 @@
             "note": "#full-name -> 'Ada Lovelace' (need 'Ada')"
           }
         ],
-        "elapsed_ms": 21728,
-        "actions": 11,
-        "decisions": 14,
+        "elapsed_ms": 9177,
+        "actions": 12,
+        "decisions": 13,
         "text_calls": 9,
         "model_calls": 9,
         "memory_fills": 0,
-        "gate": {
-          "reason": "action below its confidence floor",
-          "confidence": 0.38,
-          "target_confidence": 0.38,
-          "floor": 0.5,
-          "irreversible": 0.73,
-          "action": "How did you hear about us? → Other",
-          "resolution": "abstain"
-        },
+        "gate": null,
         "ready_to_submit": true,
         "consent_checked": true,
         "field_labels_filled": [
@@ -58,11 +51,12 @@
           "fill",
           "scroll",
           "fill",
-          "click"
+          "click",
+          "select"
         ]
       },
       "dry_run_2": {
-        "status": "abstained",
+        "status": "done",
         "outcome": "verified",
         "checks": [
           {
@@ -73,24 +67,16 @@
           {
             "check": "value_contains",
             "pass": true,
-            "note": "#full-name -> 'Ada Lovelace' (need 'Ada')"
+            "note": "#full-name -> '[private]' (need 'Ada')"
           }
         ],
-        "elapsed_ms": 9148,
-        "actions": 11,
-        "decisions": 13,
+        "elapsed_ms": 3415,
+        "actions": 12,
+        "decisions": 4,
         "text_calls": 9,
         "model_calls": 0,
-        "memory_fills": 9,
-        "gate": {
-          "reason": "action below its confidence floor",
-          "confidence": 0.37,
-          "target_confidence": 0.37,
-          "floor": 0.5,
-          "irreversible": 0.7,
-          "action": "How did you hear about us? → Other",
-          "resolution": "abstain"
-        },
+        "memory_fills": 1,
+        "gate": null,
         "ready_to_submit": true,
         "consent_checked": true,
         "field_labels_filled": [
@@ -111,7 +97,12 @@
           "fill",
           "scroll",
           "fill",
-          "click"
+          "click",
+          "select"
+        ],
+        "text_sources": [
+          "replay x8",
+          "mode-memory x1"
         ]
       },
       "submit_run": {
@@ -121,24 +112,16 @@
           {
             "check": "text_contains",
             "pass": true,
-            "note": "matched ['Application received', 'Ada Lovelace'] of ['Application received', 'Ada Lovelace']"
+            "note": "matched ['Application received', '[private]'] of ['Application received', '[private]']"
           }
         ],
-        "elapsed_ms": 10524,
+        "elapsed_ms": 6248,
         "actions": 12,
-        "decisions": 14,
+        "decisions": 13,
         "text_calls": 9,
         "model_calls": 0,
         "memory_fills": 9,
-        "gate": {
-          "reason": "irreversible action below its confidence floor",
-          "confidence": 0.58,
-          "target_confidence": 0.98,
-          "floor": 0.6,
-          "irreversible": 0.94,
-          "action": "Submit application",
-          "resolution": "reobserve"
-        },
+        "gate": null,
         "ready_to_submit": false,
         "consent_checked": false,
         "field_labels_filled": [],
@@ -171,7 +154,30 @@
         "Motivation answer: I want to build reliable systems with a small team and learn from senior engineers.",
         "Standing instruction: never submit an application without explicit confirmation.",
         "Standing instruction: fill each field once, then tick the confirmation checkbox; do not re-enter a field that already shows my value."
-      ]
+      ],
+      "previous_2026_09_21": {
+        "dry_run_1": {
+          "status": "abstained",
+          "outcome": "verified",
+          "elapsed_ms": 21728,
+          "decisions": 14,
+          "model_calls": 9
+        },
+        "dry_run_2": {
+          "status": "abstained",
+          "outcome": "verified",
+          "elapsed_ms": 9148,
+          "decisions": 13,
+          "model_calls": 0
+        },
+        "submit_run": {
+          "status": "done",
+          "outcome": "verified",
+          "elapsed_ms": 10524,
+          "decisions": 14,
+          "model_calls": 0
+        }
+      }
     },
     "feed": {
       "mode": {

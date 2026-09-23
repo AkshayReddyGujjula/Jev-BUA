@@ -237,8 +237,8 @@ the gitignored `artifacts/modes-live/`.
 
 | Scenario | Mode (auto-created) | Result |
 | --- | --- | --- |
-| Internship form, dry run 1 | `internship-application` | `verified` — the user's details reached the page (`value_contains #full-name`), no receipt; 9 model calls |
-| Internship form, dry run 2 (same goal) | same | `verified` in about a third of the time: **all nine fills came from learned memory, zero model calls** |
+| Internship form, dry run 1 | `internship-application` | `verified` — the user's details reached the page (`value_contains #full-name`), no receipt; 9 model calls. Re-measured 2026-09-23: `done`/`verified` in **9.2 s** (was 21.7 s and `abstained` on a 0.38 "How did you hear about us? → Other" select, before reversible actions stopped being gated) |
+| Internship form, dry run 2 (same goal) | same | `verified` in about a third of the time: **all nine fills came from learned memory, zero model calls**. Re-measured 2026-09-23: **3.4 s**, 4 decisions; 8 fills replayed and 1 from learned memory, zero text-model calls |
 | Internship submit | same | **verified end-to-end**: with the mode owner's explicit `irreversible_floor: 0.6` the Submit click executed and the receipt page matched (`text_contains "Application received"`); the default 0.9 had withheld it at 0.68–0.77 |
 | Local feed collection | `collect-feed-posts` (classifier chose `collect`) | `verified` — 6 scrolls plus 2 content-wheel fallbacks, 6 items, 0 gossip, the page's engagement log still `actions: none` |
 | Live x.com timeline, read-only | `x-feed-collect` | `verified` by `url_contains` + `harvest_at_least` — 5 scrolls, 6 harvest calls, 1 real post stored, zero clicks, `only_scrolled` true |

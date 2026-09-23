@@ -125,7 +125,8 @@ def run_agent(url, goal, *, mode_slug, expect=None, collect_steps=None, max_seco
         "decisions": len(final.get("decisions") or []),
         "text_calls": len(text_calls),
         "model_calls": sum(
-            1 for c in text_calls if c.get("model") not in {"mode-memory", "supplied"}
+            1 for c in text_calls
+            if c.get("model") not in {"mode-memory", "supplied", "profile", "replay", "supervisor"}
         ),
         "text_models": sorted({str(c.get("model")) for c in text_calls}),
         "memory_fills": sum(1 for c in text_calls if c.get("model") == "mode-memory"),
