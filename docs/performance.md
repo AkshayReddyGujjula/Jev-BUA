@@ -1,5 +1,31 @@
 # Faster on the real web
 
+## Google Flights after the fundamentals fixes (2026-09-23, night)
+
+Task: Zürich → London, one-way, Tuesday 20 October 2026 (`JEV_FLIGHTS_DATE=2026-10-20`),
+`scripts/measure_flights.py`, background tab with the render keepalive, independent
+verification after the run. Jev's median decision latency was ~300 ms in these runs.
+
+| Tree | Runs | Verified | Time | Text-helper wait |
+| --- | --- | --- | --- | --- |
+| before text prefetch (`71cac0b`) | 1 | 1/1 | 16.8 s | 2 × ~1.35 s on the critical path |
+| exact-field-set prefetch | 3 | 3/3 | 13.4–15.2 s | 0.8–1.4 s per field |
+| covered-field-set prefetch, drafts kept per goal (`2291375`) | 4 | 4/4 | **10.5–12.8 s** | **0 ms** per field |
+
+Where a 10.5 s run goes: 13 Jev decisions (~300 ms each), ~100–270 ms of browser work
+before each action and ~130–300 ms of settling after it, and ~2.5 s after Search while the
+results page loads before Jev's DONE (`goal_done` 0.94). Upstream's 7.073 s recording ran
+at ~200 ms per Jev call with Mercury as the text helper.
+
+A matched A/B against upstream `452c1ad` could not be run tonight: the baseline has no
+render keepalive, so it needs a foreground tab, and with the display off Chrome throttled
+it to 4–6 s per step (71.7 s, failed). The A/B stays pending a daytime foreground run with
+both arms under identical conditions.
+
+Local trap closure after the same changes (`scripts/verify_stall.py --runs 2`): every trap
+terminates (worst wall 14.3 s against a 25 s cap); the working-form happy path is `done` in
+1.6 s.
+
 ## Delegated task interface — cold vs warm (local fixture)
 
 Measured 2026-09-23 on the same machine, Chrome, and Jev API, against
