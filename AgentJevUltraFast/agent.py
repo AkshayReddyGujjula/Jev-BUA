@@ -596,6 +596,24 @@ class Agent:
         return values[label], {**meta, "prefetched": True,
                                "waited_ms": round((time.monotonic() - asked) * 1000)}
 
+    def _back_available(self):
+        """BACK is offered only when this run moved the tab forward in its history.
+
+        Measured 2026-09-24: on a dead Confirm button Jev chose BACK from the start page of a
+        fresh tab and left the task for about:blank. The floor is the tab's history index at
+        the run's first decision, per tab, so a warm MCP tab's earlier calls never count.
+        """
+        reader = getattr(getattr(self, "browser", None), "history_index", None)
+        if reader is None:
+            return True
+        try:
+            index = reader()
+        except Exception:
+            return True             # unknown history: keep the upstream behaviour
+        floors = self.state.setdefault("history_floor", {})
+        floor = floors.setdefault(str(getattr(self.browser, "target", "")), index)
+        return index > floor
+
     def _guidance(self):
         """The supervisor's current sub-goal, or None once it has steered GUIDANCE_STEPS actions."""
         guidance = self.state.get("guidance")
@@ -1447,6 +1465,7 @@ class Agent:
                             self.mode.decision_state() if getattr(self, "mode", None) else None
                         ),
                         guidance=self._guidance(),
+                        allow_back=self._back_available(),
                     )
                     break
                 except ValueError as error:
@@ -1511,6 +1530,10 @@ class Agent:
                     # The last mutation may have committed server-side even if
                     # Chrome showed no immediate change. Never dispatch it twice.
                     state["status"] = "blocked"
+                    state["blocked_reason"] = (
+                        "the chosen action had no visible effect twice and no alternative was "
+                        "left; not repeating a mutation that may have committed"
+                    )
                     state["uncertain_execution"] = True
                     self._finalize()
                     return self.snapshot()
@@ -1977,6 +2000,7 @@ class Agent:
                 # lost. Re-observing is useful, but another model decision could
                 # dispatch the same mutation again. End this run as uncertain.
                 state["status"] = "blocked"
+                state["blocked_reason"] = "browser dispatch failed; the action may have run"
                 state["uncertain_execution"] = True
                 self._finalize()
                 return self.snapshot()
@@ -1990,6 +2014,7 @@ class Agent:
                 state["history"][-1]["outcome"] = "readback failed"
                 state["history"][-1]["error"] = str(exc)[:200]
                 state["status"] = "blocked"
+                state["blocked_reason"] = "the page could not be read after the action; it may have run"
                 state["uncertain_execution"] = True
                 self._finalize()
                 return self.snapshot()
@@ -2101,6 +2126,7 @@ class Agent:
             if failure and failure["class"] == "hard_wall":
                 # The page itself is the wall; the planner would only burn the deadline.
                 state["status"] = "blocked"
+                state["blocked_reason"] = "the page does not respond to the available actions (hard wall)"
             elif failure and failure["class"] == "still_loading":
                 if self.stalled():
                     return self._stop_stalled()
@@ -2114,6 +2140,10 @@ class Agent:
                 return self.snapshot()
             else:
                 state["status"] = "blocked" if dead else "ready"
+                if dead:
+                    state["blocked_reason"] = state.get("blocked_reason") or (
+                        "consecutive actions changed nothing on the page"
+                    )
             if state["status"] == "blocked":
                 self._finalize()
         else:

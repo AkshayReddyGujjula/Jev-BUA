@@ -74,9 +74,9 @@ def prewarm():
 
     A fresh process otherwise pays the handshake inside its first decision. An unauthenticated
     HEAD carries no key and costs nothing; failures are ignored. Skipped without a TypeSafe
-    key, so offline tests never touch the network.
+    key or with JEV_PREWARM=0 (the test default), so tests never touch the network.
     """
-    if not os.environ.get("TYPESAFE_API_KEY"):
+    if not os.environ.get("TYPESAFE_API_KEY") or os.environ.get("JEV_PREWARM", "1") == "0":
         return []
     return [_HEDGE_POOL.submit(_touch, client) for client in (CLIENT, HEDGE_CLIENT)]
 
@@ -299,7 +299,7 @@ def action_space(actions):
 
 
 def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=True,
-           model_id=None, mode_state=None, guidance=None):
+           model_id=None, mode_state=None, guidance=None, allow_back=True):
     elements, targets, controls = action_space(state["actions"])
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
@@ -322,6 +322,10 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
     if not allow_reobserve:
         # The loop's own re-observe budget is spent, so the option is not offered.
         operations.pop("REOBSERVE", None)
+    if not allow_back:
+        # Nothing this run reached lies behind the current page: BACK could only leave the
+        # task (to the blank new tab, or the user's previous page in an active tab).
+        operations.pop("BACK", None)
     # Stable candidate order. Jev-style decisions are sensitive to the ORDER candidates are
     # presented in - an independent reimplementation reports a different answer on 119 of 139
     # Choice tasks depending on order. Enumeration order is not something we control: it is

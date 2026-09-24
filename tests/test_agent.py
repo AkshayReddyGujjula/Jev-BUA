@@ -290,6 +290,7 @@ def test_stale_observation_preserves_executed_action(runner):
     assert runner.state["history"][-1]["action"] == "Go"
     assert state["status"] == "blocked" and state["outcome"] == "unknown"
     assert state["uncertain_execution"] is True
+    assert "could not be read after the action" in state["blocked_reason"]
     runner.state["browser"].act.assert_called_once()
 
 
@@ -299,6 +300,7 @@ def test_lost_mutation_reply_blocks_further_actions(runner):
     state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert state["status"] == "blocked"
     assert state["uncertain_execution"] is True
+    assert state["blocked_reason"] == "browser dispatch failed; the action may have run"
     assert state["history"][-1]["error"] == "session lost after dispatch"
     assert state["outcome"] == "unknown"
     runner.state["browser"].observe.assert_not_called()
@@ -774,6 +776,7 @@ def test_repeated_no_effect_action_without_alternative_stops(runner, monkeypatch
     monkeypatch.setattr(loop, "choose", lambda *args, **kwargs: proposal)
     state = runner.command("predict")
     assert state["status"] == "blocked" and state["uncertain_execution"] is True
+    assert "no visible effect twice" in state["blocked_reason"]
     runner.state["browser"].act.assert_not_called()
 
 
@@ -2040,3 +2043,48 @@ def test_supervision_records_are_redacted(runner, consult):
     script["verdict"] = {"verdict": "impossible", "reason": "typed hunter22secret but no luck"}
     runner._supervise("dead_streak")
     assert "hunter22secret" not in json.dumps(runner.state["supervision"])
+
+
+def test_back_is_not_offered_when_the_run_has_not_moved_forward(monkeypatch):
+    seen = []
+
+    def post(_url, _key, body, **_kwargs):
+        seen.append(set(body["questions"]["operation"]["criteria"]))
+        return _complete_answer(body, "TYPE_TEXT", target="1")
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", post)
+    model.choose(page(), "Find a book", [])
+    model.choose(page(), "Find a book", [], allow_back=False)
+    assert "BACK" in seen[0]
+    assert "BACK" not in seen[1]
+
+
+def test_back_is_available_only_above_the_runs_own_history_floor():
+    from types import SimpleNamespace
+
+    index = [3]
+    agent = loop.Agent.__new__(loop.Agent)
+    agent.state = {}
+    agent.browser = SimpleNamespace(target="t1", history_index=lambda: index[0])
+    assert agent._back_available() is False        # the start page: BACK would leave the task
+    index[0] = 4
+    assert agent._back_available() is True         # this run navigated forward
+    index[0] = 3
+    assert agent._back_available() is False        # back at the start again
+    agent.browser = SimpleNamespace(target="t2", history_index=lambda: 0)
+    assert agent._back_available() is False        # an adopted tab gets its own floor
+
+
+def test_back_stays_offered_when_history_cannot_be_read():
+    from types import SimpleNamespace
+
+    def broken():
+        raise RuntimeError("cdp gone")
+
+    agent = loop.Agent.__new__(loop.Agent)
+    agent.state = {}
+    agent.browser = SimpleNamespace(target="t", history_index=broken)
+    assert agent._back_available() is True
+    agent.browser = SimpleNamespace(target="t")
+    assert agent._back_available() is True

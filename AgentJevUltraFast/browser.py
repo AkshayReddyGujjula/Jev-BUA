@@ -156,6 +156,10 @@ class Browser:
             # Chrome 153 replaces the target on navigation: adopt the replacement before the first read.
             self.reattach()
 
+    def history_index(self):
+        """This tab's navigation-history index. Read-only CDP; no page script runs."""
+        return int(self.call("Page.getNavigationHistory").get("currentIndex", 0))
+
     def call(self, method, **params):
         # CDP calls include navigation and Runtime.evaluate expressions that can
         # mutate the page. A lost reply cannot establish whether they ran.

@@ -92,6 +92,7 @@ def test_prewarm_opens_both_decision_connections_and_never_raises(monkeypatch):
             raise OSError("offline")        # a failed warm-up is ignored
 
     monkeypatch.setenv("TYPESAFE_API_KEY", "offline-test")
+    monkeypatch.setenv("JEV_PREWARM", "1")
     monkeypatch.setattr(model, "CLIENT", Client())
     monkeypatch.setattr(model, "HEDGE_CLIENT", Client())
     for future in model.prewarm():
