@@ -22,10 +22,25 @@ before each action and ~130–300 ms of settling after it, and ~2.5 s after Sear
 results page loads before Jev's DONE (`goal_done` 0.94). Upstream's 7.073 s recording ran
 at ~200 ms per Jev call with Mercury as the text helper.
 
-A matched A/B against upstream `452c1ad` could not be run tonight: the baseline has no
-render keepalive, so it needs a foreground tab, and with the display off Chrome throttled
-it to 4–6 s per step (71.7 s, failed). The A/B stays pending a daytime foreground run with
-both arms under identical conditions.
+### Matched A/B against upstream `452c1ad` (2026-09-24, foreground tabs, display on)
+
+Arms alternated run by run in the same foreground Chrome, same Jev endpoint, cache off,
+upstream's text helper pointed at the same DeepSeek endpoint.
+
+| Date in the goal | Upstream `452c1ad` | HEAD |
+| --- | --- | --- |
+| 2026-10-20 (needs month navigation) | 0/3 - blocked at 12.8, 18.9, 2.4 s | **3/3 verified** - 12.4, 12.9, 12.6 s |
+| 2026-09-28 (visible month, like the 7 s demo) | 0/3 - blocked at 16.5, 2.4, 51.2 s | **4/4 done** (readback shown on the last: verified) - 13.2-15.8 s |
+
+Upstream no longer completes the task on today's Google Flights. Its snapshot does not
+surface the options of the opened ticket-type menu: after clicking "Change ticket type.
+Round trip" the element list is unchanged, so Jev clicks it again (closing the menu), then
+sees an empty table and answers BLOCKED; with the date inside the calendar it instead loops on
+the preselected day. HEAD's later snapshot and loop changes get through both. Daytime Jev
+latency was higher than overnight (~520-650 ms per decision against ~380 ms), which is where
+HEAD's 12-16 s here differs from its 10.4-11.7 s overnight background runs. The 7.07 s
+recording is therefore not reproducible with either tree today; it remains the target, not
+a comparison point.
 
 Local trap closure after the same changes (`scripts/verify_stall.py --runs 2`): every trap
 terminates (worst wall 14.3 s against a 25 s cap); the working-form happy path is `done` in
