@@ -103,7 +103,7 @@ What v2 **was** measured on:
 | --- | --- |
 | Google Flights, Zurich → London, October 20, 2026, same goal shape | `verified`, 27.930 s, 21 actions, 0 skipped; the search URL's `tfs` encodes `2026-10-20` |
 | Local trap closure (`scripts/verify_stall.py`) | every trap terminates; worst recorded stall window 5.0 s against the 5 s limit with a 1 s in-flight allowance (loading traps stop at 4.5–4.6 s); artifact is real, see `artifacts/verify_stall.json` |
-| Parallel checks self-test (`--serve-traps`) | 5/5 verified, 3.2 s wall / 12.2 s serial (warm second run) |
+| Parallel checks self-test (`--serve-traps`) | 5/5 verified, 3.2 s wall / 12.2 s serial (warm second run); 2026-09-24 with the supervisor on: 5/5, 5.9–7.1 s wall / 14–20 s serial - the inert-control check now ends on the supervisor's `needs_human` (~2.6 s consult) instead of BACK to about:blank |
 | Local fixture smoke | `verified`, 3.2–4.0 s, 6 actions, 0–1 skipped, 8–9 decisions |
 
 The safety layer was visible in the loop at the time of these measurements: a reversible action below its confidence floor (then 0.5; 0.9 when Jev marks it irreversible) was never executed, was routed around, and one code-owned reveal scroll could be used when refusals exhausted the visible options. The cost was extra decisions while the model was uncertain. Since 2026-09-23 reversible actions are not gated by default (ADR-008); only the 0.9 commit floor remains.
