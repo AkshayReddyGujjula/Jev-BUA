@@ -7,8 +7,12 @@ license = "MIT"
 requires-python = ">=3.12"
 dependencies = ["browser-harness==0.1.13", "httpx[http2]>=0.28,<1"]
 
+[project.optional-dependencies]
+cloud = ["browser-use-sdk>=3.11.3,<4"]
+
 [project.scripts]
 agent-jev = "AgentJevUltraFast.demo:main"
+jev-cloud = "AgentJevUltraFast.cloud_runner:main"
 jev = "AgentJevUltraFast.demo:main"
 
 [build-system]

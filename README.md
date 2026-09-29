@@ -68,6 +68,8 @@ Chrome connects through [Browser Harness](https://github.com/browser-use/browser
 
 `TEXT_MODEL_API_KEY` is the key for the text helper. The current configuration runs `deepseek-v4.1-flash` through the OpenAI-compatible OpenCode Go endpoint with reasoning disabled (`TEXT_MODEL`, `TEXT_MODEL_BASE_URL`, `TEXT_MODEL_REASONING` in `.env`). Gemini, GLM, DeepSeek and other OpenAI-compatible providers work too; configure the model, endpoint, and reasoning setting together. The 7.073 s recording used `inception/mercury-2.5`, so its helper latencies are historical rather than a property of the current configuration.
 
+**Optional Cloud Chrome pilot:** [docs/cloud-browser.md](docs/cloud-browser.md) explains the labeled API-key settings, free-credit budget, `jev-cloud` command, and browser stop/recovery procedure. Cloud supplies Chrome over CDP; Jev still makes the decisions and verifies outcomes.
+
 ## Use the library
 
 ```python
