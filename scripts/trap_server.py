@@ -198,6 +198,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 feed_page = 1
             self._send(feed_page_html(feed_page))
             return
+        if parsed.path == "/dialog":
+            # A delete behind a native confirm(): without a dialog policy the page freezes.
+            self._send(f"""<!doctype html><html><head><title>Items</title></head>
+<body style="{STYLE}"><h1>Your items</h1><ul id="items"><li>Quarterly report</li></ul>
+<button onclick="if (confirm('Delete Quarterly report?')) {{
+  document.getElementById('items').innerHTML=''; this.remove(); document.getElementById('note').textContent='Item deleted';
+}}">Delete Quarterly report</button><p id="note"></p></body></html>""")
+            return
         if parsed.path == "/favicon.ico":
             self._send("", status=204)
             return

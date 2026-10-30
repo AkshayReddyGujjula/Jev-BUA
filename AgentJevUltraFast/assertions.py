@@ -35,6 +35,29 @@ ERROR_RECORDER = (
 )
 
 
+def dialog_script(policy):
+    """Answer alert/confirm/prompt in page script instead of a native dialog, or None.
+
+    A native dialog freezes the page's JavaScript thread: every later read times out and the
+    run ends unable to see the page. A test run picks a policy instead, like Playwright, which
+    dismisses dialogs unless a test handles them: "accept" (OK; the default on a local dev host,
+    where "Delete this? OK" is the flow under test) or "dismiss" (Cancel). Each message is kept
+    in window.__jevDialogs for the report. None leaves the page's own dialogs untouched.
+    """
+    if policy not in {"accept", "dismiss"}:
+        return None
+    accept = "true" if policy == "accept" else "false"
+    return (
+        "(() => { if (window.__jevDialogs) return; const seen = window.__jevDialogs = [];"
+        f"const accept = {accept};"
+        "const keep = (type, m) => { if (seen.length < 20) seen.push(type + ': ' + String(m ?? '').slice(0, 200)); };"
+        "window.alert = m => { keep('alert', m); };"
+        "window.confirm = m => { keep('confirm', m); return accept; };"
+        "window.prompt = (m, d) => { keep('prompt', m); return accept ? (d ?? '') : null; };"
+        "})()"
+    )
+
+
 def normalize_expect(expect):
     """Validate a caller's expectation and return it in canonical shape, or raise ValueError.
 

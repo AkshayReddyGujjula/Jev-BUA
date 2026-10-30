@@ -12,3 +12,7 @@ dist/
 .commandcode/
 opencode-instructions.md
 modes/
+
+# jev test run output (replay plans under .jev/replay are meant to be committed)
+**/.jev/evidence/
+**/.jev/reports/

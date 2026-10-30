@@ -12,7 +12,7 @@ from browser_harness.admin import ensure_daemon
 from browser_harness.helpers import activate_tab, cdp
 
 from . import chrome
-from .assertions import ERROR_RECORDER
+from .assertions import ERROR_RECORDER, dialog_script
 
 # Atomically read visible content and controls, preserving actual DOM node identity.
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text(encoding="utf-8")
@@ -54,6 +54,22 @@ SCAN_BARREN_LIMIT = int(os.environ.get("JEV_SCAN_BARREN_LIMIT", "3"))
 SCAN_MAX_S = float(os.environ.get("JEV_SCAN_MAX_SECONDS", "120"))
 # A screenshot is a luxury, never worth a 5 s IPC wait inside a run.
 SCREENSHOT_TIMEOUT = float(os.environ.get("JEV_SCREENSHOT_TIMEOUT", "3"))
+
+
+VIEWPORTS = {"mobile": (390, 844, True), "tablet": (820, 1180, True), "desktop": (1280, 800, False)}
+
+
+def viewport():
+    """(width, height, mobile) from JEV_VIEWPORT ("mobile", "tablet", "desktop" or "WxH"), or None."""
+    value = os.environ.get("JEV_VIEWPORT", "").strip().lower()
+    if not value:
+        return None
+    if value in VIEWPORTS:
+        return VIEWPORTS[value]
+    width, sep, height = value.partition("x")
+    if sep and width.isdigit() and height.isdigit():
+        return int(width), int(height), int(width) < 768
+    raise ValueError(f"JEV_VIEWPORT must be mobile, tablet, desktop or WIDTHxHEIGHT, got {value!r}")
 
 
 def isolate_mode():
@@ -164,7 +180,15 @@ class Browser:
             self.session = cdp("Target.attachToTarget", targetId=self.target, flatten=True)["sessionId"]
             if not background:
                 activate_tab(self.target)
-            if background:
+            size = viewport()
+            if size:
+                # A test's chosen device size (JEV_VIEWPORT), e.g. a phone for a mobile persona.
+                width, height, mobile = size
+                self.call("Emulation.setDeviceMetricsOverride", width=width, height=height,
+                          deviceScaleFactor=1, mobile=mobile)
+                if mobile:
+                    self.call("Emulation.setTouchEmulationEnabled", enabled=True, maxTouchPoints=5)
+            elif background:
                 # Emulated metrics keep hidden snapshots consistent; visible tabs use the real window size.
                 self.call(
                     "Emulation.setDeviceMetricsOverride",
@@ -328,8 +352,10 @@ class Browser:
             # Without the Page domain enabled the script is registered but never injected
             # (measured: window.__jevErrors undefined after a navigation).
             self.call("Page.enable")
-            self.call("Page.addScriptToEvaluateOnNewDocument", source=ERROR_RECORDER)
-            self.call("Runtime.evaluate", expression=ERROR_RECORDER)
+            for source in (ERROR_RECORDER, dialog_script(os.environ.get("JEV_DIALOGS", "").strip().lower())):
+                if source:
+                    self.call("Page.addScriptToEvaluateOnNewDocument", source=source)
+                    self.call("Runtime.evaluate", expression=source)
         except Exception:
             pass
 

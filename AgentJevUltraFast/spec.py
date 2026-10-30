@@ -29,9 +29,9 @@ so nothing here can weaken a verdict: a malformed check rejects the whole file.
 
 import re
 
-SUITE_KEYS = {"base_url", "isolate", "commit_floor", "max_seconds", "max_steps", "tab", "review",
+SUITE_KEYS = {"base_url", "isolate", "commit_floor", "max_seconds", "max_steps", "tab", "review", "viewport", "dialogs",
               "replay_commits", "stop_on_expect", "mode"}
-TEST_KEYS = {"path", "isolate", "commit_floor", "max_seconds", "max_steps", "tab", "review",
+TEST_KEYS = {"path", "isolate", "commit_floor", "max_seconds", "max_steps", "tab", "review", "viewport", "dialogs",
              "replay_commits", "stop_on_expect", "mode"}
 BEFORE_EACH = {"before each", "before each test", "setup"}
 STEP = re.compile(r"^\s*(\d+)[.)]\s+(.+?)\s*$")

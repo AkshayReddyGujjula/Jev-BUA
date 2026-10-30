@@ -138,6 +138,10 @@ def run_worker(job, out_path):
     os.environ["JEV_MODES"] = "off"
     isolate = job.get("isolate")
     os.environ["JEV_ISOLATE"] = ("storage" if isolate == "storage" else "context") if isolate else "0"
+    # Native dialogs freeze the page; a test answers them (see assertions.dialog_script).
+    os.environ["JEV_DIALOGS"] = job.get("dialogs") or ("accept" if local_host(job["url"]) else "dismiss")
+    if job.get("viewport"):
+        os.environ["JEV_VIEWPORT"] = str(job["viewport"])
     if job.get("review") is False:
         os.environ["JEV_REVIEW"] = "off"
 
