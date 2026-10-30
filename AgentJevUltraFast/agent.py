@@ -1826,8 +1826,22 @@ class Agent:
                 self._mark_progress()
             if self.stalled():
                 return self._stop_stalled()
-            if not state["browser"].fresh(state["page"]):
+            try:
+                stale = not state["browser"].fresh(state["page"])
+                if stale:
+                    state["page"] = state["browser"].observe(screenshot=self.screenshots,
+                                                             deadline=self.read_deadline())
+            except (TimeoutError, ConnectionError):
+                # A read, never a mutation, so one more try is safe. A heavy page right after a
+                # navigation can miss one IPC deadline (measured: a marketing landing page after
+                # "Go home" ended a test as stalled with the goal already done). Once per run.
+                if state.get("read_retried"):
+                    raise
+                state["read_retried"] = True
+                time.sleep(1.0)
+                stale = True
                 state["page"] = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
+            if stale:
                 self.note_progress(state["page"])
             state["decision"] = None
             if state["status"] in TERMINAL_STATUS:

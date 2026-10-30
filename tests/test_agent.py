@@ -2544,3 +2544,15 @@ def test_check_wait_sets_the_readback_window_and_is_capped(monkeypatch):
     assert loop.Agent("https://example.test/", "goal", browser=browser, check_wait=20).expect_wait_s == 20
     assert loop.Agent("https://example.test/", "goal", browser=browser,
                       check_wait=900).expect_wait_s == loop.CHECK_WAIT_MAX_S
+
+
+def test_a_read_that_times_out_is_retried_once_then_stalls(runner, monkeypatch):
+    monkeypatch.setattr(loop.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: decision("e1"))
+    browser = runner.state["browser"]
+    browser.fresh = Mock(side_effect=TimeoutError("ipc"))
+    runner.state["status"] = "ready"
+    runner.command("predict")                       # one missed read deadline: read again
+    assert runner.state["status"] == "predicted" and browser.observe.called
+    with pytest.raises(TimeoutError):               # a second one is a stall (run() ends it)
+        runner.command("predict")
