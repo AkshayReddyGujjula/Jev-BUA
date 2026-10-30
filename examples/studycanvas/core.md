@@ -22,6 +22,8 @@ values:
    - not see: Enter your access code
 2. Finish the onboarding questions: give the name, skip every optional question, and finish (the last button starts the tutorial, which takes a few seconds to write).
    - not see: Your study profile
+3. End the tutorial.
+   - not see: End tutorial
 
 ## Unknown URL shows the 404 page
 path: /workspace/no-such-place-xyz?storage=idb

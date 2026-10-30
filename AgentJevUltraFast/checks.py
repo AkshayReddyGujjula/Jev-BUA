@@ -498,11 +498,13 @@ def run_parent(args):
                 # A step without checks proves nothing; these came from what it changed on screen.
                 print(f"  no checks: {r.get('name')} step {number} - suggested (review first): "
                       + " | ".join(step["suggested_checks"]))
-    usd =round(sum((r.get("cost") or {}).get("usd_estimate") or 0 for r in results), 6)
+    # Before all is part of what the run cost: signing in is often the most expensive step.
+    billed = results + ([setup_result] if setup_result else [])
+    usd = round(sum((r.get("cost") or {}).get("usd_estimate") or 0 for r in billed), 6)
     model_calls = sum(sum(((r.get("cost") or {}).get("calls") or {}).get(k, 0)
-                          for k in ("jev", "text", "review", "supervisor")) for r in results)
-    replayed = sum((r.get("replay") or {}).get("steps_replayed", 0) for r in results)
-    heals = sum((r.get("replay") or {}).get("heals", 0) for r in results)
+                          for k in ("jev", "text", "review", "supervisor")) for r in billed)
+    replayed = sum((r.get("replay") or {}).get("steps_replayed", 0) for r in billed)
+    heals = sum((r.get("replay") or {}).get("heals", 0) for r in billed)
     print(f"cost ~${usd:.6f} for {model_calls} model calls"
           + (f"; {replayed} steps replayed with no model call, {heals} healed" if replay_dir else ""))
 
