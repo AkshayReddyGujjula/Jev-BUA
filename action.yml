@@ -38,6 +38,7 @@ runs:
         TEXT_MODEL: ${{ inputs.text-model }}
         JEV_CHROME: dedicated
         JEV_CHROME_HEADLESS: "1"
+        JEV_CHROME_ARGS: --no-sandbox
         JEV_CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         JEV_MODES: "off"
       run: >-

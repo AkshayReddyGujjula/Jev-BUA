@@ -13,6 +13,7 @@ never touched. Sign-ins made inside the dedicated profile persist in that profil
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -151,6 +152,8 @@ def launch_command(executable):
                *LAUNCH_FLAGS]
     if os.environ.get("JEV_CHROME_HEADLESS", "0").strip().lower() in {"1", "true", "yes", "on"}:
         command.append("--headless=new")
+    # Extra flags, e.g. --no-sandbox on a Linux CI runner that runs as root.
+    command += shlex.split(os.environ.get("JEV_CHROME_ARGS", ""), posix=os.name != "nt")
     command.append("about:blank")
     return command
 
