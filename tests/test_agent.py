@@ -2419,3 +2419,38 @@ def test_descriptors_keep_the_element_anchor():
     step = replay.descriptor({"kind": "click", "label": "Go", "anchor": {"testid": "go"}},
                              {"operation": "CLICK"}, "page changed", None)
     assert step["anchor"] == {"testid": "go"}
+
+
+def test_a_done_the_checks_contradict_becomes_a_subgoal_twice_then_stands(runner, monkeypatch):
+    monkeypatch.setattr(loop, "page_facts", Mock(return_value={
+        "url": "https://example.test/", "title": "", "text": "Question 5 of 5"}))
+    runner.expect = {"text_absent": ["Question 5 of 5"]}
+    runner.private_values = set()
+    assert runner._checks_before_done() is True
+    guidance = runner.state["guidance"]
+    assert guidance["source"] == "checks" and "Question 5 of 5" in guidance["subgoal"]
+    assert runner._checks_before_done() is True
+    assert runner._checks_before_done() is False      # the limit: DONE stands, readback decides
+    assert runner.state["done_vetoes"] == 2
+
+
+def test_a_done_the_checks_confirm_is_not_vetoed(runner, monkeypatch):
+    monkeypatch.setattr(loop, "page_facts", Mock(return_value={
+        "url": "https://example.test/", "title": "", "text": "Welcome home"}))
+    runner.expect = {"text_contains": ["Welcome"]}
+    assert runner._checks_before_done() is False
+    runner.expect = None
+    assert runner._checks_before_done() is False
+
+
+def test_a_stale_page_during_replay_retries_the_step_then_heals(runner):
+    runner.replay_plan = {"steps": [{"kind": "click", "label": "Go", "operation": "CLICK"}]}
+    runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
+    runner.state["decision"] = None
+    runner.state["browser"].act.side_effect = StalePage("changed before input")
+    for _ in range(2):
+        assert runner._replay_step() is True
+        assert runner.state["replay"]["stopped"] is None and runner.replay_plan is not None
+    assert runner._replay_step() is True
+    assert "kept changing" in runner.state["replay"]["healing"]["reason"]
+    assert runner.state["replay"]["used"] == 0

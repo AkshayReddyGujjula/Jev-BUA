@@ -3,7 +3,7 @@
   "url": "http://localhost:5173/workspace?storage=idb",
   "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish.",
   "goal_hash": "675fe0116d05c00ae3533951ab7ff61344d6d07b7824d37580924ddd37a5c572",
-  "recorded_at": 1793400547.982817,
+  "recorded_at": 1793400762.106726,
   "verified": true,
   "steps": [
     {
@@ -68,8 +68,8 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page changed",
-      "confidence": 0.98,
-      "irreversible": 0.36,
+      "confidence": 0.99,
+      "irreversible": 0.33,
       "anchor": {
         "container": "What would make this term a win?"
       }
@@ -81,21 +81,41 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.79,
-      "irreversible": 0.38,
+      "confidence": 0.82,
+      "irreversible": 0.4,
       "anchor": {
         "container": "How long should answers be?"
       }
     },
     {
-      "kind": "key",
-      "label": "Press Escape",
-      "role": null,
-      "operation": "KEY_ESCAPE",
+      "kind": "click",
+      "label": "Dismiss",
+      "role": "button",
+      "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.34,
-      "irreversible": 0.29
+      "confidence": 0.91,
+      "irreversible": 0.15
+    },
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.66,
+      "irreversible": 0.14
+    },
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.66,
+      "irreversible": 0.14
     }
   ]
 }

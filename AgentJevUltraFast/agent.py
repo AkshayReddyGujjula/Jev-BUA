@@ -86,6 +86,8 @@ EXPECT_WAIT_S = max(0.0, float(os.environ.get("JEV_EXPECT_WAIT_S", "3")))
 # Replay commit-like clicks (Delete, Submit, Save changes) from a recorded plan instead of
 # asking Jev again. Off by default; for a disposable test environment whose owner trusts it.
 REPLAY_COMMITS = os.environ.get("JEV_REPLAY_COMMITS", "0").strip().lower() in {"1", "true", "yes", "on"}
+# Times a DONE contradicted by the caller's checks is turned back into "keep going" per run.
+CHECK_DONE_LIMIT = int(os.environ.get("JEV_CHECK_DONE_LIMIT", "2"))
 # Checks that something IS on the page. Only these can end a run early (see _finish_on_readback).
 POSITIVE_CHECKS = {"text_contains", "text_contains_all", "url_contains", "url_matches",
                    "title_contains", "selector_count", "value_contains"}
@@ -706,6 +708,37 @@ class Agent:
             state["decision"] = None
         return applied
 
+    def _checks_before_done(self):
+        """Jev chose DONE while the caller's checks still fail: keep going (bounded), code-owned.
+
+        The checks are the definition of done the caller wrote, so a DONE they contradict is a
+        premature stop (measured: DONE on question 5 of a 5-question onboarding). The run gets a
+        sub-goal naming what is still missing, at most CHECK_DONE_LIMIT times, then DONE stands
+        and the readback reports the failure as usual. Plain page reads, no model call.
+        """
+        state = self.state
+        expect = getattr(self, "expect", None)
+        if not expect or state.get("done_vetoes", 0) >= CHECK_DONE_LIMIT:
+            return False
+        try:
+            facts = page_facts(state["browser"], selectors_for(expect), value_selectors_for(expect))
+        except Exception:
+            return False
+        passed, detail = evaluate_expectations(expect, facts)
+        if passed:
+            return False
+        missing = "; ".join(item["note"] for item in detail if not item["pass"])[:300]
+        subgoal = redact(f"The task is not finished yet; the page does not show the expected result "
+                         f"({missing}). Continue the task.", getattr(self, "private_values", ()))
+        state["done_vetoes"] = state.get("done_vetoes", 0) + 1
+        state["guidance"] = {"subgoal": subgoal, "source": "checks",
+                             "until_step": len(state["history"]) + GUIDANCE_STEPS}
+        state["decision"] = None
+        evidence = getattr(self, "evidence", None)
+        if evidence is not None:
+            evidence.record("done_vetoed", missing=redact(missing, getattr(self, "private_values", ())))
+        return True
+
     def _review_apply(self, result):
         state = self.state
         record = redact({k: result.get(k) for k in
@@ -1068,7 +1101,13 @@ class Agent:
             state["status"] = "ready"
             state["page"] = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
             self.note_progress(state["page"])
-            self._stop_replay(index, "page changed during the replayed step")
+            # StalePage is raised before any input is dispatched, so trying the same recorded
+            # step on the fresh page is not a retried mutation. A page that keeps changing
+            # under it (twice) hands the step to Jev instead of dropping the whole plan.
+            stale = replay_state.setdefault("stale", {})
+            stale[index] = stale.get(index, 0) + 1
+            if stale[index] > 2:
+                self._heal(index, "page kept changing under the replayed step")
             return True
         last = state["history"][-1] if state["history"] else {}
         if last.get("outcome") in DEAD_OUTCOMES and step.get("kind") != "scroll":
@@ -1981,7 +2020,7 @@ class Agent:
             if decision.get("goal_done", 0.0) > 0.85 and state["history"]:
                 # The completion cross-check fired: stop without executing the proposed action,
                 # unless the reviewer's look at this state finds a requirement still unmet.
-                if self._review_before_done():
+                if self._checks_before_done() or self._review_before_done():
                     state["decision"] = None
                     state["status"] = "ready"
                     return self.snapshot()
@@ -2027,7 +2066,7 @@ class Agent:
                     raise StalePage("Page changed since the decision. Choose again.")
                 if selected == "BLOCKED" and self._supervise("model_blocked"):
                     return self.snapshot()
-                if selected == "DONE" and self._review_before_done():
+                if selected == "DONE" and (self._checks_before_done() or self._review_before_done()):
                     state["status"] = "ready"
                     return self.snapshot()
                 state["status"] = "done" if selected == "DONE" else "blocked"

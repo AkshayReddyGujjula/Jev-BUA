@@ -104,7 +104,7 @@ def apply_env():
         # `jev test` / `jev draft` run unattended by design. Deciding here, at import, is the
         # only safe place: by the time the command's own code runs, Browser Harness has already
         # read BU_NAME, and a late switch once attached to the user's Chrome and waited forever
-        # on its "Allow remote debugging?" prompt (observed 30 Oct 2026, 23:05).
+        # on its "Allow remote debugging?" prompt (observed 30 Oct 2026).
         os.environ["JEV_CHROME"] = "dedicated"
     if not dedicated() or os.environ.get("BU_CDP_WS") or os.environ.get("BU_CDP_URL"):
         return
