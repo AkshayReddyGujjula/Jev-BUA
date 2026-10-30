@@ -220,3 +220,36 @@ def test_suggestions_stay_fast_on_a_huge_page():
     started = time.perf_counter()
     suggest_checks(before, before + "\nSaved", limit=5)
     assert time.perf_counter() - started < 1.0
+
+
+def test_an_unchecked_last_step_that_stalls_fails_the_test(monkeypatch, tmp_path):
+    class LastStalls:
+        def __init__(self, url, goal, **kwargs):
+            self.goal = goal
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def run(self):
+            return iter(())
+
+        def snapshot(self):
+            stalled = self.goal == "click Go home"
+            return {"status": "stalled" if stalled else "done",
+                    "outcome": "unknown" if stalled else "verified",
+                    "checks": [], "history": [], "decisions": [], "text_calls": [], "page": {},
+                    "replay": {"used": 0}}
+
+    monkeypatch.setattr(run_checks, "load_env", lambda: None)
+    monkeypatch.setattr(AgentJevUltraFast, "Agent", LastStalls)
+    monkeypatch.setattr(AgentJevUltraFast, "Browser", FakeBrowser)
+    out = tmp_path / "part.json"
+    job = {"name": "n", "url": "http://app.test/", "base_url": "http://app.test",
+           "steps": [{"goal": "read the page", "expect": {"text_contains": ["Page not found"]}},
+                     {"goal": "click Go home"}]}
+    run_checks.run_worker(job, out)
+    result = json.loads(out.read_text(encoding="utf-8"))
+    assert result["verified"] is False and result["failed_step"] == 2

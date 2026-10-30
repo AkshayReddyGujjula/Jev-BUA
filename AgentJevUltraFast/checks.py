@@ -292,8 +292,11 @@ def run_worker(job, out_path):
                     pass
                 break
         expected = [s for s in result["steps"] if s["verified"] is not None]
+        # A step without checks that did not finish (stalled, blocked) fails the test wherever it
+        # is: the steps after it never ran, and for the last step the test's flow never completed.
         result["verified"] = (
             all(s["verified"] for s in expected) and len(result["steps"]) == len(steps)
+            and not result.get("failed_step")
         ) if expected else None
         result["replay"] = {
             "steps_replayed": sum((s["replay"].get("used") or 0) for s in result["steps"]),
@@ -503,7 +506,11 @@ def run_parent(args):
           f"slowest check {slowest:.1f}s")
     for r in failed:
         step = f" (step {r['failed_step']})" if r.get("failed_step") else ""
-        print(f"  FAILED {r.get('name')}{step}: {r.get('error') or 'assertions not satisfied'}")
+        reason = r.get("error") or ("no checks, so nothing was verified" if r.get("verified") is None
+                                    else f"step {r.get('failed_step')} did not finish ({r.get('status')})"
+                                    if not (r.get("checks") or []) or all(c.get("pass") for c in r["checks"])
+                                    else "assertions not satisfied")
+        print(f"  FAILED {r.get('name')}{step}: {reason}")
     for r in results:
         for number, step in enumerate(r.get("steps") or [], 1):
             if step.get("suggested_checks"):
