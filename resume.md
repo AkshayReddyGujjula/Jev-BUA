@@ -38,6 +38,14 @@ role+name -> narrow by container/ordinal -> placeholder/name/href -> fuzzy uniqu
 idempotent toggle skip; quarantine plan after refuted; `skip`/quarantined test flag; plan trusted only
 after 2 identical verified recordings (maybe); miss reasons in report; Playwright planner spec shape.
 
+## Progress log
+- 22:18 committed: self-healing replay, check runner in package (AgentJevUltraFast/checks.py), Markdown
+  specs (spec.py, `## Before each`), `jev test` / `jev init`, isolation context|storage, cost reporting,
+  stop_on_expect (positive checks only), replay auto-wait, commit replay on local hosts.
+  StudyCanvas examples/studycanvas/core.md: 5/5 fresh $0.0085 (61 calls) -> rerun $0.00028 (3 calls).
+- NEXT: MCP browser_test tool (async, beat 120 s cap); second project (Nebius Decision Lab ?mock=1,
+  run web on another port); anchors cascade; product docs + landing page; REPORT.md.
+
 ## Done so far
 - chrome.py dedicated Chrome + tests; expect auto-wait (JEV_EXPECT_WAIT_S=3), text_contains_all,
   no_page_errors (page error recorder installed per document).

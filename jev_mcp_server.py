@@ -327,6 +327,44 @@ TOOLS.extend([
             "required": ["task_id", "checkpoint"],
         },
     },
+    {
+        "name": "browser_test",
+        "description": (
+            "Run a test suite against a web app (usually on localhost) and return a run_id at "
+            "once; poll browser_test_status for the verdict. The suite is a Markdown spec: "
+            "'## Test name' headings, 'path: /route', numbered steps that are plain-English goals, "
+            "and check bullets under each step ('- see: X', '- not see: X', '- url contains: X', "
+            "'- see any: A | B', '- no page errors'). '## Before each' steps (e.g. sign in) run "
+            "first in every test. Checks read off the real page are the verdict. Verified flows are "
+            "recorded and replayed with no model calls on later runs, so re-running is ~free. "
+            "Pass spec_path (a .md/.json file in the project; plans persist next to it in .jev/) "
+            "or spec_markdown (inline text, plus base_url if the text has none)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "spec_path": {"type": "string", "description": "Absolute path to a .md or .json suite."},
+                "spec_markdown": {"type": "string", "description": "Inline Markdown suite."},
+                "base_url": {"type": "string", "description": "Overrides the suite's base_url."},
+                "workers": {"type": "integer", "default": 4, "minimum": 1, "maximum": 10},
+                "fresh": {"type": "boolean", "default": False,
+                          "description": "Forget recorded plans and decide every step again."},
+            },
+        },
+    },
+    {
+        "name": "browser_test_status",
+        "description": (
+            "The state of a browser_test run: running (with how many tests have finished), or the "
+            "final report - passed/total, cost, and per test the verdict, failed step, failing "
+            "checks and an excerpt of what the page showed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"run_id": {"type": "string"}},
+            "required": ["run_id"],
+        },
+    },
 ])
 
 # These are hints for MCP hosts, not an authorization mechanism. Even a state
@@ -738,7 +776,90 @@ def tool_browser_task_cancel(args):
     return result
 
 
+_TEST_RUNS = {}
+TEST_RUNS_DIR = Path.home() / ".jev-ultrafast" / "mcp-tests"
+
+
+def tool_browser_test(args):
+    """Start a suite as a detached child process; never holds the MCP call open."""
+    import subprocess
+    import uuid
+
+    run_id = uuid.uuid4().hex[:12]
+    run_dir = TEST_RUNS_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if args.get("spec_path"):
+        spec = Path(args["spec_path"]).expanduser().resolve()
+        if not spec.exists():
+            return {"error": f"no such spec: {spec}"}
+    elif args.get("spec_markdown"):
+        spec = run_dir / "suite.md"
+        text = args["spec_markdown"]
+        if args.get("base_url") and "base_url:" not in text:
+            text = f"base_url: {args['base_url']}\n\n" + text
+        spec.write_text(text, encoding="utf-8")
+    else:
+        return {"error": "pass spec_path or spec_markdown"}
+    try:
+        from AgentJevUltraFast.checks import load_suite
+
+        suite = load_suite(spec)
+    except SystemExit as error:          # a malformed spec is the caller's to fix, before any browser
+        return {"error": str(error)}
+    except Exception as error:
+        return {"error": f"{type(error).__name__}: {error}"}
+    if args.get("base_url") and spec.suffix.lower() == ".json":
+        suite["base_url"] = args["base_url"]
+        spec = run_dir / "suite.json"
+        spec.write_text(json.dumps(suite), encoding="utf-8")
+    report = spec.parent / ".jev" / "reports" / f"{spec.stem}.json"
+    report.unlink(missing_ok=True)
+    command = [sys.executable, "-m", "AgentJevUltraFast.cli", "test", str(spec),
+               "--workers", str(min(int(args.get("workers", 4)), 10))]
+    if args.get("fresh"):
+        command.append("--fresh")
+    log = open(run_dir / "run.log", "w", encoding="utf-8")
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+    proc = subprocess.Popen(command, cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT,
+                            stdin=subprocess.DEVNULL, **flags)
+    _TEST_RUNS[run_id] = {"proc": proc, "report": report, "log": run_dir / "run.log",
+                          "started": time.monotonic(), "tests": len(suite.get("checks") or []),
+                          "parts": report.parent / f"{spec.stem}_parts"}
+    return {"run_id": run_id, "tests": len(suite.get("checks") or []), "status": "running",
+            "hint": "poll browser_test_status every 15-30 s"}
+
+
+def tool_browser_test_status(args):
+    run = _TEST_RUNS.get(args.get("run_id"))
+    if run is None:
+        return {"error": "unknown run_id (runs live as long as this MCP server process)"}
+    code = run["proc"].poll()
+    elapsed = round(time.monotonic() - run["started"], 1)
+    if code is None:
+        finished = len(list(run["parts"].glob("*.json"))) if run["parts"].exists() else 0
+        return {"status": "running", "elapsed_s": elapsed, "finished": finished, "tests": run["tests"]}
+    if not run["report"].exists():
+        tail = run["log"].read_text(encoding="utf-8", errors="replace")[-1200:] if run["log"].exists() else ""
+        return {"status": "error", "exit_code": code, "detail": tail}
+    report = json.loads(run["report"].read_text(encoding="utf-8"))
+    return {
+        "status": "finished", "elapsed_s": elapsed, "passed": report.get("passed"),
+        "total": report.get("total"), "usd_estimate": report.get("usd_estimate"),
+        "model_calls": report.get("model_calls"), "steps_replayed": report.get("steps_replayed"),
+        "report_path": str(run["report"]),
+        "results": [
+            {"name": r.get("name"), "verified": r.get("verified"), "status": r.get("status"),
+             "failed_step": r.get("failed_step"),
+             "failing_checks": [c for c in (r.get("checks") or []) if not c.get("pass")],
+             "page_excerpt": (r.get("page_excerpt") or "")[:400] if not r.get("verified") else None,
+             "error": r.get("error"), "usd": (r.get("cost") or {}).get("usd_estimate")}
+            for r in report.get("results", [])
+        ],
+    }
+
+
 HANDLERS = {"browser_do": tool_browser_do, "browser_assert": tool_browser_assert,
+            "browser_test": tool_browser_test, "browser_test_status": tool_browser_test_status,
             "browser_checks": tool_browser_checks, "browser_state": tool_browser_state,
             "browser_act": tool_browser_act, "browser_task": tool_browser_task,
             "browser_task_resume": tool_browser_task_resume,
