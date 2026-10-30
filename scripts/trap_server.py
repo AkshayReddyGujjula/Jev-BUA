@@ -215,6 +215,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
   document.getElementById('note').textContent='Item deleted';
 }}">Delete Quarterly report</button><p id="note"></p></body></html>""")
             return
+        if parsed.path == "/keys":
+            # Shortcuts with no visible control and no aria-keyshortcuts: only a key the goal
+            # names can reach them ("?" opens the sheet, Ctrl+K the command bar).
+            self._send(f"""<!doctype html><html><head><title>Notes</title></head>
+<body style="{STYLE}"><h1>Notes</h1><p>Press a key to get around.</p><div id="out"></div>
+<script>addEventListener('keydown', e => {{
+  const out = document.getElementById('out');
+  if (e.key === '?' || (e.key === '/' && e.shiftKey)) out.innerHTML = '<h2>Keyboard shortcuts</h2><p>Anywhere</p>';
+  if (e.ctrlKey && e.key.toLowerCase() === 'k') {{ e.preventDefault(); out.innerHTML = '<h2>Command bar</h2>'; }}
+}});</script></body></html>""")
+            return
         if parsed.path == "/favicon.ico":
             self._send("", status=204)
             return

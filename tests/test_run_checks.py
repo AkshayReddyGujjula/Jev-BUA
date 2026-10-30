@@ -177,6 +177,7 @@ def _fake_suite(tmp_path, monkeypatch, setup_ok):
 
     monkeypatch.setattr(run_checks, "run_job", fake_run_job)
     monkeypatch.setenv("JEV_CHROME", "user")
+    monkeypatch.setenv("JEV_LOCK_DIR", str(tmp_path / "locks"))
     out = tmp_path / "report.json"
     args = run_checks.argparse.Namespace(checks=str(spec_file), workers=4, out=str(out), replay=None,
                                          no_evidence=True, state_dir=str(tmp_path))
@@ -253,3 +254,16 @@ def test_an_unchecked_last_step_that_stalls_fails_the_test(monkeypatch, tmp_path
     run_checks.run_worker(job, out)
     result = json.loads(out.read_text(encoding="utf-8"))
     assert result["verified"] is False and result["failed_step"] == 2
+
+
+def test_concurrent_runs_get_different_daemon_names(tmp_path):
+    first, first_lock = run_checks.claim_slot(tmp_path)
+    second, second_lock = run_checks.claim_slot(tmp_path)
+    assert first == "jev-check" and second == "jev-check-s1"
+    first_lock.unlink()
+    assert run_checks.claim_slot(tmp_path)[0] == "jev-check"       # a released slot is reused
+
+
+def test_a_slot_left_by_a_dead_run_is_reclaimed(tmp_path):
+    (tmp_path / "checks-0.lock").write_text("999999999", encoding="utf-8")
+    assert run_checks.claim_slot(tmp_path)[0] == "jev-check"

@@ -20,6 +20,7 @@ from .browser import SCAN_MAX_S, Browser, CoveredTarget, StalePage, target_visib
 from .evidence import Evidence
 from .gates import IRREVERSIBLE_NOUL, committal
 from .gates import check as gate_check
+from .keys import goal_keys
 from .model import (
     DECIDE_TIMEOUT,
     TEXT_TIMEOUT,
@@ -321,6 +322,8 @@ class Agent:
         prewarm()
         self.browser = browser or Browser(url)
         self._owns_browser = browser is None
+        # A shared browser (multi-step tests, the MCP warm tab) gets each run's own keys.
+        self.browser.goal_keys = goal_keys(task)
         # A supplied value that appears verbatim in the goal is not private: the goal already
         # carries it to every model in plain text, and masking it on the page only hid the
         # evidence of success (a "Results for laptops" page read "Results for [private]", so

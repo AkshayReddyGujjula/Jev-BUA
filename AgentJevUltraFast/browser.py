@@ -13,6 +13,7 @@ from browser_harness.helpers import _send, activate_tab, cdp
 
 from . import chrome
 from .assertions import ERROR_RECORDER, dialog_script
+from .keys import with_goal_keys
 
 # Atomically read visible content and controls, preserving actual DOM node identity.
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text(encoding="utf-8")
@@ -614,7 +615,8 @@ class Browser:
                      "private_values": getattr(self, "private_values", [])}
                 )
                 self.last_url = page.get("url", getattr(self, "last_url", ""))
-                return page
+                # Keys the run's goal names ("press ?") join the page's own key actions.
+                return with_goal_keys(page, getattr(self, "goal_keys", None))
             except StalePage:
                 if time.monotonic() > give_up or (
                     deadline is not None and attempt >= 2 and time.monotonic() > deadline

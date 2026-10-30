@@ -119,6 +119,63 @@ VISIBLE_TEXT = "document.body ? document.body.innerText : ''"
 TRIVIAL_LINE = re.compile(r"^[\d\s:.,/%+-]*$")      # counters, clocks, dates: not a check
 
 
+RUN_SLOTS = 6
+
+
+def pid_alive(pid):
+    """Whether a process exists. Never os.kill(pid, 0) on Windows: that terminates the process."""
+    if os.name == "nt":
+        import ctypes
+
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x1000, False, int(pid))      # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel.CloseHandle(handle)
+        return bool(ok) and code.value == 259                       # STILL_ACTIVE
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def claim_slot(lock_dir=None):
+    """(daemon-name prefix, lock path) that no other live check run on this machine holds.
+
+    Worker daemons are named per index, so two runs at once (two coding agents testing in
+    parallel) would otherwise share `jev-check-00`'s daemon and tab: silently wrong pages. Each
+    run takes a slot; slot 0 keeps the historical names, so warm daemons are reused.
+    """
+    lock_dir = Path(lock_dir or os.environ.get("JEV_LOCK_DIR") or Path.home() / ".jev-ultrafast" / "locks")
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    for slot in range(RUN_SLOTS):
+        path = lock_dir / f"checks-{slot}.lock"
+        for _ in range(2):
+            try:
+                handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    holder = int(path.read_text(encoding="utf-8").strip() or 0)
+                except (OSError, ValueError):
+                    holder = 0
+                if holder and pid_alive(holder):
+                    break                                     # taken: try the next slot
+                try:
+                    path.unlink()                             # left by a run that died
+                except OSError:
+                    break
+                continue
+            os.write(handle, str(os.getpid()).encode())
+            os.close(handle)
+            return ("jev-check" if slot == 0 else f"jev-check-s{slot}"), path
+    raise SystemExit(f"! {RUN_SLOTS} check runs are already active on this machine; wait for one to finish")
+
+
 def isolation(value):
     """A job's `isolate` as None, "storage" or "context". Specs write it many ways (true, none, off)."""
     if value is None or value is False or str(value).strip().lower() in {"", "none", "off", "no", "0", "false"}:
@@ -357,6 +414,17 @@ def run_job(job, part, bu_name):
 
 
 def run_parent(args):
+    prefix, lock = claim_slot()
+    try:
+        return _run_parent(args, prefix)
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+
+
+def _run_parent(args, prefix="jev-check"):
     spec = load_suite(args.checks)
     base = (os.environ.get("JEV_TRAP_BASE") or spec.get("base_url", "")).rstrip("/")
     defaults = spec.get("defaults", {})
@@ -449,7 +517,7 @@ def run_parent(args):
         part = outdir / f"{index:02d}-{re.sub(r'[^a-z0-9]+', '-', job['name'].lower())[:40]}.json"
         part.unlink(missing_ok=True)      # a stale part from an earlier run is not a result
         started = time.perf_counter()
-        proc = run_job(job, part, f"jev-check-{index:02d}")
+        proc = run_job(job, part, f"{prefix}-{index:02d}")
         return index, job, part, proc, round(time.perf_counter() - started, 2)
 
     setup_result = None
