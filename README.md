@@ -18,6 +18,70 @@ Give it one goal. [TypeSafe's Jev](https://docs.typesafe.ai/introduction) picks 
 
 [Architecture and current limits](docs/architecture.md) · [Delegation demo](docs/delegation-demo.md)
 
+## Test your web app in plain English
+
+Write tests the way you would brief a tester. Jev does each step on the real page; the checks under
+it, read off the page, are the only verdict. A verified run is recorded, and every later run replays
+it with **no model calls**, handing a step back to Jev only when the app changed under it.
+
+```markdown
+# Shop smoke
+base_url: http://localhost:3000
+isolate: storage
+
+## Before each
+path: /login
+values:
+  - Email: ada@example.com
+  - Password: correct-horse
+1. Sign in.
+   - see: Dashboard
+
+## Search finds a product
+path: /
+1. Search for laptops.
+   - see: Results for "laptops"
+   - not see: No results
+   - no page errors
+```
+
+```bash
+jev init --url http://localhost:3000     # writes jev-tests/smoke.md
+jev test jev-tests/smoke.md              # runs it; plans land in jev-tests/.jev/replay
+```
+
+Measured on a real app ([StudyCanvas](examples/studycanvas/core.md), Vite + React on localhost; every
+test first passes an access gate and a five-question onboarding):
+
+| Run | Verified | Model calls | Model cost | Steps replayed |
+|---|---|---|---|---|
+| first (nothing recorded) | 5/5 | 61 | $0.0085 | 32 |
+| third (replay) | 5/5 | 3 | $0.00028 | 52 |
+
+A second, unrelated app ([Decision Lab](examples/decision-lab/smoke.md)) passes 3/3 with the same runner.
+Full results in [REPORT.md](REPORT.md).
+
+- **Checks:** `see:`, `see any: A | B`, `not see:`, `url contains:`, `url matches:`, `title contains:`,
+  `count: SELECTOR >= N`, `value: SELECTOR contains X`, `no page errors` (uncaught exceptions,
+  unhandled rejections and `console.error`). They re-read the page for up to 3 s, like
+  auto-waiting test assertions. A step with a positive check ends the moment it holds.
+- **Replay:** steps are recorded by meaning (kind, accessible name, role, plus test id, name,
+  placeholder, link path and enclosing dialog/section) and must match exactly one element. A step that
+  no longer matches is decided by Jev (a heal), replay resumes on the next matching step, and the healed
+  plan is re-recorded. Supplied values are stored by reference, never by value. Commit-like clicks
+  (Save, Delete, Submit) replay only on local dev hosts; elsewhere they get a fresh gated decision.
+  Commit `.jev/replay/` and CI reruns cost nothing.
+- **Unattended by default:** `jev test` uses its own automation Chrome (`JEV_CHROME=dedicated`, a
+  separate profile on port 9333), so there is never an "Allow remote debugging?" prompt and your own
+  tabs are never touched. `JEV_CHROME_HEADLESS=1` for CI. `isolate: context` gives each test a fresh
+  browser context (parallel); `isolate: storage` wipes the app origin's storage instead and keeps the
+  HTTP cache warm (sequential; much faster on dev servers).
+- **Bounded:** each test has `max_seconds`, each step at most 25 actions (`max_steps`), and a step with
+  only `not see:` checks gets a warning, because absence cannot tell a run it has arrived.
+- **From a coding agent:** the MCP tool `browser_test` takes a spec path or inline Markdown and returns
+  a run id at once; `browser_test_status` returns pass/fail, cost, the failing checks and an excerpt
+  of what the page showed.
+
 ## The action space
 
 Every observation produces a new element table:

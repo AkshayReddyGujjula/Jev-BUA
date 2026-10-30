@@ -3,7 +3,7 @@
   "url": "http://localhost:5173/workspace?storage=idb",
   "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish.",
   "goal_hash": "675fe0116d05c00ae3533951ab7ff61344d6d07b7824d37580924ddd37a5c572",
-  "recorded_at": 1793399423.2327018,
+  "recorded_at": 1793399600.0405962,
   "verified": true,
   "steps": [
     {
@@ -43,7 +43,7 @@
       "text": null,
       "outcome": "page changed",
       "confidence": 1.0,
-      "irreversible": 0.4,
+      "irreversible": 0.41,
       "anchor": {
         "container": "What level are you studying at, Ada?"
       }
@@ -54,9 +54,9 @@
       "role": "button",
       "operation": "CLICK",
       "text": null,
-      "outcome": "page changed",
-      "confidence": 0.98,
-      "irreversible": 0.4,
+      "outcome": "page content changed",
+      "confidence": 0.96,
+      "irreversible": 0.37,
       "anchor": {
         "container": "What do you study?"
       }
@@ -68,10 +68,23 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.99,
-      "irreversible": 0.33,
+      "confidence": 0.97,
+      "irreversible": 0.43,
       "anchor": {
         "container": "What would make this term a win?"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Balanced",
+      "role": "radio",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.81,
+      "irreversible": 0.43,
+      "anchor": {
+        "container": "How long should answers be?"
       }
     },
     {
@@ -81,8 +94,8 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.97,
-      "irreversible": 0.38,
+      "confidence": 0.86,
+      "irreversible": 0.43,
       "anchor": {
         "container": "How long should answers be?"
       }
