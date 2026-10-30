@@ -40,7 +40,12 @@ Rules that make tests cheap and trustworthy:
   Use local test credentials only; values are never written to replay plans.
 - Settings (suite or test level): `base_url`, `path`, `isolate: storage|context`, `max_seconds`,
   `max_steps` (actions per step, default 25), `commit_floor` (owner trust for Save/Delete-style
-  clicks on a disposable local app, 0.5-0.9).
+  clicks on a disposable local app, 0.5-0.9), `check_wait` (seconds the checks keep re-reading,
+  default 3; raise it for steps that start slow work such as a model call).
+- `## Before all` instead of `## Before each` signs in once per run and the tests start from its
+  state: use it when sign-in is slow or rate-limited (tests then run one at a time).
+- A step without checks reports suggested `see:` lines from what it changed on screen; adopt the
+  right ones (never the ones that were true before the step).
 
 ## 2. Run it
 

@@ -10,7 +10,8 @@ built on the existing Jev loop (one cheap decision per step, no screenshots).
 
 | Piece | What it does | Where |
 |---|---|---|
-| Markdown specs | `## Test`, `path:`, numbered steps (goals), check bullets (`see:`, `not see:`, `see any:`, `url contains:`, `count:`, `value:`, `no page errors`), `## Before each`, `- open: /path`, `values:` | `AgentJevUltraFast/spec.py` |
+| Markdown specs | `## Test`, `path:`, numbered steps (goals), check bullets (`see:`, `not see:`, `see any:`, `url contains:`, `count:`, `value:`, `no page errors`), `## Before each`, `## Before all` (once per run, like Playwright's global setup), `- open: /path`, `values:`, `check_wait:` (how long checks keep re-reading, for slow async work) | `AgentJevUltraFast/spec.py` |
+| Check suggestions | a step written without checks reports `see:` / `not see:` candidates from what it changed on screen (no model call) | `checks.py` |
 | `jev test` | runs a spec or JSON check file; dedicated Chrome, replay on, cost per test; `--repeat N` for flake rate; `--fresh` to re-record | `AgentJevUltraFast/cli.py`, `checks.py` |
 | `jev init` / `jev draft` | starter spec; or one page read + one ~$0.0003 DeepSeek call → a draft suite with weak/predicted checks marked | `cli.py`, `draft.py` |
 | Zero-model replay | verified runs recorded by meaning (kind, label, role + test id, name, placeholder, href, container); unique-match cascade; 2 s auto-wait; one-step heals with resync; healed plans re-recorded; supplied values by reference only | `replay.py`, `agent.py` |
@@ -63,6 +64,25 @@ RESULTS_PLACEHOLDER
   differences are the 3 s auto-waiting readback and the content wait after navigation.
 - StudyCanvas was only read and run, never edited. It runs in IndexedDB mode via its own
   `?storage=idb` dev switch, because the folder picker is a native dialog.
+- **StudyCanvas rate-limits access-code redeems (10 a minute, 50 an hour).** A suite that signed
+  in before every test exhausted it and every later run failed at the gate ("Could not reach
+  StudyCanvas"). That is why `## Before all` exists. I restarted the uvicorn on :8000 that I had
+  started myself, to clear its in-memory limiter; nothing else in StudyCanvas was touched.
+- **Each StudyCanvas suite run makes one Gemini call on the app's own key**: onboarding's last
+  button now starts a tutorial that writes a lecture (~9 s). That is why the setup has
+  `check_wait: 30`.
+- **Another session was editing StudyCanvas tonight.** Its saves caused hot-reload storms that
+  hung my Vite on :5173, so I ran Vite with a config of my own outside the repo (HMR and file
+  watching off: `scratchpad\vite.frozen.config.ts`). Runs between 23:00 and 23:30 that failed for
+  that reason or for the rate limit are not in the results below.
+- **Two bugs found by the runs themselves, fixed:** a cached "abstain" decision was replayed from
+  the decision cache and failed a test with zero model calls (refusals are no longer cached); and
+  `jev test` workers inherited the dedicated Chrome endpoint without its own daemon name, so one
+  could have reused a same-named daemon attached to your normal Chrome.
+- **Ownership before selling:** this checkout's `origin` is `github.com/browser-use/jev-ultrafast`,
+  and the LICENSE says "Copyright (c) 2026 Browser Use", MIT. MIT lets you sell a product built on
+  it, but check with Browser Use who owns the product and name before launching under your own
+  brand.
 - Costs tonight: well under $1 of Jev + DeepSeek in total (per-run figures above).
 
 ## How to try it (5 minutes)

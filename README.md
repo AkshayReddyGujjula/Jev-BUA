@@ -53,7 +53,15 @@ jev test jev-tests/smoke.md --repeat 3   # pass rate per test (flaky / always fa
 ```
 
 `jev draft` marks every check it could not see on the start page as *predicted* and every check that
-was already true before its step as *weak*; review those before trusting a pass. A JSON test checklist
+was already true before its step as *weak*; review those before trusting a pass. A step written
+without checks still runs, reports `unknown` (never a pass), and prints suggested `see:` / `not see:`
+lines taken from what it changed on screen.
+
+`## Before each` runs at the start of every test. `## Before all` runs once per `jev test`, alone,
+and the tests start from the state it left (signed in, onboarded): use it when signing in is slow or
+rate-limited, and note that its tests then run one at a time. `check_wait: 20` (suite or test) lets
+the checks keep re-reading for up to 20 s, for steps that start slow work such as a model call or
+an upload (default 3 s). A JSON test checklist
 can be drafted the same way with `scripts/import_checklist.py`.
 
 Measured on a real app ([StudyCanvas](examples/studycanvas/core.md), Vite + React on localhost; every
