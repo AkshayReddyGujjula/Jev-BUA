@@ -62,6 +62,12 @@ after 2 identical verified recordings (maybe); miss reasons in report; Playwrigh
 - 23:15 runtime TypeError from the usage fix (review evidence) found by the night runs, fixed + test.
   FINAL ROUND running: scratchpad\final-runs.ps1 (pid 57028) -> scratchpad\final-runs.log. When DONE,
   fill REPORT.md RESULTS (core fresh/repeat, 5 checklist sections, decision-lab fresh/replay).
+- 23:25 StudyCanvas rate-limits /api/auth/redeem (10/min, 50/h): added `## Before all` (da60205), restarted
+  my uvicorn :8000 to reset the limiter. Onboarding now ends in a ~9 s Gemini tutorial lecture: added
+  `check_wait` (601798e). A cached ABSTAIN failed a test with 0 calls: refusals never cached (601798e).
+  Worker daemons lost the -chrome9333 suffix (inherited BU_CDP_URL) -> fixed (25a4ade).
+  23:32 FINAL ROUND re-running (pid 57820, scratchpad\final-runs.log); core fresh 5/5.
+  After it: stop orphan non-suffixed jev-check-NN daemons (all started tonight; ~1.4 GB), fill REPORT.md.
 - Remaining ideas (older): REPORT.md (morning summary), `jev test --repeat N` flake rate, landing page draft,
   maybe Linux CI action.yml.
 - OLD NEXT: MCP browser_test tool (async, beat 120 s cap); second project (Nebius Decision Lab ?mock=1,

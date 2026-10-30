@@ -195,3 +195,12 @@ def test_a_failed_before_all_blocks_every_test(tmp_path, monkeypatch):
     assert ran == [("Before all", "storage")]
     assert code == 1 and report["passed"] == 0
     assert all("Before all did not verify" in r["error"] for r in report["results"])
+
+
+def test_a_step_without_checks_gets_suggestions_from_what_it_changed():
+    from AgentJevUltraFast.checks import suggest_checks
+    before = "Home\nNew canvas\n12:04\nNo canvases yet\nSearch"
+    after = "Home\nNew canvas\n12:05\nBiology Chapter 3\nSaved for ada@example.com\nSearch"
+    suggested = suggest_checks(before, after, private=("ada@example.com",))
+    # The clock is not a check, and a line holding a private value is dropped, not redacted.
+    assert suggested == ["see: Biology Chapter 3", "not see: No canvases yet"]

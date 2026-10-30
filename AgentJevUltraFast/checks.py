@@ -115,6 +115,33 @@ def add_cost(total, part):
     return out
 
 
+VISIBLE_TEXT = "document.body ? document.body.innerText : ''"
+TRIVIAL_LINE = re.compile(r"^[\d\s:.,/%+-]*$")      # counters, clocks, dates: not a check
+
+
+def suggest_checks(before, after, private=(), limit=5):
+    """Checks a human can adopt for a step that had none, from what the step changed on screen.
+
+    Zero model calls: the lines that appeared become `see:` candidates and the lines that went
+    away `not see:` candidates, in page order. Field values never reach innerText, and any line
+    holding a private value is dropped rather than redacted. They are suggestions only; a
+    run without checks still reports `unknown`, never a pass.
+    """
+    def lines(text):
+        seen = []
+        for line in (text or "").splitlines():
+            line = " ".join(line.split())
+            if 3 <= len(line) <= 60 and not TRIVIAL_LINE.match(line) and line not in seen \
+                    and not any(value and value in line for value in private):
+                seen.append(line)
+        return seen
+
+    old, new = lines(before), lines(after)
+    appeared = [line for line in new if line not in old][:limit]
+    gone = [line for line in old if line not in new][:max(1, limit // 2)]
+    return [f"see: {line}" for line in appeared] + [f"not see: {line}" for line in gone]
+
+
 def run_worker(job, out_path):
     """One check, in this process. Its BU_NAME was set by the parent before launch.
 
@@ -169,6 +196,12 @@ def run_worker(job, out_path):
             url = job["url"] if index == 0 and not step.get("path") else browser.evaluate("location.href")
             values = {**(job.get("values") or {}), **(step.get("values") or {})} or None
             expect = step.get("expect")
+            before_text = None
+            if not expect:
+                try:
+                    before_text = browser.evaluate(VISIBLE_TEXT)
+                except Exception:
+                    before_text = None
             with Agent(url, step["goal"], values=values, expect=expect, browser=browser,
                        mode=job.get("mode"), collect_steps=job.get("collect_steps"),
                        replay_dir=job.get("replay_dir"),
@@ -202,6 +235,14 @@ def run_worker(job, out_path):
                            ("available", "used", "completed", "stopped", "heals",
                             "finished_by_readback", "recorded")},
             })
+            if before_text is not None and state["status"] == "done":
+                try:
+                    suggested = suggest_checks(before_text, browser.evaluate(VISIBLE_TEXT),
+                                               private=agent.private_values)
+                except Exception:
+                    suggested = []
+                if suggested:
+                    result["steps"][-1]["suggested_checks"] = suggested
             result["cost"] = add_cost(result["cost"], cost)
             result["outcome"] = outcome
             result["checks"] = state.get("checks") or []
@@ -451,7 +492,13 @@ def run_parent(args):
     for r in failed:
         step = f" (step {r['failed_step']})" if r.get("failed_step") else ""
         print(f"  FAILED {r.get('name')}{step}: {r.get('error') or 'assertions not satisfied'}")
-    usd = round(sum((r.get("cost") or {}).get("usd_estimate") or 0 for r in results), 6)
+    for r in results:
+        for number, step in enumerate(r.get("steps") or [], 1):
+            if step.get("suggested_checks"):
+                # A step without checks proves nothing; these came from what it changed on screen.
+                print(f"  no checks: {r.get('name')} step {number} - suggested (review first): "
+                      + " | ".join(step["suggested_checks"]))
+    usd =round(sum((r.get("cost") or {}).get("usd_estimate") or 0 for r in results), 6)
     model_calls = sum(sum(((r.get("cost") or {}).get("calls") or {}).get(k, 0)
                           for k in ("jev", "text", "review", "supervisor")) for r in results)
     replayed = sum((r.get("replay") or {}).get("steps_replayed", 0) for r in results)
