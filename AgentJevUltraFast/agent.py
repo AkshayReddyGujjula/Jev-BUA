@@ -18,7 +18,7 @@ from .assertions import (
 )
 from .browser import SCAN_MAX_S, Browser, CoveredTarget, StalePage, target_visible
 from .evidence import Evidence
-from .gates import IRREVERSIBLE_NOUL
+from .gates import IRREVERSIBLE_NOUL, committal
 from .gates import check as gate_check
 from .model import (
     DECIDE_TIMEOUT,
@@ -83,6 +83,9 @@ MIN_DECIDE_S = float(os.environ.get("JEV_MIN_DECIDE_SECONDS", "0.6"))
 # How long the final readback keeps re-reading the page for the caller's expectation to hold.
 # Readbacks are plain page reads, never model calls; 0 reads exactly once.
 EXPECT_WAIT_S = max(0.0, float(os.environ.get("JEV_EXPECT_WAIT_S", "3")))
+# Replay commit-like clicks (Delete, Submit, Save changes) from a recorded plan instead of
+# asking Jev again. Off by default; for a disposable test environment whose owner trusts it.
+REPLAY_COMMITS = os.environ.get("JEV_REPLAY_COMMITS", "0").strip().lower() in {"1", "true", "yes", "on"}
 # Backstop for the deadline: consecutive decisions with no progress at all. The clock can
 # be held open by a page that keeps changing; a decision count cannot.
 STALL_MAX_ROUNDS = int(os.environ.get("JEV_STALL_MAX_ROUNDS", "8"))
@@ -383,6 +386,12 @@ class Agent:
                 "completed": False,
                 "stopped": None,
                 "recorded": None,
+                # Steps Jev re-decided while the plan waited to resync, and the pending one.
+                "heals": [],
+                "healing": None,
+                # True when a completed plan plus a passing readback ended the run with no
+                # model call at all.
+                "finished_by_readback": False,
             },
             # Task-class mode: name/strategy for callers, and this run's collector state.
             mode=self.mode.summary() if self.mode else None,
@@ -891,18 +900,24 @@ class Agent:
             )
 
     def _record_replay(self):
-        """Record the executed steps of a completed run, unless this run was itself a replay.
+        """Record the executed steps of a verified run.
 
-        Only `done` runs record: a blocked or stalled run has no successful flow to repeat.
-        A replay run never re-records, so the plan keeps the confidences and irreversibility
-        readings of the real run that produced it.
+        Only verified runs record: a blocked, stalled or unverified run has no flow proven to
+        work. A clean replay (every recorded step matched, no heal) does not re-record, so the
+        plan keeps the confidences of the real run that produced it. A healed replay does: its
+        descriptors are the recorded steps that still matched plus the steps Jev re-decided, in
+        execution order, and the next run replays the healed flow with no model call.
         """
         state = self.state
         replay_dir = getattr(self, "replay_dir", None)
         replay_state = state.get("replay")
         if not replay_dir or replay_state is None:
             return
-        if state.get("status") != "done" or state.get("outcome") != "verified" or replay_state.get("used"):
+        if state.get("status") != "done" or state.get("outcome") != "verified":
+            return
+        healed = bool(replay_state.get("heals") or replay_state.get("stopped")
+                      or replay_state.get("healing"))
+        if replay_state.get("used") and not healed:
             return
         if replay_state.get("recorded") or not state.get("descriptors"):
             return
@@ -912,6 +927,7 @@ class Agent:
             state["goal"],
             state["descriptors"],
             verified=state.get("outcome") == "verified",
+            heals=replay_state.get("heals") or None,
         )
         if path:
             replay_state["recorded"] = str(path)
@@ -926,48 +942,66 @@ class Agent:
         """Execute the next recorded step when it is unambiguously safe.
 
         True means a step was attempted (the caller snapshots); False means there is no
-        usable plan or the replay must hand back to the normal Jev loop. Replay never
-        retries: a mismatch or a no-effect step stops it and Jev decides from there.
+        usable plan right now and the normal Jev loop decides this tick. Replay never
+        retries: a step that does not line up is handed to Jev (a heal), and the plan
+        resumes only once Jev has acted and a later recorded step matches the page again.
         """
         plan = getattr(self, "replay_plan", None)
         state = self.state
         replay_state = state.get("replay")
         if not plan or replay_state is None or state["status"] in TERMINAL_STATUS:
             return False
-        index = replay_state["used"]
         steps = plan["steps"]
-        if index >= len(steps):
-            replay_state["completed"] = True
-            self.replay_plan = None
-            return False
-        step = steps[index]
-        if float(step.get("irreversible") or 0.0) >= IRREVERSIBLE_NOUL:
-            # The gate's trust does not survive into replay: commit-like steps get a fresh
-            # gated decision even when the recorded one executed once.
-            self._stop_replay(index, "irreversible step needs a fresh gated decision")
+        healing = replay_state.get("healing")
+        if healing and len(state["history"]) <= healing["history"]:
+            # Jev has not acted on the step that missed yet.
             return False
         if state["started_at"] is None:
             state["started_at"] = time.perf_counter()
             self._mark_progress()
-        try:
-            page = state["page"]
-            if not state["browser"].fresh(page):
-                page = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
-                state["page"] = page
-                self.note_progress(page)
-        except Exception:
-            self._stop_replay(index, "page unreadable before the replayed step")
-            return False
+        if replay_state["used"] < len(steps) or healing:
+            try:
+                page = self._replay_page()
+            except Exception:
+                self._stop_replay(replay_state["used"], "page unreadable before the replayed step")
+                return False
+        if healing:
+            found = replay.resync(steps, healing["from"], page["actions"])
+            if found is None:
+                return False
+            replay_state.setdefault("heals", []).append({
+                "at_step": healing["step"], "resumed_at": found, "reason": healing["reason"],
+                "jev_actions": len(state["history"]) - healing["history"],
+            })
+            replay_state["healing"] = None
+            replay_state["used"] = found
+            evidence = getattr(self, "evidence", None)
+            if evidence is not None:
+                evidence.record("replay_resumed", at_step=healing["from"], resumed_at=found)
+        index = replay_state["used"]
+        if index >= len(steps):
+            replay_state["completed"] = True
+            self.replay_plan = None
+            return self._finish_replay_by_readback()
+        step = steps[index]
         action = replay.match_step(step, page["actions"])
         if action is None:
-            self._stop_replay(index, "recorded step does not match this page")
-            return False
+            return self._heal(index, "recorded step does not match this page")
+        if committal(action) and not REPLAY_COMMITS:
+            # The gate's trust does not survive into replay: a commit-like element gets a
+            # fresh gated decision even when the recorded run clicked it once.
+            return self._heal(index, "commit-like step needs a fresh gated decision",
+                              resume_from=index + 1)
         text = step.get("text")
+        if action["kind"] in {"fill", "seek"} and step.get("value_ref") is not None:
+            # A caller-supplied value is never stored: it is looked up in this run's values.
+            text = self.supplied_text(action)
+            if text is None:
+                return self._heal(index, "no supplied value for this field in this run")
         if action["kind"] in {"fill", "seek"} and (
             not isinstance(text, str) or not text.strip() or len(text) > 2000
         ):
-            self._stop_replay(index, "recorded text is not reusable")
-            return False
+            return self._heal(index, "recorded text is not reusable")
         decision = {
             "choice": action["id"],
             "operation": step.get("operation") or action["kind"].upper(),
@@ -998,11 +1032,78 @@ class Agent:
             return True
         last = state["history"][-1] if state["history"] else {}
         if last.get("outcome") in DEAD_OUTCOMES and step.get("kind") != "scroll":
-            self._stop_replay(index, "replayed step had no visible effect")
+            # Not retried: the step is Jev's from here, decided on the page as it now is.
+            self._heal(index, "replayed step had no visible effect", resume_from=index + 1)
         else:
             # A scroll that changes nothing is not a mismatch: the page may already be
             # where it needs to be, and the next step's match is the real check.
             replay_state["used"] = index + 1
+            if state.get("descriptors") is not None and last.get("outcome") not in DEAD_OUTCOMES:
+                # The recorded step, unchanged, so a healed plan re-recorded from this run
+                # keeps the original reading and never stores a supplied value.
+                state["descriptors"].append(dict(step))
+        return True
+
+    def _replay_page(self):
+        state = self.state
+        page = state["page"]
+        if not state["browser"].fresh(page):
+            page = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
+            state["page"] = page
+            self.note_progress(page)
+        return page
+
+    def _heal(self, index, reason, resume_from=None):
+        """Hand recorded step `index` to Jev; replay resumes when the page lines up again.
+
+        `resume_from` is past `index` when that step must never be replayed again in this
+        run: a step that already executed (no visible effect) or a commit Jev now owns.
+        Resyncing onto it could press the same button twice, which is a retried mutation.
+        """
+        replay_state = self.state["replay"]
+        if len(replay_state.setdefault("heals", [])) >= replay.MAX_HEALS:
+            self._stop_replay(index, f"{reason}; heal limit reached")
+            return False
+        replay_state["healing"] = {"from": index if resume_from is None else resume_from,
+                                   "step": index, "history": len(self.state["history"]),
+                                   "reason": reason}
+        evidence = getattr(self, "evidence", None)
+        if evidence is not None:
+            evidence.record("replay_heal", at_step=index, reason=reason)
+        return False
+
+    def _finish_replay_by_readback(self):
+        """End a fully replayed run without a model call when the caller's checks already hold.
+
+        Only with an expectation: the checks are the definition of done, read off the live
+        page by the same auto-waiting readback that judges every run. Without one, or when
+        the checks do not hold yet, Jev decides what is left as usual.
+        """
+        state = self.state
+        expect = getattr(self, "expect", None)
+        if not expect:
+            return False
+        deadline = time.monotonic() + EXPECT_WAIT_S
+        while True:
+            try:
+                facts = page_facts(state["browser"], selectors_for(expect), value_selectors_for(expect))
+            except Exception:
+                return False
+            facts["harvest"] = {"items": (state.get("harvest") or {}).get("items", 0)}
+            passed, _ = evaluate_expectations(expect, facts)
+            if passed:
+                break
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.25)
+        state["replay"]["finished_by_readback"] = True
+        state["decision"] = None
+        state["status"] = "done"
+        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+        evidence = getattr(self, "evidence", None)
+        if evidence is not None:
+            evidence.record("replay_finished", steps=state["replay"]["used"])
+        self._finalize()
         return True
 
     def _stop_replay(self, index, reason):
@@ -2280,6 +2381,9 @@ class Agent:
                         action, decision, outcome,
                         modes.redact_for_replay(action.get("label"), text)
                         if text_source in {"model", "goal"} else None,
+                        # A supplied literal is recorded by reference and re-read from the
+                        # replaying run's own values, so it is never written to disk.
+                        value_ref=action.get("label") if text_source == "supplied" else None,
                     )
                 )
             if (

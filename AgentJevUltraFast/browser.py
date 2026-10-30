@@ -8,10 +8,10 @@ import time
 from pathlib import Path
 
 from browser_harness.admin import ensure_daemon
+from browser_harness.helpers import activate_tab, cdp
 
 from . import chrome
 from .assertions import ERROR_RECORDER
-from browser_harness.helpers import activate_tab, cdp
 
 # Atomically read visible content and controls, preserving actual DOM node identity.
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text(encoding="utf-8")

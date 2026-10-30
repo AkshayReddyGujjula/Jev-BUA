@@ -10,11 +10,14 @@ What is recorded is a step's *identity*, never a node id: operation kind, role, 
 from the live DOM on every replayed step, so replay cannot click a stale node.
 
 Safety rules:
-- a step recorded as irreversible is never replayed; the plan stops there and Jev decides
-  it with a fresh, gated request
-- a step that no longer matches uniquely on the live page stops the replay
+- a step whose live element is commit-like (gates.committal) is never replayed blind; Jev
+  decides it with a fresh, gated request, and replay resumes after it
+- a step that no longer matches uniquely on the live page hands that step to Jev (a heal);
+  replay resumes once a later recorded step matches again, at most MAX_HEALS times a run
 - a replayed step with no visible effect stops the replay (the page changed)
-- a plan only serves the exact URL and goal it was recorded from (goal hash)
+- a plan only serves the route (path + query, not host or port) and goal it was recorded from
+- a supplied value is recorded by reference (`value_ref`), never by value, and is resolved from
+  the current run's values; without one the step goes back to Jev
 - nothing here retries a mutation
 """
 
@@ -23,12 +26,25 @@ import json
 import os
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
-VERSION = 1
+VERSION = 2
+# Heals one run may make before the plan is dropped for good: a page that needs more is a
+# different flow, and Jev should own it end to end.
+MAX_HEALS = int(os.environ.get("JEV_REPLAY_MAX_HEALS", "3"))
+# How far past the step that missed a resync may land. Skipping recorded steps is how a heal
+# absorbs a step the app no longer needs (a dismissed banner); a long skip is a different flow.
+RESYNC_WINDOW = 3
+
+
+def route(url):
+    """The part of a URL a plan is keyed on: the same app on another port is the same flow."""
+    parts = urlsplit(url or "")
+    return (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
 
 
 def goal_hash(url, goal):
-    payload = json.dumps([url, goal], ensure_ascii=False, sort_keys=True)
+    payload = json.dumps([route(url), goal], ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -54,8 +70,12 @@ def load(directory, url, goal):
     return plan
 
 
-def record(directory, url, goal, steps, verified=False):
-    """Write a plan atomically. Returns its path, or None when it could not be written."""
+def record(directory, url, goal, steps, verified=False, heals=None):
+    """Write a plan atomically. Returns its path, or None when it could not be written.
+
+    `heals` is the log of steps Jev re-decided while replaying an older plan, kept so a
+    reviewer can see what changed in the app, never consulted by replay itself.
+    """
     if not directory or not steps:
         return None
     payload = {
@@ -67,6 +87,8 @@ def record(directory, url, goal, steps, verified=False):
         "verified": bool(verified),
         "steps": steps,
     }
+    if heals:
+        payload["heals"] = heals
     path = plan_path(directory, url, goal)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,15 +126,27 @@ def match_step(step, actions):
     return None
 
 
-def descriptor(action, decision, outcome, text):
+def descriptor(action, decision, outcome, text, value_ref=None):
     """One recorded step from an executed action. Dead outcomes are never recorded."""
-    return {
+    fills = action.get("kind") in {"fill", "seek"}
+    step = {
         "kind": action.get("kind"),
         "label": action.get("label"),
         "role": action.get("role"),
         "operation": decision.get("operation"),
-        "text": text if action.get("kind") in {"fill", "seek"} else None,
+        "text": text if fills and value_ref is None else None,
         "outcome": outcome,
         "confidence": decision.get("confidence"),
         "irreversible": decision.get("irreversible"),
     }
+    if fills and value_ref is not None:
+        step["value_ref"] = value_ref
+    return step
+
+
+def resync(steps, start, actions, limit=RESYNC_WINDOW):
+    """The first recorded step at or after `start` that matches this page uniquely, or None."""
+    for index in range(start, min(len(steps), start + limit)):
+        if match_step(steps[index], actions) is not None:
+            return index
+    return None

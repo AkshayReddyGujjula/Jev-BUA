@@ -1547,7 +1547,9 @@ def test_replay_plan_roundtrip_is_bound_to_url_and_goal(tmp_path):
     assert path.exists()
     assert replay.load(tmp_path, "https://example.test/", "Find a book")["steps"] == steps
     assert replay.load(tmp_path, "https://example.test/", "Find a movie") is None
-    assert replay.load(tmp_path, "https://other.test/", "Find a book") is None
+    assert replay.load(tmp_path, "https://example.test/other", "Find a book") is None
+    # Keyed on the route, not the origin: the same app on another port is the same flow.
+    assert replay.load(tmp_path, "http://localhost:5174/", "Find a book")["steps"] == steps
 
 
 def test_replay_matching_is_unique_or_a_miss():
@@ -1595,37 +1597,141 @@ def test_replay_fill_uses_recorded_literal_without_text_model(runner, monkeypatc
     assert runner.state["text_calls"][-1]["model"] == "replay"
 
 
-def test_replay_never_repeats_an_irreversible_step(runner):
-    runner.replay_plan = {
-        "steps": [{"kind": "click", "label": "Pay", "operation": "CLICK", "irreversible": 0.95}]
-    }
+def _with_action(runner, **action):
+    p = runner.state["page"]
+    p = {**p, "actions": [*p["actions"], action]}
+    runner.state["page"] = p
+    runner.state["browser"].observe.return_value = p
+    return p
+
+
+def test_replay_never_clicks_a_commit_like_element_blind(runner):
+    _with_action(runner, id="pay", kind="click", label="Pay now", role="button")
+    runner.replay_plan = {"steps": [{"kind": "click", "label": "Pay now", "operation": "CLICK"}]}
     runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
     runner.state["decision"] = None
     assert runner._replay_step() is False
-    assert runner.state["replay"]["stopped"].startswith("irreversible")
+    healing = runner.state["replay"]["healing"]
+    assert healing["reason"].startswith("commit-like")
+    # Jev now owns that commit: the plan may only resume after it, never onto it again.
+    assert healing["from"] == 1
     runner.state["browser"].act.assert_not_called()
 
 
-def test_replay_stops_when_a_step_no_longer_matches(runner):
+def test_replay_hands_a_missing_step_to_jev(runner):
     runner.replay_plan = {
         "steps": [{"kind": "click", "label": "Gone", "operation": "CLICK"}]
     }
     runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
     runner.state["decision"] = None
     assert runner._replay_step() is False
-    assert "does not match" in runner.state["replay"]["stopped"]
+    assert "does not match" in runner.state["replay"]["healing"]["reason"]
+    assert runner.state["replay"]["stopped"] is None
     runner.state["browser"].act.assert_not_called()
 
 
-def test_replay_stops_when_a_step_has_no_effect(runner):
+def test_replay_never_repeats_a_step_that_had_no_effect(runner):
     runner.replay_plan = {
         "steps": [{"kind": "click", "label": "Go", "operation": "CLICK"}]
     }
     runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
     runner.state["decision"] = None
     assert runner._replay_step() is True
-    assert "no visible effect" in runner.state["replay"]["stopped"]
+    healing = runner.state["replay"]["healing"]
+    assert "no visible effect" in healing["reason"] and healing["from"] == 1
     assert runner.state["replay"]["used"] == 0
+
+
+def test_replay_waits_for_jev_then_resumes_on_the_next_matching_step(runner):
+    steps = [{"kind": "click", "label": "Gone", "operation": "CLICK"},
+             {"kind": "click", "label": "Go", "role": "button", "operation": "CLICK"}]
+    runner.replay_plan = {"steps": steps}
+    runner.state["replay"] = _replay_state(steps)
+    runner.state["decision"] = None
+    assert runner._replay_step() is False            # step 0 missing: Jev's turn
+    assert runner._replay_step() is False            # Jev has not acted yet: still Jev's turn
+    runner.state["history"].append({"action": "something Jev did", "outcome": "page changed"})
+    runner.state["browser"].observe.return_value = {
+        **runner.state["page"], "url": "https://example.test/results"}
+    assert runner._replay_step() is True             # resynced on step 1 and replayed it
+    replay_state = runner.state["replay"]
+    assert replay_state["used"] == 2 and replay_state["healing"] is None
+    assert replay_state["heals"] == [{"at_step": 0, "resumed_at": 1,
+                                      "reason": "recorded step does not match this page",
+                                      "jev_actions": 1}]
+
+
+def test_replay_stops_after_the_heal_limit(runner, monkeypatch):
+    monkeypatch.setattr(loop.replay, "MAX_HEALS", 1)
+    runner.replay_plan = {"steps": [{"kind": "click", "label": "Gone", "operation": "CLICK"}]}
+    runner.state["replay"] = {**_replay_state(runner.replay_plan["steps"]),
+                              "heals": [{"at_step": 0}]}
+    runner.state["decision"] = None
+    assert runner._replay_step() is False
+    assert "heal limit" in runner.state["replay"]["stopped"]
+    assert runner.replay_plan is None
+
+
+def test_replay_resolves_supplied_values_by_reference(runner, monkeypatch):
+    monkeypatch.setattr(loop, "field_text", Mock(side_effect=AssertionError("text model called")))
+    runner.values = {"Search": "Grace Hopper"}
+    runner.private_values = {"Grace Hopper"}
+    runner.replay_plan = {"steps": [{
+        "kind": "fill", "label": "Search", "role": "textbox",
+        "operation": "TYPE_TEXT", "text": None, "value_ref": "Search",
+    }]}
+    runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
+    runner.state["decision"] = None
+    runner._replay_step()
+    assert runner.state["browser"].act.call_args.kwargs["text"] == "Grace Hopper"
+
+
+def test_replay_without_a_supplied_value_hands_the_field_to_jev(runner):
+    runner.replay_plan = {"steps": [{
+        "kind": "fill", "label": "Search", "operation": "TYPE_TEXT", "value_ref": "Search",
+    }]}
+    runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
+    runner.state["decision"] = None
+    assert runner._replay_step() is False
+    assert "no supplied value" in runner.state["replay"]["healing"]["reason"]
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_supplied_fill_is_recorded_by_reference_never_by_value():
+    from AgentJevUltraFast import replay
+
+    step = replay.descriptor({"kind": "fill", "label": "Password"}, {"operation": "TYPE_TEXT"},
+                             "page changed", "hunter2", value_ref="Password")
+    assert step["text"] is None and step["value_ref"] == "Password"
+
+
+def test_completed_replay_finishes_on_a_passing_readback_without_a_model(runner, monkeypatch):
+    monkeypatch.setattr(loop, "choose", Mock(side_effect=AssertionError("no model call")))
+    monkeypatch.setattr(loop, "page_facts", Mock(return_value={
+        "url": "https://example.test/results", "title": "Results", "text": "3 books found"}))
+    finalized = []
+    monkeypatch.setattr(runner, "_finalize", lambda: finalized.append(True), raising=False)
+    runner.expect = {"text_contains": ["books found"]}
+    runner.replay_plan = {"steps": [{"kind": "click", "label": "Go", "operation": "CLICK"}]}
+    runner.state["replay"] = {**_replay_state(runner.replay_plan["steps"]), "used": 1}
+    runner.state["decision"] = None
+    runner.state["status"] = "ready"
+    assert runner._replay_step() is True
+    assert runner.state["status"] == "done" and finalized == [True]
+    assert runner.state["replay"]["finished_by_readback"] is True
+
+
+def test_completed_replay_leaves_an_unmet_expectation_to_jev(runner, monkeypatch):
+    monkeypatch.setattr(loop, "EXPECT_WAIT_S", 0)
+    monkeypatch.setattr(loop, "page_facts", Mock(return_value={
+        "url": "https://example.test/", "title": "", "text": "nothing yet"}))
+    runner.expect = {"text_contains": ["books found"]}
+    runner.replay_plan = {"steps": [{"kind": "click", "label": "Go", "operation": "CLICK"}]}
+    runner.state["replay"] = {**_replay_state(runner.replay_plan["steps"]), "used": 1}
+    runner.state["decision"] = None
+    runner.state["status"] = "ready"
+    assert runner._replay_step() is False
+    assert runner.state["status"] == "ready"
 
 
 def test_executed_steps_become_descriptors(runner):
