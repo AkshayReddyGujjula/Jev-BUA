@@ -203,7 +203,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(f"""<!doctype html><html><head><title>Items</title></head>
 <body style="{STYLE}"><h1>Your items</h1><ul id="items"><li>Quarterly report</li></ul>
 <button onclick="if (confirm('Delete Quarterly report?')) {{
-  document.getElementById('items').innerHTML=''; this.remove(); document.getElementById('note').textContent='Item deleted';
+  document.getElementById('items').innerHTML=''; this.remove();
+  document.getElementById('note').textContent='Item deleted';
 }}">Delete Quarterly report</button><p id="note"></p></body></html>""")
             return
         if parsed.path == "/favicon.ico":
