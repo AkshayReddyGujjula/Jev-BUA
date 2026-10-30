@@ -129,3 +129,9 @@ def test_before_all_runs_once_and_is_not_a_test():
 def test_check_wait_is_seconds_and_becomes_a_suite_default():
     suite = spec.parse("check_wait: 20s\n\n## Slow page\n1. Go.\n   - see: Ready\n")
     assert suite["defaults"]["check_wait"] == 20.0
+
+
+def test_before_all_without_a_check_is_refused_at_parse_time():
+    import pytest
+    with pytest.raises(spec.SpecError, match="needs a check"):
+        spec.parse("## Before all\n1. Sign in.\n\n## T\n1. Go.\n   - see: X\n")

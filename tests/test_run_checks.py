@@ -204,3 +204,19 @@ def test_a_step_without_checks_gets_suggestions_from_what_it_changed():
     suggested = suggest_checks(before, after, private=("ada@example.com",))
     # The clock is not a check, and a line holding a private value is dropped, not redacted.
     assert suggested == ["see: Biology Chapter 3", "not see: No canvases yet"]
+
+
+def test_isolate_is_normalised_the_same_everywhere():
+    from AgentJevUltraFast.checks import isolation
+    assert [isolation(v) for v in (None, False, "none", "off", "", True, "context", "storage", "Storage")] == \
+        [None, None, None, None, None, "context", "context", "storage", "storage"]
+
+
+def test_suggestions_stay_fast_on_a_huge_page():
+    import time
+
+    from AgentJevUltraFast.checks import suggest_checks
+    before = "\n".join(f"row {i} item" for i in range(40_000))
+    started = time.perf_counter()
+    suggest_checks(before, before + "\nSaved", limit=5)
+    assert time.perf_counter() - started < 1.0

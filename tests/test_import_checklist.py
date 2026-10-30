@@ -42,3 +42,7 @@ def test_a_bad_or_failed_answer_keeps_the_check_on_the_last_step():
     assert importer.align(["A.", "B."], ["X"], call=broken) == {"X": 2}
     assert importer.align(["A.", "B."], ["X"], call=lambda *a, **k: ({"after": {"X": 9}}, {})) == {"X": 2}
     assert importer.align(["A.", "B."], ["X"], call=lambda *a, **k: ({"after": {"X": True}}, {})) == {"X": 2}
+
+
+def test_a_non_dict_answer_keeps_the_check_on_the_last_step():
+    assert importer.align(["A.", "B."], ["X"], call=lambda *a, **k: ({"after": ["X", 1]}, {})) == {"X": 2}

@@ -119,6 +119,16 @@ VISIBLE_TEXT = "document.body ? document.body.innerText : ''"
 TRIVIAL_LINE = re.compile(r"^[\d\s:.,/%+-]*$")      # counters, clocks, dates: not a check
 
 
+def isolation(value):
+    """A job's `isolate` as None, "storage" or "context". Specs write it many ways (true, none, off)."""
+    if value is None or value is False or str(value).strip().lower() in {"", "none", "off", "no", "0", "false"}:
+        return None
+    return "storage" if str(value).strip().lower() == "storage" else "context"
+
+
+SUGGEST_TEXT_CAP = 200_000
+
+
 def suggest_checks(before, after, private=(), limit=5):
     """Checks a human can adopt for a step that had none, from what the step changed on screen.
 
@@ -128,12 +138,13 @@ def suggest_checks(before, after, private=(), limit=5):
     run without checks still reports `unknown`, never a pass.
     """
     def lines(text):
-        seen = []
-        for line in (text or "").splitlines():
+        # Dict keys: page order and constant-time membership (a feed can have 10k+ lines).
+        seen = {}
+        for line in (text or "")[:SUGGEST_TEXT_CAP].splitlines():
             line = " ".join(line.split())
-            if 3 <= len(line) <= 60 and not TRIVIAL_LINE.match(line) and line not in seen \
+            if 3 <= len(line) <= 60 and line not in seen and not TRIVIAL_LINE.match(line) \
                     and not any(value and value in line for value in private):
-                seen.append(line)
+                seen[line] = None
         return seen
 
     old, new = lines(before), lines(after)
@@ -163,8 +174,7 @@ def run_worker(job, out_path):
     os.environ["JEV_FOLLOW_TABS"] = "0"
     # A check run is a measurement: no mode auto-creation unless the check names one.
     os.environ["JEV_MODES"] = "off"
-    isolate = job.get("isolate")
-    os.environ["JEV_ISOLATE"] = ("storage" if isolate == "storage" else "context") if isolate else "0"
+    os.environ["JEV_ISOLATE"] = isolation(job.get("isolate")) or "0"
     # Native dialogs freeze the page; a test answers them (see assertions.dialog_script).
     dialogs = job.get("dialogs")
     if dialogs is False or str(dialogs).lower() in {"off", "no", "none"}:
@@ -326,7 +336,8 @@ def run_job(job, part, bu_name):
     comes back with returncode None and the reason in stderr.
     """
     env = {**os.environ, "BU_NAME": bu_name, "PYTHONIOENCODING": "utf-8"}
-    bound = float(job.get("max_seconds", 60)) + STARTUP_GRACE_S
+    # The final readback may keep re-reading for check_wait after the step budget ends.
+    bound = float(job.get("max_seconds", 60)) + STARTUP_GRACE_S + float(job.get("check_wait") or 0)
     command = [sys.executable, "-m", "AgentJevUltraFast.checks", "--worker", "--job", json.dumps(job),
                "--out", str(part)]
     try:
@@ -396,10 +407,11 @@ def run_parent(args):
         for job in jobs:
             # Tests inherit the state Before all left (signed in, onboarded): wiping the
             # origin again would undo it. Isolation by context cannot share it at all.
-            if job.get("isolate") == "context":
+            mode = isolation(job.get("isolate"))
+            if mode == "context":
                 raise SystemExit(f"{job['name']}: '## Before all' needs isolate: storage or none")
-            if job.get("isolate") == "storage":
-                job["isolate"] = None
+            job["isolate"] = None
+            if mode == "storage":
                 job["sequential"] = True
     from AgentJevUltraFast.agent import POSITIVE_CHECKS
     for job in jobs:

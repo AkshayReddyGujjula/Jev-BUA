@@ -98,6 +98,8 @@ def align(steps, phrases, call=None):
         after = answer.get("after") or {}
     except Exception:
         return placed                         # the draft still stands, just unaligned
+    if not isinstance(after, dict):
+        return placed
     for phrase in phrases:
         value = after.get(phrase)
         if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= last:

@@ -836,7 +836,8 @@ def tool_browser_test_status(args):
     code = run["proc"].poll()
     elapsed = round(time.monotonic() - run["started"], 1)
     if code is None:
-        finished = len(list(run["parts"].glob("*.json"))) if run["parts"].exists() else 0
+        finished = (sum(1 for part in run["parts"].glob("*.json") if not part.name.startswith("99-"))
+                    if run["parts"].exists() else 0)            # 99-* is Before all, not a test
         return {"status": "running", "elapsed_s": elapsed, "finished": finished, "tests": run["tests"]}
     if run.get("log_file") and not run["log_file"].closed:
         run["log_file"].close()
@@ -844,8 +845,15 @@ def tool_browser_test_status(args):
         tail = run["log"].read_text(encoding="utf-8", errors="replace")[-1200:] if run["log"].exists() else ""
         return {"status": "error", "exit_code": code, "detail": tail}
     report = json.loads(run["report"].read_text(encoding="utf-8"))
+    setup = report.get("before_all")
     return {
         "status": "finished", "elapsed_s": elapsed, "passed": report.get("passed"),
+        # When setup fails every test reads "not run": say why, once, with what the page showed.
+        **({"before_all": {"verified": setup.get("verified"), "status": setup.get("status"),
+                           "failed_step": setup.get("failed_step"), "error": setup.get("error"),
+                           "failing_checks": [c for c in (setup.get("checks") or []) if not c.get("pass")],
+                           "page_excerpt": (setup.get("page_excerpt") or "")[:400]
+                           if not setup.get("verified") else None}} if setup else {}),
         "total": report.get("total"), "usd_estimate": report.get("usd_estimate"),
         "model_calls": report.get("model_calls"), "steps_replayed": report.get("steps_replayed"),
         "report_path": str(run["report"]),

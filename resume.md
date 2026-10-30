@@ -68,6 +68,11 @@ after 2 identical verified recordings (maybe); miss reasons in report; Playwrigh
   Worker daemons lost the -chrome9333 suffix (inherited BU_CDP_URL) -> fixed (25a4ade).
   23:32 FINAL ROUND re-running (pid 57820, scratchpad\final-runs.log); core fresh 5/5.
   After it: stop orphan non-suffixed jev-check-NN daemons (all started tonight; ~1.4 GB), fill REPORT.md.
+- 23:45 New since: suggested checks for check-less steps (403260e), importer --align (f943ae7), setup now
+  ends the tutorial (it blocked later tests), run cost includes Before all (e25a036). Core fresh 5/5
+  ($0.0037 tests + $0.0082 Before all). CLEAN ROUND running: scratchpad\final-runs2.ps1 (pid 46248) ->
+  final-runs2.log: core --repeat 3, 5 aligned checklist sections --fresh, decision-lab fresh+replay.
+  Unaligned checklist numbers (before tutorial fix): S05 0/2, S06 0/3, S08 1/3.
 - Remaining ideas (older): REPORT.md (morning summary), `jev test --repeat N` flake rate, landing page draft,
   maybe Linux CI action.yml.
 - OLD NEXT: MCP browser_test tool (async, beat 120 s cap); second project (Nebius Decision Lab ?mock=1,

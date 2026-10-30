@@ -193,6 +193,10 @@ def parse(text, name="spec"):
     if once:
         if not once[0]["steps"]:
             raise SpecError(f"{name}: '## Before all' has no numbered steps")
+        if not any(step.get("expect") for step in once[0]["steps"]):
+            # Every test waits on it, so a setup that cannot verify would block the whole suite.
+            raise SpecError(f"{name}: '## Before all' needs a check (e.g. '- see: Dashboard') "
+                            "so the run can tell that setup worked")
         # Runs once, before every test, and the tests start from the state it leaves.
         suite["before_all"] = once[0]
     if not suite["checks"]:
