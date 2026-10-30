@@ -198,6 +198,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 feed_page = 1
             self._send(feed_page_html(feed_page))
             return
+        if parsed.path == "/leave":
+            # Unsaved changes arm a "Leave site?" prompt that holds any navigation away.
+            self._send(f"""<!doctype html><html><head><title>Editor</title></head>
+<body style="{STYLE}"><h1>Editor</h1><p id="state">All changes saved</p>
+<button onclick="document.getElementById('state').textContent='Unsaved changes';
+  addEventListener('beforeunload', e => {{ e.preventDefault(); e.returnValue=''; }});">Start editing</button>
+</body></html>""")
+            return
         if parsed.path == "/dialog":
             # A delete behind a native confirm(): without a dialog policy the page freezes.
             self._send(f"""<!doctype html><html><head><title>Items</title></head>

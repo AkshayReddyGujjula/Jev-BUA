@@ -11,3 +11,12 @@ path: /dialog
 1. Delete the quarterly report.
    - see: Item deleted
    - not see: Quarterly report
+
+## Leaving a page with unsaved changes is not blocked by its prompt
+path: /leave
+
+1. Click Start editing.
+   - see: Unsaved changes
+2. Read the page.
+   - open: /dialog
+   - see: Your items

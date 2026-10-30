@@ -226,7 +226,12 @@ def page_facts(browser, selectors=(), value_selectors=()):
         "[s, document.querySelectorAll(s).length]));"
         f"const values = Object.fromEntries({json.dumps(list(value_selectors))}.map(s => "
         "[s, document.querySelector(s)?.value ?? '']));"
-        "return {url:location.href,title:document.title,text:document.body.innerText,"
+        # What a person sees includes a field's placeholder and its typed value, which
+        # innerText leaves out; password fields are never read.
+        "const fields=[...document.querySelectorAll('input:not([type=password]):not([type=hidden]),textarea')]"
+        ".filter(e=>e.checkVisibility?.()??true).map(e=>e.value||e.placeholder||'').filter(Boolean);"
+        "return {url:location.href,title:document.title,text:document.body.innerText+"
+        "(fields.length?'\\n'+fields.join('\\n'):''),"
         "selector_counts:counts,values:values,"
         "errors:Array.isArray(window.__jevErrors)?window.__jevErrors.slice():null};"
         "})()"

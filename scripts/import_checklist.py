@@ -34,7 +34,9 @@ def checks_for(item):
     for line in item.get("expected") or []:
         for phrase in QUOTED.findall(line):
             phrase = phrase.strip().rstrip(".")
-            if ("{" in phrase or "…" in phrase or "..." in phrase or phrase.lower() in steps_text
+            if (len(phrase) < 4 or (" " not in phrase and phrase.islower())        # "with", "here"
+                    or "<" in phrase or phrase.startswith("/")                    # URL patterns
+                    or "{" in phrase or "…" in phrase or "..." in phrase or phrase.lower() in steps_text
                     or phrase in seen):
                 continue
             seen.append(phrase)

@@ -1,0 +1,40 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Read the rail top to bottom. Collapse and expand it.",
+  "goal_hash": "419f803480d0bd490d3df11ec59ec274c16029078a6fe4acb95d52439b2ff1ee",
+  "recorded_at": 1793400529.4645681,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Chapter 2 of 6. Open the tutorial map",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.89,
+      "irreversible": 0.11
+    },
+    {
+      "kind": "click",
+      "label": "Toggle workspace menu",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.91,
+      "irreversible": 0.11
+    },
+    {
+      "kind": "click",
+      "label": "Toggle workspace menu",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.84,
+      "irreversible": 0.1
+    }
+  ]
+}

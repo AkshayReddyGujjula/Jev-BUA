@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from browser_harness.admin import ensure_daemon
-from browser_harness.helpers import activate_tab, cdp
+from browser_harness.helpers import _send, activate_tab, cdp
 
 from . import chrome
 from .assertions import ERROR_RECORDER, dialog_script
@@ -221,7 +221,14 @@ class Browser:
             origin = "{0.scheme}://{0.netloc}".format(urlsplit(url))
             self.call("Storage.clearDataForOrigin", origin=origin, storageTypes="all")
             self._storage_cleared = True
-        self.call("Page.navigate", url=url)
+        try:
+            self.call("Page.navigate", url=url)
+        except Exception:
+            # A "Leave site?" (beforeunload) prompt holds Page.navigate open. This navigation is
+            # the caller's own (a test step's `path`), so leaving is intended: accept exactly
+            # that prompt and carry on. Anything else is a real failure.
+            if not self._leave_page_prompt():
+                raise
         deadline = time.monotonic() + NAV_TIMEOUT
         while time.monotonic() < deadline:
             if self.evaluate("document.readyState") == "complete":
@@ -232,6 +239,17 @@ class Browser:
         if not any(t["targetId"] == self.target for t in self._page_targets()):
             # Chrome 153 replaces the target on navigation: adopt the replacement before the first read.
             self.reattach()
+
+    def _leave_page_prompt(self):
+        """Accept a pending beforeunload prompt on this tab. True when one was accepted."""
+        try:
+            dialog = _send({"meta": "pending_dialog"}).get("dialog") or {}
+            if dialog.get("type") != "beforeunload":
+                return False
+            self.call("Page.handleJavaScriptDialog", accept=True)
+            return True
+        except Exception:
+            return False
 
     def _wait_for_content(self, timeout=None):
         """Wait (reads only) until the document shows text or a control. Never raises."""

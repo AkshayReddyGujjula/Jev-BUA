@@ -100,3 +100,9 @@ path: /settings
     # Settings signs in on /login first, then opens its own page for its own first step.
     assert settings["path"] == "/login" and settings["steps"][1]["path"] == "/settings"
     assert len(suite["checks"]) == 2
+
+
+def test_open_bullet_loads_a_path_before_the_step():
+    suite = spec.parse("## T\npath: /a\n1. Edit.\n   - see: Unsaved\n2. Read.\n   - open: /b\n   - see: Items\n")
+    second = suite["checks"][0]["steps"][1]
+    assert second["path"] == "/b" and second["expect"] == {"text_contains_all": ["Items"]}

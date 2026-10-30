@@ -3,7 +3,7 @@
   "url": "http://localhost:5173/workspace?storage=idb",
   "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish.",
   "goal_hash": "675fe0116d05c00ae3533951ab7ff61344d6d07b7824d37580924ddd37a5c572",
-  "recorded_at": 1793400366.5324974,
+  "recorded_at": 1793400457.4147265,
   "verified": true,
   "steps": [
     {
@@ -54,7 +54,7 @@
       "role": "button",
       "operation": "CLICK",
       "text": null,
-      "outcome": "page content changed",
+      "outcome": "page changed",
       "confidence": 0.96,
       "irreversible": 0.37,
       "anchor": {
@@ -67,11 +67,24 @@
       "role": "button",
       "operation": "CLICK",
       "text": null,
-      "outcome": "page changed",
-      "confidence": 0.97,
-      "irreversible": 0.43,
+      "outcome": "page content changed",
+      "confidence": 0.99,
+      "irreversible": 0.32,
       "anchor": {
         "container": "What would make this term a win?"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Balanced",
+      "role": "radio",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.79,
+      "irreversible": 0.37,
+      "anchor": {
+        "container": "How long should answers be?"
       }
     },
     {
@@ -81,59 +94,11 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.82,
-      "irreversible": 0.4,
+      "confidence": 0.79,
+      "irreversible": 0.38,
       "anchor": {
         "container": "How long should answers be?"
       }
-    },
-    {
-      "kind": "click",
-      "label": "End tutorial",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.39,
-      "irreversible": 0.13
-    },
-    {
-      "kind": "click",
-      "label": "Keep going",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.34,
-      "irreversible": 0.14
-    },
-    {
-      "kind": "click",
-      "label": "End tutorial",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.92,
-      "irreversible": 0.13
-    },
-    {
-      "kind": "click",
-      "label": "End tutorial",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.83,
-      "irreversible": 0.12
-    }
-  ],
-  "heals": [
-    {
-      "at_step": 6,
-      "resumed_at": 7,
-      "reason": "replayed step had no visible effect",
-      "jev_actions": 2
     }
   ]
 }

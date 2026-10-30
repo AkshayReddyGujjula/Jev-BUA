@@ -15,6 +15,8 @@
     2. Click Go home.
        - url contains: /workspace
 
+A step bullet `- open: /path` is not a check: it loads that path in the same tab before the step.
+
 A test headed `## Before each` is not a test: its steps (and values, and path when a test has
 none) are put in front of every test, e.g. signing in.
 
@@ -137,6 +139,11 @@ def parse(text, name="spec"):
             values_target[_unquote(label)] = _unquote(value)
             continue
         if bullet and step is not None:
+            key, sep, value = bullet[1].partition(":")
+            if sep and key.strip().lower() == "open" and value.strip():
+                # Not a check: load this path in the same tab before the step runs.
+                step["path"] = _unquote(value)
+                continue
             _check(step.setdefault("expect", {}), bullet[1], where)
             continue
         setting = SETTING.match(stripped)
