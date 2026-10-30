@@ -1,0 +1,51 @@
+name: Jev test
+description: >-
+  Run plain-English browser tests (Markdown specs) against your app with Jev. Committed replay plans
+  (.jev/replay) rerun with no model calls; checks read off the page decide pass or fail.
+  UNTESTED DRAFT (written 30 Oct 2026 without a CI run).
+inputs:
+  spec:
+    description: Path to a Markdown spec (.md) or JSON check file, relative to the repository root.
+    required: true
+  workers:
+    description: Parallel browsers (1-10).
+    default: "4"
+  typesafe-api-key:
+    description: TypeSafe key for Jev decisions.
+    required: true
+  text-model-api-key:
+    description: Key for the text model that drafts form values (only needed when a spec leaves values to it).
+    required: false
+    default: ""
+  text-model-base-url:
+    description: OpenAI-compatible base URL of the text model.
+    default: https://api.deepseek.com/v1
+  text-model:
+    description: Text model name.
+    default: deepseek-chat
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v5
+    - id: chrome
+      uses: browser-actions/setup-chrome@v1
+    - name: Run the suite
+      shell: bash
+      env:
+        TYPESAFE_API_KEY: ${{ inputs.typesafe-api-key }}
+        TEXT_MODEL_API_KEY: ${{ inputs.text-model-api-key }}
+        TEXT_MODEL_BASE_URL: ${{ inputs.text-model-base-url }}
+        TEXT_MODEL: ${{ inputs.text-model }}
+        JEV_CHROME: dedicated
+        JEV_CHROME_HEADLESS: "1"
+        JEV_CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        JEV_MODES: "off"
+      run: >-
+        uvx --from "git+https://github.com/browser-use/jev-ultrafast@${{ github.action_ref || 'main' }}"
+        jev test "${{ inputs.spec }}" --workers "${{ inputs.workers }}"
+    - if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: jev-test-report
+        path: "**/.jev/reports/"
+        if-no-files-found: ignore
