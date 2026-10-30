@@ -1,0 +1,50 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Look at the home screen.",
+  "goal_hash": "4958e1de4981fc4acd130aae993956bef72652af912738a37cf8d8c38a67ffcb",
+  "recorded_at": 1793402179.1342704,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "key",
+      "label": "Press Escape",
+      "role": null,
+      "operation": "KEY_ESCAPE",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.39,
+      "irreversible": 0.12
+    },
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.26,
+      "irreversible": 0.13
+    },
+    {
+      "kind": "key",
+      "label": "Press Escape",
+      "role": null,
+      "operation": "KEY_ESCAPE",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.25,
+      "irreversible": 0.13
+    },
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.25,
+      "irreversible": 0.16
+    }
+  ]
+}

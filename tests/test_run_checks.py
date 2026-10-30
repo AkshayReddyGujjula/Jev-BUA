@@ -158,3 +158,40 @@ def test_a_step_whose_readback_failed_fails_the_check(monkeypatch, tmp_path):
                                      {"goal": "second", "expect": {"text_contains": ["B"]}}]}, out)
     result = json.loads(out.read_text(encoding="utf-8"))
     assert result["verified"] is False and result["failed_step"] == 1
+
+
+def _fake_suite(tmp_path, monkeypatch, setup_ok):
+    spec_file = tmp_path / "suite.md"
+    spec_file.write_text("base_url: http://localhost:3000\nisolate: storage\n\n"
+                         "## Before all\n1. Sign in.\n   - see: Home\n\n"
+                         "## A\n1. Go.\n   - see: A\n\n## B\n1. Go.\n   - see: B\n", encoding="utf-8")
+    ran = []
+
+    def fake_run_job(job, part, bu_name):
+        ran.append((job["name"], job.get("isolate")))
+        ok = setup_ok if job["name"] == "Before all" else True
+        from pathlib import Path
+        Path(part).write_text(json.dumps({"name": job["name"], "status": "done", "verified": ok,
+                                          "checks": [], "wall_s": 0.1}), encoding="utf-8")
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr(run_checks, "run_job", fake_run_job)
+    monkeypatch.setenv("JEV_CHROME", "user")
+    out = tmp_path / "report.json"
+    args = run_checks.argparse.Namespace(checks=str(spec_file), workers=4, out=str(out), replay=None,
+                                         no_evidence=True, state_dir=str(tmp_path))
+    code = run_checks.run_parent(args)
+    return code, ran, json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_before_all_runs_first_and_tests_keep_its_state(tmp_path, monkeypatch):
+    code, ran, report = _fake_suite(tmp_path, monkeypatch, setup_ok=True)
+    assert ran == [("Before all", "storage"), ("A", None), ("B", None)]
+    assert code == 0 and report["passed"] == 2 and report["total"] == 2
+
+
+def test_a_failed_before_all_blocks_every_test(tmp_path, monkeypatch):
+    code, ran, report = _fake_suite(tmp_path, monkeypatch, setup_ok=False)
+    assert ran == [("Before all", "storage")]
+    assert code == 1 and report["passed"] == 0
+    assert all("Before all did not verify" in r["error"] for r in report["results"])

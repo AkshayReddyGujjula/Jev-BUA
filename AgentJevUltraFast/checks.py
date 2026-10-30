@@ -314,7 +314,9 @@ def run_parent(args):
                          else state / "replay" / Path(args.checks).stem)
     evidence_dir = None if args.no_evidence else str(state / "evidence" / "checks")
     jobs = []
-    for index, check in enumerate(checks):
+    before_all = spec.get("before_all")
+    entries = ([before_all] if before_all else []) + list(checks)
+    for index, check in enumerate(entries):
         job = {**defaults, **check}
         if defaults.get("values") or check.get("values"):
             # Suite-level values apply under a test's own, not instead of them.
@@ -346,6 +348,17 @@ def run_parent(args):
         except ValueError as error:
             raise SystemExit(f"{job['name']}: {error}") from error
         jobs.append(job)
+    setup_job = jobs.pop(0) if before_all else None
+    if setup_job:
+        setup_job["name"] = "Before all"
+        for job in jobs:
+            # Tests inherit the state Before all left (signed in, onboarded): wiping the
+            # origin again would undo it. Isolation by context cannot share it at all.
+            if job.get("isolate") == "context":
+                raise SystemExit(f"{job['name']}: '## Before all' needs isolate: storage or none")
+            if job.get("isolate") == "storage":
+                job["isolate"] = None
+                job["sequential"] = True
     from AgentJevUltraFast.agent import POSITIVE_CHECKS
     for job in jobs:
         for number, step in enumerate(check_steps(job), 1):
@@ -355,7 +368,7 @@ def run_parent(args):
                 # it has arrived, so it runs until Jev chooses DONE or the step budget ends it.
                 print(f"note: {job['name']} step {number} has only negative checks; add a "
                       "'see:' check so it can stop the moment it succeeds")
-    if workers > 1 and any(job.get("isolate") == "storage" for job in jobs):
+    if workers > 1 and any(job.get("isolate") == "storage" or job.get("sequential") for job in jobs):
         # Storage isolation wipes the app origin's data in the shared browser context, which
         # would pull state out from under any check running at the same time.
         print("isolate: storage runs one check at a time (use isolate: context to parallelise)")
@@ -382,8 +395,22 @@ def run_parent(args):
         proc = run_job(job, part, f"jev-check-{index:02d}")
         return index, job, part, proc, round(time.perf_counter() - started, 2)
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        launched = list(pool.map(launch, enumerate(jobs)))
+    setup_result = None
+    if setup_job:
+        # Once per suite run, alone, before any test (Playwright's global setup).
+        _, _, part, proc, wall = launch((99, setup_job))
+        setup_result = (json.loads(part.read_text(encoding="utf-8")) if part.exists() else
+                        {"name": "Before all", "status": "error", "verified": False, "wall_s": wall,
+                         "error": (proc.stderr or proc.stdout or "no result file")[-400:]})
+        print(f"Before all: {'verified' if setup_result.get('verified') else 'FAILED'} "
+              f"({setup_result.get('wall_s')}s)")
+    if setup_result is not None and not setup_result.get("verified"):
+        # Every test depends on it: report them as blocked instead of running them blind.
+        launched = [(index, job, outdir / "__none__", subprocess.CompletedProcess([], 1, "",
+                     "Before all did not verify; test not run"), 0.0) for index, job in enumerate(jobs)]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            launched = list(pool.map(launch, enumerate(jobs)))
 
     results = []
     for index, job, part, proc, wall in sorted(launched, key=lambda r: r[0]):
@@ -438,6 +465,7 @@ def run_parent(args):
         "passed": len(passed), "total": len(results), "stalled": len(stalls),
         "usd_estimate": usd, "model_calls": model_calls,
         "replay_dir": replay_dir, "steps_replayed": replayed, "heals": heals,
+        "before_all": setup_result,
         "results": results,
     }
     Path(args.out).write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")

@@ -8,7 +8,10 @@ base_url: http://localhost:5173
 isolate: storage
 commit_floor: 0.6
 
-## Before each
+Signing in once per run (`## Before all`) matters here: the app rate-limits access-code
+redeems to 10 a minute, which a suite that signs in before every test exceeds.
+
+## Before all
 path: /workspace?storage=idb
 values:
   - Access code: jev-local-test

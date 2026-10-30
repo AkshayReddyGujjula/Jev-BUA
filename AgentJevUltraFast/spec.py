@@ -17,6 +17,9 @@
 
 A step bullet `- open: /path` is not a check: it loads that path in the same tab before the step.
 
+A test headed `## Before all` runs once per suite run, before every test, and the tests start
+from the state it leaves (signed in, onboarded): sign in once instead of once per test.
+
 A test headed `## Before each` is not a test: its steps (and values, and path when a test has
 none) are put in front of every test, e.g. signing in.
 
@@ -36,6 +39,7 @@ SUITE_KEYS = {"base_url", "isolate", "commit_floor", "max_seconds", "max_steps",
 TEST_KEYS = {"path", "isolate", "commit_floor", "max_seconds", "max_steps", "tab", "review", "viewport", "dialogs",
              "replay_commits", "stop_on_expect", "mode"}
 BEFORE_EACH = {"before each", "before each test", "setup"}
+BEFORE_ALL = {"before all", "before all tests", "global setup"}
 STEP = re.compile(r"^\s*(\d+)[.)]\s+(.+?)\s*$")
 BULLET = re.compile(r"^\s*[-*]\s+(.+?)\s*$")
 SETTING = re.compile(r"^([A-Za-z_][\w ]*?)\s*:\s*(.*?)\s*$")
@@ -181,8 +185,16 @@ def parse(text, name="spec"):
         if step is None:
             continue                          # free prose under a heading documents the test
         raise SpecError(f"{where}: expected a check bullet under step {step['goal']!r}")
+    once = [test for test in suite["checks"] if test["name"].strip().lower() in BEFORE_ALL]
     setup = [test for test in suite["checks"] if test["name"].strip().lower() in BEFORE_EACH]
-    suite["checks"] = [test for test in suite["checks"] if test not in setup]
+    suite["checks"] = [test for test in suite["checks"] if test not in setup and test not in once]
+    if len(once) > 1:
+        raise SpecError(f"{name}: only one '## Before all' block is allowed")
+    if once:
+        if not once[0]["steps"]:
+            raise SpecError(f"{name}: '## Before all' has no numbered steps")
+        # Runs once, before every test, and the tests start from the state it leaves.
+        suite["before_all"] = once[0]
     if not suite["checks"]:
         raise SpecError(f"{name}: no tests (each test starts with a '## ' heading)")
     for test in setup + suite["checks"]:

@@ -3,7 +3,7 @@
   "url": "http://localhost:5173/workspace?storage=idb",
   "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish.",
   "goal_hash": "675fe0116d05c00ae3533951ab7ff61344d6d07b7824d37580924ddd37a5c572",
-  "recorded_at": 1793399600.0405962,
+  "recorded_at": 1793402172.4103394,
   "verified": true,
   "steps": [
     {
@@ -28,7 +28,7 @@
       "role": "button",
       "operation": "CLICK",
       "text": null,
-      "outcome": "page content changed",
+      "outcome": "page changed",
       "confidence": 0.81,
       "irreversible": 0.48,
       "anchor": {

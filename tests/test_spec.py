@@ -116,3 +116,10 @@ def test_open_bullet_loads_a_path_before_the_step():
 def test_checks_are_never_dropped_silently(bad, message):
     with pytest.raises(spec.SpecError, match=message):
         spec.parse(bad)
+
+
+def test_before_all_runs_once_and_is_not_a_test():
+    suite = spec.parse("## Before all\npath: /login\n1. Sign in.\n   - see: Home\n\n## A\n1. Go.\n")
+    assert [t["name"] for t in suite["checks"]] == ["A"]
+    assert suite["before_all"]["steps"][0]["goal"] == "Sign in." and suite["before_all"]["path"] == "/login"
+    assert suite["checks"][0]["steps"] == [{"goal": "Go."}]       # not prepended to tests

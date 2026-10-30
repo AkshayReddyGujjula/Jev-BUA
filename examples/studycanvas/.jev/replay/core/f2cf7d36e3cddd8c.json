@@ -3,7 +3,7 @@
   "url": "http://localhost:5173/workspace/no-such-place-xyz?storage=idb",
   "goal": "Click Go home.",
   "goal_hash": "f2cf7d36e3cddd8c3444dfff2f636c2e7b1b2c8ead4c8c821eccd04726ffc772",
-  "recorded_at": 1793399315.2215552,
+  "recorded_at": 1793402158.546914,
   "verified": true,
   "steps": [
     {

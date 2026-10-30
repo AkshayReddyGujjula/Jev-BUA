@@ -1,4 +1,4 @@
-## Before each
+## Before all
 path: /workspace?storage=idb
 values:
   - Access code: jev-local-test
