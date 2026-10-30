@@ -156,6 +156,7 @@ class Browser:
         wait = os.environ.get("JEV_DAEMON_WAIT_S")
         ensure_daemon(wait=float(wait) if wait else None)
         self.context = None
+        viewport()                      # a bad JEV_VIEWPORT fails here, before any tab exists
         self.private_values = []
         self.follow_tabs = follow_tabs
         self.mode = os.environ.get("JEV_TAB_MODE", "foreground").strip().lower()
@@ -369,6 +370,8 @@ class Browser:
         A new-document script belongs to the CDP session that added it, so every attach
         installs it again; the recorder itself is idempotent per document.
         """
+        if getattr(self, "mode", None) == "active":
+            return                      # never instrument the user's own tab
         try:
             # Without the Page domain enabled the script is registered but never injected
             # (measured: window.__jevErrors undefined after a navigation).

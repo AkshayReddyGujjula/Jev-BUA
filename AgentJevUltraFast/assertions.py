@@ -226,16 +226,15 @@ def page_facts(browser, selectors=(), value_selectors=()):
         "[s, document.querySelectorAll(s).length]));"
         f"const values = Object.fromEntries({json.dumps(list(value_selectors))}.map(s => "
         "[s, document.querySelector(s)?.value ?? '']));"
-        # What a person sees includes a field's placeholder and its typed value, which
-        # innerText leaves out; password fields are never read.
-        "const fields=[...document.querySelectorAll('input:not([type=password]):not([type=hidden]),textarea')]"
-        ".filter(e=>e.checkVisibility?.()??true).map(e=>e.value||e.placeholder||'').filter(Boolean);"
         # An icon-only control is seen by its name (tooltip / aria-label), not by innerText.
+        # Field values and placeholders are deliberately NOT text: a value the run typed itself
+        # would otherwise satisfy `see:` before the form was ever submitted.
+        "const names=[];"
         "for (const e of document.querySelectorAll('button[aria-label],a[aria-label],[role=button][aria-label],"
         "button[title],a[title]')) if ((e.checkVisibility?.()??true) && !e.innerText.trim())"
-        " fields.push(e.getAttribute('aria-label')||e.getAttribute('title'));"
+        " names.push(e.getAttribute('aria-label')||e.getAttribute('title'));"
         "return {url:location.href,title:document.title,text:document.body.innerText+"
-        "(fields.length?'\\n'+fields.join('\\n'):''),"
+        "(names.length?'\\n'+names.join('\\n'):''),"
         "selector_counts:counts,values:values,"
         "errors:Array.isArray(window.__jevErrors)?window.__jevErrors.slice():null};"
         "})()"

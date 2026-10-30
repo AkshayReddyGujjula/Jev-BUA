@@ -139,7 +139,10 @@ def run_worker(job, out_path):
     isolate = job.get("isolate")
     os.environ["JEV_ISOLATE"] = ("storage" if isolate == "storage" else "context") if isolate else "0"
     # Native dialogs freeze the page; a test answers them (see assertions.dialog_script).
-    os.environ["JEV_DIALOGS"] = job.get("dialogs") or ("accept" if local_host(job["url"]) else "dismiss")
+    dialogs = job.get("dialogs")
+    if dialogs is False or str(dialogs).lower() in {"off", "no", "none"}:
+        dialogs = "off"             # the page's own dialogs stay native
+    os.environ["JEV_DIALOGS"] = dialogs or ("accept" if local_host(job["url"]) else "dismiss")
     if job.get("viewport"):
         os.environ["JEV_VIEWPORT"] = str(job["viewport"])
     if job.get("review") is False:
@@ -160,10 +163,10 @@ def run_worker(job, out_path):
     try:
         browser = Browser(job["url"])
         for index, step in enumerate(steps):
-            if index and step.get("path"):
+            if step.get("path") and (index or step["path"] != job.get("path")):
                 path = step["path"]
                 browser.navigate(path if path.startswith("http") else job["base_url"] + path)
-            url = job["url"] if index == 0 else browser.evaluate("location.href")
+            url = job["url"] if index == 0 and not step.get("path") else browser.evaluate("location.href")
             values = {**(job.get("values") or {}), **(step.get("values") or {})} or None
             expect = step.get("expect")
             with Agent(url, step["goal"], values=values, expect=expect, browser=browser,
@@ -185,7 +188,9 @@ def run_worker(job, out_path):
             # page, the same one written to evidence) resolved through outcomes.resolve, so a
             # check is judged exactly like browser_do and run_task.
             outcome = state.get("outcome")
-            verified = {"verified": True, "refuted": False}.get(outcome) if expect else None
+            # With checks, anything short of a verified readback (refuted, unknown because the
+            # readback failed, budget_exhausted) is a failed step, never a skipped one.
+            verified = (outcome == "verified") if expect else None
             cost = cost_summary(state)
             replay_state = state.get("replay") or {}
             result["steps"].append({
@@ -311,6 +316,9 @@ def run_parent(args):
     jobs = []
     for index, check in enumerate(checks):
         job = {**defaults, **check}
+        if defaults.get("values") or check.get("values"):
+            # Suite-level values apply under a test's own, not instead of them.
+            job["values"] = {**(defaults.get("values") or {}), **(check.get("values") or {})}
         path = job.get("path", "")
         if not path.startswith("http"):
             job["url"] = f"{base}{path}"
@@ -502,7 +510,11 @@ def main(argv=None):
         run_worker(json.loads(args.job), args.out)
         return 0
     args = parser.parse_args(argv)
-    if args.chrome:
+    if args.chrome == "user":
+        from . import chrome
+
+        chrome.use_user_chrome()
+    elif args.chrome:
         os.environ["JEV_CHROME"] = args.chrome
     if args.serve_traps:
         sys.path.insert(0, str(ROOT / "scripts"))
@@ -518,7 +530,7 @@ def main(argv=None):
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     if not args.skip_probe and not args.serve_traps:
         spec = load_suite(args.checks)
-        if not probe_target((spec.get("base_url") or "").rstrip("/")):
+        if not probe_target((os.environ.get("JEV_TRAP_BASE") or spec.get("base_url") or "").rstrip("/")):
             return 2
     return run_parent(args)
 

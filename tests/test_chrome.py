@@ -91,3 +91,16 @@ def test_jev_test_selects_dedicated_chrome_before_any_browser_import(monkeypatch
     monkeypatch.setattr(chrome.sys, "argv", ["jev", "test", "suite.md"])
     chrome.apply_env()
     assert os.environ["JEV_CHROME"] == "dedicated" and os.environ["BU_CDP_URL"].endswith(":9333")
+
+
+def test_chrome_user_undoes_only_what_apply_env_set(monkeypatch):
+    import os
+    monkeypatch.setattr(chrome.sys, "argv", ["jev", "test", "suite.md"])
+    monkeypatch.setenv("BU_NAME", "jev-check-01")
+    chrome.apply_env()
+    chrome.use_user_chrome()
+    assert os.environ["JEV_CHROME"] == "user" and "BU_CDP_URL" not in os.environ
+    assert os.environ["BU_NAME"] == "jev-check-01"
+    monkeypatch.setenv("BU_CDP_URL", "http://10.0.0.5:9222")       # someone else's endpoint stays
+    chrome.use_user_chrome()
+    assert os.environ["BU_CDP_URL"] == "http://10.0.0.5:9222"

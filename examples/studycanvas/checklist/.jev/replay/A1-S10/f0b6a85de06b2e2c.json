@@ -1,0 +1,151 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Open a Space and expand its sidebar. Switch between the \"Instructions\" and \"Sources\" tabs.",
+  "goal_hash": "f0b6a85de06b2e2cc0e27a329e01850f62b9e23efacf1149eea0d964c8630d8c",
+  "recorded_at": 1793401709.8104239,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Chapter 2 of 6. Open the tutorial map",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.38,
+      "irreversible": 0.09
+    },
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.98,
+      "irreversible": 0.08,
+      "anchor": {
+        "container": "Tutorial map"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.51,
+      "irreversible": 0.08
+    },
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.61,
+      "irreversible": 0.09
+    },
+    {
+      "kind": "click",
+      "label": "Dismiss",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.54,
+      "irreversible": 0.09
+    },
+    {
+      "kind": "click",
+      "label": "A Ada Browser",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.93,
+      "irreversible": 0.1,
+      "anchor": {
+        "container": "Workspace"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "New space",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.87,
+      "irreversible": 0.09
+    },
+    {
+      "kind": "click",
+      "label": "A Ada Browser",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.91,
+      "irreversible": 0.08,
+      "anchor": {
+        "container": "Workspace"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "New space",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.91,
+      "irreversible": 0.08
+    },
+    {
+      "kind": "fill",
+      "label": "Name",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": "Study Space",
+      "outcome": "page changed",
+      "confidence": 0.44,
+      "irreversible": 0.13,
+      "anchor": {
+        "id": "_r_8_-name",
+        "placeholder": "e.g. Organic Chemistry",
+        "container": "New Space"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Create",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.83,
+      "irreversible": 0.26,
+      "anchor": {
+        "container": "New Space"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Sources",
+      "role": "tab",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.94,
+      "irreversible": 0.1,
+      "anchor": {
+        "id": "space-tab-sources",
+        "container": "Study Space Space settings"
+      }
+    }
+  ]
+}

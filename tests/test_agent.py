@@ -2454,3 +2454,50 @@ def test_a_stale_page_during_replay_retries_the_step_then_heals(runner):
     assert runner._replay_step() is True
     assert "kept changing" in runner.state["replay"]["healing"]["reason"]
     assert runner.state["replay"]["used"] == 0
+
+
+def test_resync_never_repeats_a_step_jev_did_out_of_order(runner, monkeypatch):
+    monkeypatch.setattr(loop, "REPLAY_WAIT_S", 0)
+    steps = [{"kind": "click", "label": "Dismiss banner", "operation": "CLICK"},
+             {"kind": "click", "label": "Go", "role": "button", "operation": "CLICK"},
+             {"kind": "click", "label": "Next", "operation": "CLICK"}]
+    runner.replay_plan = {"steps": steps}
+    runner.state["replay"] = _replay_state(steps)
+    runner.state["decision"] = None
+    assert runner._replay_step() is False             # the banner is gone: Jev's turn
+    runner.state["history"].append({"action": "Go", "kind": "click", "outcome": "page changed"})
+    # "Go" is still on the page, but Jev already pressed it: replay must not press it again.
+    assert runner._replay_step() is False
+    assert runner.state["replay"]["used"] == 0
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_a_commit_heal_resumes_only_after_jev_made_that_commit(runner, monkeypatch):
+    monkeypatch.setattr(loop, "REPLAY_WAIT_S", 0)
+    _with_action(runner, id="save", kind="click", label="Save changes", role="button", node=99)
+    steps = [{"kind": "click", "label": "Save changes", "operation": "CLICK"},
+             {"kind": "click", "label": "Go", "role": "button", "operation": "CLICK"}]
+    runner.replay_plan = {"steps": steps}
+    runner.state["replay"] = _replay_state(steps)
+    runner.state["decision"] = None
+    runner.replay_commits = False
+    assert runner._replay_step() is False                      # commit: Jev decides it
+    runner.state["history"].append({"action": "Something else", "kind": "click", "outcome": "page changed"})
+    assert runner._replay_step() is False                      # Save not made yet: keep waiting
+    runner.state["history"].append({"action": "Save changes", "kind": "click", "outcome": "page changed"})
+    runner.state["browser"].observe.return_value = {**runner.state["page"], "url": "https://example.test/saved"}
+    assert runner._replay_step() is True and runner.state["replay"]["used"] == 2
+
+
+def test_a_reused_test_id_under_a_new_label_is_never_clicked_blind(runner, monkeypatch):
+    monkeypatch.setattr(loop, "REPLAY_WAIT_S", 0)
+    _with_action(runner, id="x", kind="click", label="Delete account", role="button",
+                 anchor={"testid": "primary"})
+    runner.replay_plan = {"steps": [{"kind": "click", "label": "Save", "operation": "CLICK",
+                                     "anchor": {"testid": "primary"}}]}
+    runner.state["replay"] = _replay_state(runner.replay_plan["steps"])
+    runner.state["decision"] = None
+    runner.replay_commits = True                                # even on a trusted local host
+    assert runner._replay_step() is False
+    assert runner.state["replay"]["healing"]["reason"].startswith("commit-like")
+    runner.state["browser"].act.assert_not_called()

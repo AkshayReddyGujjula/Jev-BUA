@@ -18,6 +18,7 @@ def test_browser_test_starts_in_the_background_and_reports_when_done(monkeypatch
 
     def fake_popen(command, **kwargs):
         launched["command"] = command
+        launched["env"] = kwargs.get("env") or {}
         return FakeProc()
 
     monkeypatch.setattr(server, "TEST_RUNS_DIR", tmp_path)
@@ -28,8 +29,8 @@ def test_browser_test_starts_in_the_background_and_reports_when_done(monkeypatch
     assert started["status"] == "running" and started["tests"] == 1
     command = launched["command"]
     assert command[1:4] == ["-m", "AgentJevUltraFast.cli", "test"] and command[-2:] == ["--workers", "2"]
-    spec = tmp_path / started["run_id"] / "suite.md"
-    assert spec.read_text(encoding="utf-8").startswith("base_url: http://localhost:3000")
+    # base_url overrides the suite for every format, through the runner's own override.
+    assert launched["env"]["JEV_TRAP_BASE"] == "http://localhost:3000"
 
     status = server.tool_browser_test_status({"run_id": started["run_id"]})
     assert status["status"] == "running" and status["tests"] == 1

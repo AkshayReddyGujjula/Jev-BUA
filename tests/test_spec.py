@@ -106,3 +106,13 @@ def test_open_bullet_loads_a_path_before_the_step():
     suite = spec.parse("## T\npath: /a\n1. Edit.\n   - see: Unsaved\n2. Read.\n   - open: /b\n   - see: Items\n")
     second = suite["checks"][0]["steps"][1]
     assert second["path"] == "/b" and second["expect"] == {"text_contains_all": ["Items"]}
+
+
+@pytest.mark.parametrize("bad, message", [
+    ("## T\n1. Go.\n   - count: .a >= 1\n   - count: .b >= 1\n", "only one 'count:'"),
+    ("## T\n   - see: X\n1. Go.\n", "must sit under a numbered step"),
+    ("## Before each\n1. A.\n## Setup\n1. B.\n## T\n1. C.\n", "only one '## Before each'"),
+])
+def test_checks_are_never_dropped_silently(bad, message):
+    with pytest.raises(spec.SpecError, match=message):
+        spec.parse(bad)

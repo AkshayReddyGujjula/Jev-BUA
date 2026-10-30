@@ -127,3 +127,34 @@ def test_only_local_dev_hosts_replay_commits_by_default():
     assert run_checks.local_host("http://app.test/")
     assert not run_checks.local_host("https://staging.example.com/")
     assert not run_checks.local_host("https://localhost.evil.com/")
+
+
+def test_a_step_whose_readback_failed_fails_the_check(monkeypatch, tmp_path):
+    class Unknown:
+        def __init__(self, url, goal, **kwargs):
+            self.goal = goal
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def run(self):
+            return iter(())
+
+        def snapshot(self):
+            # A failed readback: checks stay None and the outcome is "unknown", not "refuted".
+            outcome = "unknown" if self.goal == "first" else "verified"
+            return {"status": "done", "outcome": outcome, "checks": None, "history": [],
+                    "decisions": [], "text_calls": [], "page": {}, "replay": {}}
+
+    monkeypatch.setattr(run_checks, "load_env", lambda: None)
+    monkeypatch.setattr(AgentJevUltraFast, "Agent", Unknown)
+    monkeypatch.setattr(AgentJevUltraFast, "Browser", FakeBrowser)
+    out = tmp_path / "part.json"
+    run_checks.run_worker({"name": "n", "url": "http://app.test/", "base_url": "http://app.test",
+                           "steps": [{"goal": "first", "expect": {"text_contains": ["A"]}},
+                                     {"goal": "second", "expect": {"text_contains": ["B"]}}]}, out)
+    result = json.loads(out.read_text(encoding="utf-8"))
+    assert result["verified"] is False and result["failed_step"] == 1

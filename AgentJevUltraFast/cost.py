@@ -7,7 +7,7 @@ returns a `list_cost`), never from a price table that could drift.
 """
 
 JEV_INPUT_USD_PER_MILLION = 0.042
-FREE_TEXT_SOURCES = {"supplied", "profile", "mode-memory", "replay", "error"}
+FREE_TEXT_SOURCES = {"supplied", "profile", "mode-memory", "replay", "error", "goal-literal", "supervisor"}
 
 
 def _int(usage, *keys):

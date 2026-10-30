@@ -745,6 +745,7 @@ class Agent:
                          ("step", "on_track", "subgoal", "reason", "latency_ms", "model", "error")},
                         getattr(self, "private_values", ()))
         record["applied"] = False
+        record["usage"] = result.get("usage") or {}       # so cost reports count the reviewer
         # A verdict about a page the run has since left is about nothing Jev can act on.
         if result.get("on_track") is False and result.get("url") == state["page"].get("url"):
             state["guidance"] = {"subgoal": result["subgoal"], "source": "reviewer",
@@ -829,6 +830,7 @@ class Agent:
             "model": telemetry["model"], "screenshot": telemetry["screenshot"],
             "error": telemetry["error"], "reason": (verdict or {}).get("reason"),
         }, private)
+        record["usage"] = telemetry.get("usage") or {}
         state.setdefault("supervision", []).append(record)
         evidence = getattr(self, "evidence", None)
         if evidence is not None:
@@ -915,7 +917,15 @@ class Agent:
                     "file": (state.get("harvest") or {}).get("file"),
                 }
                 passed, checks = evaluate_expectations(expect, facts)
-                if passed or time.monotonic() >= deadline:
+                # A document blank mid-navigation satisfies every text_absent: a pass on it is
+                # no pass. Keep reading; if it is still blank when the window closes, say so.
+                blank = not (facts.get("text") or "").strip()
+                if passed and blank and "text_absent" in expect:
+                    if time.monotonic() >= deadline:
+                        checks = checks + [{"check": "page_content", "pass": False,
+                                            "note": "the page was blank at readback"}]
+                        break
+                elif passed or time.monotonic() >= deadline:
                     break
                 time.sleep(0.25)
             if facts is not None:
@@ -1021,11 +1031,19 @@ class Agent:
                 self._stop_replay(replay_state["used"], "page unreadable before the replayed step")
                 return False
         if healing:
+            since = state["history"][healing["history"]:]
+            need = healing.get("need")
+            if need is not None and not any(replay.same_step(steps[need], done) for done in since):
+                # A commit Jev now owns: the plan waits until Jev has actually made it, so an
+                # unrelated action can never let replay skip past a Save that never happened.
+                return False
             start = healing["from"]
-            # A step Jev itself just performed is done: resyncing onto it would do it twice.
-            for done in state["history"][healing["history"]:]:
-                if start < len(steps) and replay.same_step(steps[start], done):
-                    start += 1
+            # A recorded step Jev itself performed in the meantime is done, wherever it sits
+            # in the resync window: resync past the last one, so nothing is done twice.
+            window = range(start, min(len(steps), start + replay.RESYNC_WINDOW))
+            done_steps = [j for j in window if any(replay.same_step(steps[j], done) for done in since)]
+            if done_steps:
+                start = max(done_steps) + 1
             found = replay.resync(steps, start, page["actions"])
             if found is None:
                 return False
@@ -1052,19 +1070,25 @@ class Agent:
             # Jev that needed no decision, and can make Jev and the plan both perform it.
             time.sleep(0.15)
             try:
-                page = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
+                fresh_page = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
             except Exception:
                 break
-            state["page"] = page
-            self.note_progress(page)
+            if fresh_page.get("fingerprint") != page.get("fingerprint"):
+                # Only a page that changed is news; re-reading an unchanged one while waiting
+                # must not count as a round without progress (it tripped the stall stop).
+                self.note_progress(fresh_page)
+            page = state["page"] = fresh_page
             action, tier = replay.locate(step, page["actions"])
         if action is None:
             return self._heal(index, "recorded step does not match this page")
-        if committal(action) and not getattr(self, "replay_commits", REPLAY_COMMITS):
+        relabelled = tier in {"testid", "id"} and replay.normalize(action.get("label")) != replay.normalize(
+            step.get("label"))
+        if committal(action) and (relabelled or not getattr(self, "replay_commits", REPLAY_COMMITS)):
             # The gate's trust does not survive into replay: a commit-like element gets a
-            # fresh gated decision even when the recorded run clicked it once.
+            # fresh gated decision even when the recorded run clicked it once - always when it
+            # was found by a reused test id under a different label ("Save" -> "Delete account").
             return self._heal(index, "commit-like step needs a fresh gated decision",
-                              resume_from=index + 1)
+                              resume_from=index + 1, need=index)
         text = step.get("text")
         if action["kind"] in {"fill", "seek"} and step.get("value_ref") is not None:
             # A caller-supplied value is never stored: it is looked up in this run's values.
@@ -1094,6 +1118,7 @@ class Agent:
                 "replay_step", index=index, action_kind=action["kind"], tier=tier,
                 label=action.get("label"), operation=decision["operation"],
             )
+        executed = len(state["history"])
         try:
             self.command("act", {"fingerprint": page["fingerprint"]})
         except StalePage:
@@ -1109,7 +1134,11 @@ class Agent:
             if stale[index] > 2:
                 self._heal(index, "page kept changing under the replayed step")
             return True
-        last = state["history"][-1] if state["history"] else {}
+        if len(state["history"]) <= executed:
+            # act returned without executing (a budget or the stall deadline ended the run):
+            # the step did not happen, so it is neither counted nor recorded.
+            return True
+        last = state["history"][-1]
         if last.get("outcome") in DEAD_OUTCOMES and step.get("kind") != "scroll":
             # Not retried: the step is Jev's from here, decided on the page as it now is.
             self._heal(index, "replayed step had no visible effect", resume_from=index + 1)
@@ -1132,7 +1161,7 @@ class Agent:
             self.note_progress(page)
         return page
 
-    def _heal(self, index, reason, resume_from=None):
+    def _heal(self, index, reason, resume_from=None, need=None):
         """Hand recorded step `index` to Jev; replay resumes when the page lines up again.
 
         `resume_from` is past `index` when that step must never be replayed again in this
@@ -1145,7 +1174,7 @@ class Agent:
             return False
         replay_state["healing"] = {"from": index if resume_from is None else resume_from,
                                    "step": index, "history": len(self.state["history"]),
-                                   "reason": reason}
+                                   "reason": reason, "need": need}
         evidence = getattr(self, "evidence", None)
         if evidence is not None:
             evidence.record("replay_heal", at_step=index, reason=reason)
@@ -1171,7 +1200,8 @@ class Agent:
         expect = getattr(self, "expect", None)
         if not expect or state["status"] in TERMINAL_STATUS:
             return False
-        if via != "replay" and not any(key in POSITIVE_CHECKS for key in expect):
+        healed = bool((state.get("replay") or {}).get("heals"))
+        if (via != "replay" or healed) and not any(key in POSITIVE_CHECKS for key in expect):
             # Absence is not arrival: "not see: question 1" already holds on question 2 of 5.
             # Only a check that something IS there can say the goal was reached mid-run. A
             # fully replayed plan is different: it re-ran every step of a verified flow.

@@ -116,6 +116,20 @@ def apply_env():
         os.environ["BU_NAME"] = name + suffix
 
 
+def use_user_chrome():
+    """Undo apply_env's routing for this process and its children (`jev test --chrome user`).
+
+    Only what apply_env itself set is removed: an explicit BU_CDP_URL pointing elsewhere stays.
+    """
+    os.environ["JEV_CHROME"] = "user"
+    if os.environ.get("BU_CDP_URL") == endpoint():
+        os.environ.pop("BU_CDP_URL")
+    suffix = f"-chrome{port()}"
+    name = os.environ.get("BU_NAME") or ""
+    if name.endswith(suffix):
+        os.environ["BU_NAME"] = name[: -len(suffix)] or "default"
+
+
 def find_chrome():
     configured = os.environ.get("JEV_CHROME_PATH")
     if configured:

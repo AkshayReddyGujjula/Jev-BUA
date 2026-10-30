@@ -794,10 +794,7 @@ def tool_browser_test(args):
             return {"error": f"no such spec: {spec}"}
     elif args.get("spec_markdown"):
         spec = run_dir / "suite.md"
-        text = args["spec_markdown"]
-        if args.get("base_url") and "base_url:" not in text:
-            text = f"base_url: {args['base_url']}\n\n" + text
-        spec.write_text(text, encoding="utf-8")
+        spec.write_text(args["spec_markdown"], encoding="utf-8")
     else:
         return {"error": "pass spec_path or spec_markdown"}
     try:
@@ -808,10 +805,6 @@ def tool_browser_test(args):
         return {"error": str(error)}
     except Exception as error:
         return {"error": f"{type(error).__name__}: {error}"}
-    if args.get("base_url") and spec.suffix.lower() == ".json":
-        suite["base_url"] = args["base_url"]
-        spec = run_dir / "suite.json"
-        spec.write_text(json.dumps(suite), encoding="utf-8")
     report = spec.parent / ".jev" / "reports" / f"{spec.stem}.json"
     report.unlink(missing_ok=True)
     command = [sys.executable, "-m", "AgentJevUltraFast.cli", "test", str(spec),
@@ -820,9 +813,16 @@ def tool_browser_test(args):
         command.append("--fresh")
     log = open(run_dir / "run.log", "w", encoding="utf-8")
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+    env = dict(os.environ)
+    if args.get("base_url"):
+        # Overrides the suite's base_url for every format (the runner reads it first).
+        env["JEV_TRAP_BASE"] = str(args["base_url"]).rstrip("/")
+    elif not (suite.get("base_url") or "").strip():
+        log.close()
+        return {"error": "the suite has no base_url; pass base_url"}
     proc = subprocess.Popen(command, cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL, **flags)
-    _TEST_RUNS[run_id] = {"proc": proc, "report": report, "log": run_dir / "run.log",
+                            stdin=subprocess.DEVNULL, env=env, **flags)
+    _TEST_RUNS[run_id] = {"proc": proc, "report": report, "log": run_dir / "run.log", "log_file": log,
                           "started": time.monotonic(), "tests": len(suite.get("checks") or []),
                           "parts": report.parent / f"{spec.stem}_parts"}
     return {"run_id": run_id, "tests": len(suite.get("checks") or []), "status": "running",
@@ -838,6 +838,8 @@ def tool_browser_test_status(args):
     if code is None:
         finished = len(list(run["parts"].glob("*.json"))) if run["parts"].exists() else 0
         return {"status": "running", "elapsed_s": elapsed, "finished": finished, "tests": run["tests"]}
+    if run.get("log_file") and not run["log_file"].closed:
+        run["log_file"].close()
     if not run["report"].exists():
         tail = run["log"].read_text(encoding="utf-8", errors="replace")[-1200:] if run["log"].exists() else ""
         return {"status": "error", "exit_code": code, "detail": tail}

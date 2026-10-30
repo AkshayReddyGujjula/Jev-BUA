@@ -79,6 +79,11 @@ def _check(expect, text, where):
     if not sep or not value.strip():
         raise SpecError(f"{where}: cannot read check {body!r}")
     key, value = key.strip().lower(), value.strip()
+    single = {"url contains": "url_contains", "url matches": "url_matches", "title contains": "title_contains",
+              "count": "selector_count", "value": "value_contains"}
+    if single.get(key) in expect:
+        # One of these per step: a second line would silently replace the first check.
+        raise SpecError(f"{where}: only one '{key}:' check per step; split the step instead")
     if key in {"see", "sees", "shows", "text"}:
         expect.setdefault("text_contains_all", []).append(_unquote(value))
     elif key in {"see any", "see any of", "shows any"}:
@@ -138,6 +143,9 @@ def parse(text, name="spec"):
                 raise SpecError(f"{where}: a value line is 'Field label: text', got {bullet[1]!r}")
             values_target[_unquote(label)] = _unquote(value)
             continue
+        if bullet and step is None and test is not None:
+            # A check before step 1 belongs to no step; dropping it would hide it.
+            raise SpecError(f"{where}: a check bullet must sit under a numbered step")
         if bullet and step is not None:
             key, sep, value = bullet[1].partition(":")
             if sep and key.strip().lower() == "open" and value.strip():
@@ -180,6 +188,8 @@ def parse(text, name="spec"):
     for test in setup + suite["checks"]:
         if not test["steps"]:
             raise SpecError(f"{name}: test {test['name']!r} has no numbered steps")
+    if len(setup) > 1:
+        raise SpecError(f"{name}: only one '## Before each' block is allowed")
     if setup:
         # Shared setup (sign in, finish onboarding) runs at the start of every test, in that
         # test's own tab, so tests stay independent. Its values apply under the test's own.
