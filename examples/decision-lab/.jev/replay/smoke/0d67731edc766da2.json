@@ -3,7 +3,7 @@
   "url": "http://localhost:5180/?mock=1",
   "goal": "Wait for the question addressed to you, answer it with the first option, and send it.",
   "goal_hash": "0d67731edc766da20669abd055f07a034f985bddf59e8da287670c4c03424835",
-  "recorded_at": 1793399149.7179193,
+  "recorded_at": 1793404730.3052626,
   "verified": true,
   "steps": [
     {
@@ -18,13 +18,16 @@
     },
     {
       "kind": "click",
-      "label": "Question for you",
+      "label": "Show activity   ( 3 )",
       "role": "button",
       "operation": "CLICK",
       "text": null,
-      "outcome": "page changed",
-      "confidence": 0.49,
-      "irreversible": 0.62
+      "outcome": "page content changed",
+      "confidence": 0.39,
+      "irreversible": 0.32,
+      "anchor": {
+        "container": "Everything, newest first"
+      }
     },
     {
       "kind": "click",
@@ -33,18 +36,11 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page changed",
-      "confidence": 0.52,
-      "irreversible": 0.53
-    },
-    {
-      "kind": "click",
-      "label": "Question for you",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page changed",
-      "confidence": 0.5,
-      "irreversible": 0.59
+      "confidence": 0.54,
+      "irreversible": 0.6,
+      "anchor": {
+        "container": "Conversation"
+      }
     },
     {
       "kind": "click",
@@ -53,8 +49,24 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.31,
-      "irreversible": 0.57
+      "confidence": 0.6,
+      "irreversible": 0.56,
+      "anchor": {
+        "container": "Question for you"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "For you 11:58:40 PM A question is waiting for you New",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.35,
+      "irreversible": 0.59,
+      "anchor": {
+        "container": "Everything, newest first"
+      }
     },
     {
       "kind": "wait",
@@ -63,28 +75,70 @@
       "operation": "WAIT",
       "text": null,
       "outcome": "page changed",
-      "confidence": 0.43,
-      "irreversible": 0.49
+      "confidence": 0.58,
+      "irreversible": 0.42
     },
     {
       "kind": "click",
-      "label": "For you 10:25:27 PM A question is waiting for you New",
+      "label": "For you 11:58:40 PM A question is waiting for you",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.42,
+      "irreversible": 0.42,
+      "anchor": {
+        "container": "Everything, newest first"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "For you 11:58:40 PM A question is waiting for you",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.35,
+      "irreversible": 0.41,
+      "anchor": {
+        "container": "Everything, newest first"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Collapse the live feed",
       "role": "button",
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.7,
-      "irreversible": 0.53
+      "confidence": 0.65,
+      "irreversible": 0.44
     },
     {
-      "kind": "wait",
-      "label": "Wait for the page to update",
-      "role": null,
-      "operation": "WAIT",
+      "kind": "click",
+      "label": "Open the live feed",
+      "role": "button",
+      "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.5,
-      "irreversible": 0.55
+      "confidence": 0.35,
+      "irreversible": 0.49,
+      "anchor": {
+        "container": "Live feed (collapsed)"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "For you 11:58:40 PM A question is waiting for you",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.74,
+      "irreversible": 0.49,
+      "anchor": {
+        "container": "Everything, newest first"
+      }
     },
     {
       "kind": "click",
@@ -93,38 +147,22 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.64,
-      "irreversible": 0.34
-    },
-    {
-      "kind": "click",
-      "label": "Open Type or say it — e.g. Resits are in August, capped at 40%",
-      "role": "textbox",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page changed",
-      "confidence": 0.41,
-      "irreversible": 0.52
+      "confidence": 0.4,
+      "irreversible": 0.39
     },
     {
       "kind": "fill",
       "label": "Type or say it — e.g. Resits are in August, capped at 40%",
       "role": "textbox",
       "operation": "TYPE_TEXT",
-      "text": "A1 · high",
-      "outcome": "page changed",
-      "confidence": 0.41,
-      "irreversible": 0.52
-    },
-    {
-      "kind": "click",
-      "label": "Open A1 · high",
-      "role": "textbox",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page changed",
-      "confidence": 0.49,
-      "irreversible": 0.74
+      "text": "It's a big deal for me — the team would rely on me until the end, so leaving early isn't really an option.",
+      "outcome": "page content changed",
+      "confidence": 0.22,
+      "irreversible": 0.47,
+      "anchor": {
+        "id": "crux-blindspot-answer",
+        "placeholder": "Type or say it — e.g. Resits are in August, capped at 40%"
+      }
     },
     {
       "kind": "click",
@@ -133,18 +171,22 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page changed",
-      "confidence": 0.53,
-      "irreversible": 0.72
+      "confidence": 0.77,
+      "irreversible": 0.41
+    }
+  ],
+  "heals": [
+    {
+      "at_step": 4,
+      "resumed_at": 6,
+      "reason": "replayed step had no visible effect",
+      "jev_actions": 1
     },
     {
-      "kind": "click",
-      "label": "Answer it",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.6,
-      "irreversible": 0.72
+      "at_step": 7,
+      "resumed_at": 8,
+      "reason": "replayed step had no visible effect",
+      "jev_actions": 6
     }
   ]
 }

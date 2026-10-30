@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Read the rail top to bottom.",
+  "goal_hash": "af4169a2a288119d4696731fe4f98742eaa7173248b2384ce82fd6fca4692881",
+  "recorded_at": 1793404224.4603677,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Dismiss",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.56,
+      "irreversible": 0.13
+    }
+  ]
+}

@@ -1,0 +1,182 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish (the last button starts the tutorial, which takes a few seconds to write).",
+  "goal_hash": "1aa48231f460181aea7ee800d15c7750167257dcdb3e5b1ff0b384137419b16a",
+  "recorded_at": 1793403974.7082124,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "fill",
+      "label": "Your name",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.96,
+      "irreversible": 0.45,
+      "value_ref": "Your name",
+      "anchor": {
+        "id": "onboarding-name",
+        "placeholder": "e.g. Akshay",
+        "container": "Welcome to StudyCanvas"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Continue",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.84,
+      "irreversible": 0.41,
+      "anchor": {
+        "container": "Welcome to StudyCanvas"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Skip",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 1.0,
+      "irreversible": 0.38,
+      "anchor": {
+        "container": "What level are you studying at, Ada?"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Skip",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.97,
+      "irreversible": 0.43,
+      "anchor": {
+        "container": "What do you study?"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Skip",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.99,
+      "irreversible": 0.35,
+      "anchor": {
+        "container": "What would make this term a win?"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Start the tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.89,
+      "irreversible": 0.35,
+      "anchor": {
+        "container": "How long should answers be?"
+      }
+    },
+    {
+      "kind": "wait",
+      "label": "Wait for the page to update",
+      "role": null,
+      "operation": "WAIT",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.34,
+      "irreversible": 0.12
+    },
+    {
+      "kind": "click",
+      "label": "New canvas",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.89,
+      "irreversible": 0.15
+    },
+    {
+      "kind": "fill",
+      "label": "Name",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": "Java OOP",
+      "outcome": "page content changed",
+      "confidence": 0.78,
+      "irreversible": 0.19,
+      "anchor": {
+        "id": "_r_i_-name",
+        "placeholder": "e.g. Biology Chapter 3",
+        "container": "New canvas"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Create",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.93,
+      "irreversible": 0.17,
+      "anchor": {
+        "container": "New canvas"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Create",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "navigated",
+      "confidence": 0.74,
+      "irreversible": 0.16,
+      "anchor": {
+        "container": "New canvas"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.49,
+      "irreversible": 0.15
+    },
+    {
+      "kind": "click",
+      "label": "Keep going",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.57,
+      "irreversible": 0.16
+    },
+    {
+      "kind": "click",
+      "label": "Skip step",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.45,
+      "irreversible": 0.14
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Search for a nonsense string.",
+  "goal_hash": "0090f8dbb681e2641d8fc7bdd8ad0ccfa430ed69d274cd115d8addf60f5e81bb",
+  "recorded_at": 1793404463.2698503,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "fill",
+      "label": "Search workspace",
+      "role": "combobox",
+      "operation": "TYPE_TEXT",
+      "text": "asdfghjkl",
+      "outcome": "page content changed",
+      "confidence": 0.51,
+      "irreversible": 0.09,
+      "anchor": {
+        "placeholder": "Search canvases, folders, spaces"
+      }
+    }
+  ]
+}

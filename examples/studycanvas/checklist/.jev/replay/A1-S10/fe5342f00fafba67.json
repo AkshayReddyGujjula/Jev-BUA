@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "In the Instructions tab, type \"Show each maths step.\".",
+  "goal_hash": "fe5342f00fafba67e9449df584c9b5bcc105d28606402fc74e469fd3eb804877",
+  "recorded_at": 1793404530.1846826,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Usage",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.42,
+      "irreversible": 0.12
+    }
+  ]
+}

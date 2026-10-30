@@ -3,58 +3,18 @@
   "url": "http://localhost:5173/workspace?storage=idb",
   "goal": "Create a new canvas named Jev Biology Chapter 3.",
   "goal_hash": "0df4f9265bb4fac18345f486f53ec8917bcd7c3fca28c66c3b430dd5aaad3224",
-  "recorded_at": 1793402217.8447652,
+  "recorded_at": 1793403903.7710545,
   "verified": true,
   "steps": [
-    {
-      "kind": "click",
-      "label": "End tutorial",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.22,
-      "irreversible": 0.09
-    },
-    {
-      "kind": "click",
-      "label": "Keep going",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.68,
-      "irreversible": 0.13
-    },
-    {
-      "kind": "click",
-      "label": "End tutorial",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.18,
-      "irreversible": 0.1
-    },
-    {
-      "kind": "click",
-      "label": "Keep going",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page changed",
-      "confidence": 0.97,
-      "irreversible": 0.14
-    },
     {
       "kind": "click",
       "label": "New canvas",
       "role": "button",
       "operation": "CLICK",
       "text": null,
-      "outcome": "page changed",
-      "confidence": 0.62,
-      "irreversible": 0.1
+      "outcome": "page content changed",
+      "confidence": 1.0,
+      "irreversible": 0.11
     },
     {
       "kind": "fill",
@@ -62,9 +22,9 @@
       "role": "textbox",
       "operation": "TYPE_TEXT",
       "text": "Jev Biology Chapter 3",
-      "outcome": "page content changed",
-      "confidence": 0.88,
-      "irreversible": 0.14,
+      "outcome": "page changed",
+      "confidence": 0.99,
+      "irreversible": 0.21,
       "anchor": {
         "id": "_r_d_-name",
         "placeholder": "e.g. Biology Chapter 3",
@@ -77,12 +37,20 @@
       "role": "button",
       "operation": "CLICK",
       "text": null,
-      "outcome": "page changed",
-      "confidence": 0.91,
-      "irreversible": 0.12,
+      "outcome": "page content changed",
+      "confidence": 1.0,
+      "irreversible": 0.17,
       "anchor": {
         "container": "New canvas"
       }
+    }
+  ],
+  "heals": [
+    {
+      "at_step": 0,
+      "resumed_at": 1,
+      "reason": "recorded step does not match this page",
+      "jev_actions": 1
     }
   ]
 }

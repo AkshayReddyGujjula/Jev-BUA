@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Collapse and expand it.",
+  "goal_hash": "0ea008961f93dcc6aa46e78b7068219ba3a5880fcbf752f50a0b676943a3d9a3",
+  "recorded_at": 1793404225.7622964,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Toggle workspace menu",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.93,
+      "irreversible": 0.09
+    }
+  ]
+}

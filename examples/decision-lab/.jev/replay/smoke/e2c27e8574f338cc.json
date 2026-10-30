@@ -3,7 +3,7 @@
   "url": "http://localhost:5180/?mock=1",
   "goal": "Wait for the question addressed to you and skip it.",
   "goal_hash": "e2c27e8574f338cc9a99de530e59389ac0d349b2b850863c057dc342c8f6308a",
-  "recorded_at": 1793399132.0359156,
+  "recorded_at": 1793404709.9084847,
   "verified": true,
   "steps": [
     {
@@ -34,7 +34,21 @@
       "text": null,
       "outcome": "page changed",
       "confidence": 0.13,
-      "irreversible": 0.21
+      "irreversible": 0.21,
+      "anchor": {
+        "id": "crux-composer",
+        "placeholder": "I have a hackathon tomorrow and my exam is the day after…"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Hackathon tomorrow, exam the day after — should I go?",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.97,
+      "irreversible": 0.16
     }
   ]
 }

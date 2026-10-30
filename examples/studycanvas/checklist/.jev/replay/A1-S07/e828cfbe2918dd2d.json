@@ -1,0 +1,48 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Create a canvas, then create another with the same name in the same place.",
+  "goal_hash": "e828cfbe2918dd2d81290e7e95e64b7d806d7b4e22d95e0b63d811c3d3934c99",
+  "recorded_at": 1793404282.971456,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "New canvas",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 1.0,
+      "irreversible": 0.09
+    },
+    {
+      "kind": "fill",
+      "label": "Name",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": "Java OOP",
+      "outcome": "page changed",
+      "confidence": 0.91,
+      "irreversible": 0.18,
+      "anchor": {
+        "id": "_r_d_-name",
+        "placeholder": "e.g. Biology Chapter 3",
+        "container": "New canvas"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Create",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.99,
+      "irreversible": 0.24,
+      "anchor": {
+        "container": "New canvas"
+      }
+    }
+  ]
+}

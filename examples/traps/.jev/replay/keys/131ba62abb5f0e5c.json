@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://127.0.0.1:8791/keys",
+  "goal": "Open the command bar with Ctrl+K.",
+  "goal_hash": "131ba62abb5f0e5c9c38f0155229bfe14e268fbc4b5ddadc7bc9a5b7d0336b69",
+  "recorded_at": 1793404653.0202057,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "key",
+      "label": "Press Ctrl+K (named in the task)",
+      "role": null,
+      "operation": "KEY_GOAL_CTRL_K_0",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.99,
+      "irreversible": 0.13
+    }
+  ]
+}

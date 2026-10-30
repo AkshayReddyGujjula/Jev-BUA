@@ -1,9 +1,9 @@
 {
   "version": 2,
   "url": "http://localhost:5173/workspace?storage=idb",
-  "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish.",
-  "goal_hash": "675fe0116d05c00ae3533951ab7ff61344d6d07b7824d37580924ddd37a5c572",
-  "recorded_at": 1793401614.3790379,
+  "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish (the last button starts the tutorial, which takes a few seconds to write).",
+  "goal_hash": "1aa48231f460181aea7ee800d15c7750167257dcdb3e5b1ff0b384137419b16a",
+  "recorded_at": 1793404491.8958116,
   "verified": true,
   "steps": [
     {
@@ -13,8 +13,8 @@
       "operation": "TYPE_TEXT",
       "text": null,
       "outcome": "page changed",
-      "confidence": 0.94,
-      "irreversible": 0.43,
+      "confidence": 0.96,
+      "irreversible": 0.45,
       "value_ref": "Your name",
       "anchor": {
         "id": "onboarding-name",
@@ -29,8 +29,8 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.81,
-      "irreversible": 0.48,
+      "confidence": 0.84,
+      "irreversible": 0.41,
       "anchor": {
         "container": "Welcome to StudyCanvas"
       }
@@ -43,7 +43,7 @@
       "text": null,
       "outcome": "page changed",
       "confidence": 1.0,
-      "irreversible": 0.4,
+      "irreversible": 0.38,
       "anchor": {
         "container": "What level are you studying at, Ada?"
       }
@@ -54,9 +54,9 @@
       "role": "button",
       "operation": "CLICK",
       "text": null,
-      "outcome": "page changed",
-      "confidence": 0.98,
-      "irreversible": 0.4,
+      "outcome": "page content changed",
+      "confidence": 0.97,
+      "irreversible": 0.43,
       "anchor": {
         "container": "What do you study?"
       }
@@ -67,9 +67,9 @@
       "role": "button",
       "operation": "CLICK",
       "text": null,
-      "outcome": "page changed",
+      "outcome": "page content changed",
       "confidence": 0.99,
-      "irreversible": 0.33,
+      "irreversible": 0.35,
       "anchor": {
         "container": "What would make this term a win?"
       }
@@ -81,11 +81,21 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.84,
-      "irreversible": 0.37,
+      "confidence": 0.95,
+      "irreversible": 0.5,
       "anchor": {
         "container": "How long should answers be?"
       }
+    },
+    {
+      "kind": "key",
+      "label": "Press Escape",
+      "role": null,
+      "operation": "KEY_ESCAPE",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.3,
+      "irreversible": 0.3
     }
   ]
 }

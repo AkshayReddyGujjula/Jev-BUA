@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace/canvas/ce35fff2-2eff-4963-b6db-c7bb64521455",
+  "goal": "End the tutorial.",
+  "goal_hash": "e65bfd60694d687ffe6725744548fc57288b4ab3882b6999d511374444de34f9",
+  "recorded_at": 1793403779.5619245,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Next page",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.46,
+      "irreversible": 0.16
+    },
+    {
+      "kind": "click",
+      "label": "Next page",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.56,
+      "irreversible": 0.14
+    }
+  ]
+}

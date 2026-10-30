@@ -18,6 +18,7 @@ path: /?mock=1
 path: /?mock=1
 
 1. Wait for the question addressed to you, answer it with the first option, and send it.
+   - see: How did your last ML-style exam go?
    - not see: how big is this hackathon for you?
 
 ## A question can be skipped

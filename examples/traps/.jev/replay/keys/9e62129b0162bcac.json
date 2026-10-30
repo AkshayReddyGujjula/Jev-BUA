@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://127.0.0.1:8791/keys",
+  "goal": "Press \"?\" to open the keyboard shortcuts.",
+  "goal_hash": "9e62129b0162bcace65605bda02025f3dab112cb8283af5a87fead89072c39a3",
+  "recorded_at": 1793404652.8309,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "key",
+      "label": "Press ? (named in the task)",
+      "role": null,
+      "operation": "KEY_GOAL_KEY_0",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.97,
+      "irreversible": 0.11
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "End the tutorial.",
+  "goal_hash": "33dbf823e964e10060871f6a03465e695d737fab5d8d0e2f3eab3f239afa7562",
+  "recorded_at": 1793403825.1811395,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 1.0,
+      "irreversible": 0.12
+    },
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.7,
+      "irreversible": 0.12
+    }
+  ]
+}

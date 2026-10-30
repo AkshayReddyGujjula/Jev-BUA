@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Open a Space and expand its sidebar.",
+  "goal_hash": "c03c2e31ca7924495fc04fd567570e176612a76f6a2f13074f5470da5660ba4f",
+  "recorded_at": 1793404522.8107436,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Organic Chemistry",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "navigated",
+      "confidence": 0.87,
+      "irreversible": 0.11,
+      "anchor": {
+        "container": "SPACES"
+      }
+    }
+  ]
+}

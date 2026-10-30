@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Read the toolbar strip under the breadcrumb.",
+  "goal_hash": "489523e0e6489dd0d18ea5c6f3d75a3675e3cca32e06b07afabdd4a0b250cbd3",
+  "recorded_at": 1793404238.5965042,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "New canvas",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.37,
+      "irreversible": 0.18
+    }
+  ]
+}
