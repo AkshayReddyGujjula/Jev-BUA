@@ -18,6 +18,7 @@ import argparse
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 QUOTED = re.compile(r"[\"“”]([^\"“”]{3,80})[\"“”]")
 SKIP = re.compile(
@@ -44,6 +45,31 @@ def checks_for(item):
     return seen
 
 
+OPEN = re.compile(r"^\s*(?:open|go to|visit|navigate to)\s+[\"“]((?:https?://[^\"”\s]+)|(?:/[^\"”\s<]*))[\"”]\.?\s*",
+                  re.IGNORECASE)
+
+
+def split_open(steps):
+    """(start path, remaining steps): an "Open "<url>"" sentence becomes where the test starts.
+
+    Jev has no address bar, so a goal that says "open this URL" cannot be done by choosing
+    controls; the runner loads the path instead and Jev does the rest.
+    """
+    start, rest = None, []
+    for step in steps:
+        match = OPEN.match(step)
+        if match and start is None:
+            target = match[1]
+            if target.startswith("http"):
+                parts = urlsplit(target)
+                target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+            start = target
+            step = step[match.end():].strip()
+        if step:
+            rest.append(step)
+    return start, rest
+
+
 def runnable(item):
     if item.get("retired") or item.get("gemini", "none") != "none":
         return False
@@ -63,11 +89,16 @@ def to_markdown(section, items, setup, path, base_url):
     for item in items:
         checks = checks_for(item)
         lines.append(f"## {item['id']} {item['title']}" + ("" if checks else " (no quoted check: review)"))
-        if path:
-            lines.append(f"path: {path}")
+        start, steps = split_open(item.get("steps") or [])
+        if start:
+            # Keep the app's own query switches (e.g. ?storage=idb) on the opened path.
+            query = urlsplit(path or "").query
+            start = start + (("&" if "?" in start else "?") + query if query and query not in start else "")
+        if start or path:
+            lines.append(f"path: {start or path}")
         lines.append("")
         goal = " ".join(step.strip() if step.strip().endswith((".", "?", "!")) else step.strip() + "."
-                        for step in item.get("steps") or [])
+                        for step in steps) or "Read the page."
         lines.append(f"1. {goal}")
         for phrase in checks:
             lines.append(f"   - see: {phrase}")
