@@ -43,7 +43,13 @@ after 2 identical verified recordings (maybe); miss reasons in report; Playwrigh
   specs (spec.py, `## Before each`), `jev test` / `jev init`, isolation context|storage, cost reporting,
   stop_on_expect (positive checks only), replay auto-wait, commit replay on local hosts.
   StudyCanvas examples/studycanvas/core.md: 5/5 fresh $0.0085 (61 calls) -> rerun $0.00028 (3 calls).
-- NEXT: MCP browser_test tool (async, beat 120 s cap); second project (Nebius Decision Lab ?mock=1,
+- 22:55 committed since: MCP browser_test/_status, anchors cascade, README section, skills/jev-test,
+  headless verified (5/5), step cap 25, dialogs policy (trap /dialog passes), viewport, checklist
+  importer (scripts/import_checklist.py -> examples/studycanvas/checklist/*.md), docs/go-to-market.md.
+  Running: 5 draft checklist sections (log in scratchpad checklist-run.log).
+- Remaining ideas: REPORT.md (morning summary), `jev test --repeat N` flake rate, landing page draft,
+  maybe Linux CI action.yml.
+- OLD NEXT: MCP browser_test tool (async, beat 120 s cap); second project (Nebius Decision Lab ?mock=1,
   run web on another port); anchors cascade; product docs + landing page; REPORT.md.
 
 ## Done so far

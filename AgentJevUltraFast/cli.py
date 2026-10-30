@@ -243,6 +243,9 @@ def test_command(argv):
     parser.add_argument("--no-replay", action="store_true", help="always decide with Jev; record nothing")
     parser.add_argument("--fresh", action="store_true", help="forget recorded plans first, then re-record")
     parser.add_argument("--skip-probe", action="store_true", help="do not check the app is up first")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="run the suite N times and report each test's pass rate (flakiness) and "
+                             "the cost of every run")
     args = parser.parse_args(argv)
     spec = Path(args.spec).resolve()
     if not spec.exists():
@@ -258,7 +261,36 @@ def test_command(argv):
         forwarded += ["--replay", str(replay_dir)]
     if args.skip_probe:
         forwarded.append("--skip-probe")
-    return checks_main(forwarded)
+    if args.repeat <= 1:
+        return checks_main(forwarded)
+    report_path = state / "reports" / f"{spec.stem}.json"
+    runs, tests = [], {}
+    for number in range(1, args.repeat + 1):
+        print(f"\n--- run {number}/{args.repeat}")
+        code = checks_main(forwarded)
+        if code == 2 or not report_path.exists():
+            return code
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        runs.append({"run": number, "passed": report.get("passed"), "total": report.get("total"),
+                     "usd": report.get("usd_estimate"), "model_calls": report.get("model_calls"),
+                     "wall_s": report.get("wall_s")})
+        for result in report.get("results", []):
+            entry = tests.setdefault(result.get("name"), {"passed": 0, "runs": 0})
+            entry["runs"] += 1
+            entry["passed"] += bool(result.get("verified"))
+    flaky = {name: entry for name, entry in tests.items() if 0 < entry["passed"] < entry["runs"]}
+    failing = {name: entry for name, entry in tests.items() if entry["passed"] == 0}
+    summary = {"spec": str(spec), "runs": runs, "tests": tests,
+               "flaky": sorted(flaky), "always_failing": sorted(failing)}
+    (state / "reports" / f"{spec.stem}.repeat.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(f"\n{'run':>4} {'passed':>8} {'model calls':>12} {'usd':>10}")
+    for run in runs:
+        print(f"{run['run']:>4} {run['passed']:>4}/{run['total']:<3} {run['model_calls'] or 0:>12} "
+              f"{run['usd'] or 0:>10.6f}")
+    for name, entry in tests.items():
+        mark = "FLAKY" if name in flaky else ("FAIL" if name in failing else "ok")
+        print(f"  {mark:<6} {entry['passed']}/{entry['runs']}  {name}")
+    return 0 if not flaky and not failing else 1
 
 
 def init_command(argv):

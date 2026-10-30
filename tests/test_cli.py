@@ -54,3 +54,40 @@ def test_interactive_reuses_one_tab_and_continues_on_the_current_page(monkeypatc
     assert runs[0][:2] == ("open youtube, search mkbhd", "https://youtube.com/")
     assert runs[1][:2] == ("turn on captions", "https://www.youtube.com/watch?v=1")
     assert runs[0][2] is runs[1][2]
+
+
+def test_jev_init_writes_a_runnable_starter_spec(tmp_path, monkeypatch):
+    from AgentJevUltraFast import cli, spec
+
+    monkeypatch.chdir(tmp_path)
+    assert cli.init_command(["--url", "http://localhost:4000/"]) == 0
+    suite = spec.load(tmp_path / "jev-tests" / "smoke.md")
+    assert suite["base_url"] == "http://localhost:4000" and len(suite["checks"]) == 2
+    assert (tmp_path / "jev-tests" / ".jev" / ".gitignore").read_text(encoding="utf-8") == "evidence/\nreports/\n"
+    assert cli.init_command([]) == 1          # never overwrites an existing spec
+
+
+def test_jev_test_repeat_reports_flaky_tests(tmp_path, monkeypatch):
+    import json
+
+    from AgentJevUltraFast import checks, cli
+
+    spec_file = tmp_path / "suite.md"
+    spec_file.write_text("## A\n1. Go.\n", encoding="utf-8")
+    verdicts = iter([True, False, True])
+
+    def fake_main(argv):
+        out = argv[argv.index("--out") + 1]
+        assert "--replay" in argv and "--chrome" in argv
+        ok = next(verdicts)
+        from pathlib import Path
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_text(json.dumps({"passed": int(ok), "total": 1, "usd_estimate": 0.001,
+                                         "model_calls": 3, "results": [{"name": "A", "verified": ok}]}),
+                             encoding="utf-8")
+        return 0 if ok else 1
+
+    monkeypatch.setattr(checks, "main", fake_main)
+    assert cli.test_command([str(spec_file), "--repeat", "3"]) == 1
+    summary = json.loads((tmp_path / ".jev" / "reports" / "suite.repeat.json").read_text(encoding="utf-8"))
+    assert summary["tests"]["A"] == {"passed": 2, "runs": 3} and summary["flaky"] == ["A"]

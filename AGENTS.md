@@ -34,8 +34,17 @@ This repo is the browser engine other agents drive. Three ways in, pick by what 
   (`JEV_EVIDENCE_DIR=0` disables it). Start the server directly with
   `.venv\Scripts\python.exe jev_mcp_server.py` if an agent needs it explained.
 - **CLI, one task:** `jev --brief [--url <url>] [--tab background] [--values '<json>'] [--expect '<json>'] [--mode auto|<slug>] "<goal>"` (installed by `uv tool install --editable .`; `jev` alone is interactive; `run_task.py` remains as a shim). Without `--url` the start page comes from the goal (`AgentJevUltraFast/start.py`), never from a model.
+- **App test suites (preferred for testing):** a Markdown spec (`AgentJevUltraFast/spec.py` documents
+  the format; `skills/jev-test/SKILL.md` teaches it) run by `jev test <spec.md>` or the MCP tools
+  `browser_test` / `browser_test_status` (background run, no 120 s cap). It uses a dedicated
+  automation Chrome (no approval prompt), records verified flows and replays them with no model
+  calls, heals one step at a time, and reports cost per test. Replay plans live in `<spec dir>/.jev/replay`
+  and are meant to be committed; `.jev/evidence` and `.jev/reports` are ignored.
+  `scripts/import_checklist.py` drafts specs from a JSON checklist (review the drafts).
 - **CLI, parallel app testing:** write a check file and run
   `uv run --env-file .env python scripts/run_checks.py checks.json --workers 6`
+  (`scripts/run_checks.py` is a shim for `AgentJevUltraFast/checks.py`; pass `--chrome dedicated`
+  to avoid the approval prompt entirely)
   (up to 10). Assertions in `expect` are read off the real page and are the verdict — not the agent's
   opinion. `checks.example.json` is a working template. Each instance (`jev-check-00`..`09`) is its
   own Chrome connection, so Chrome asks "Allow remote debugging?" once per instance the first time
