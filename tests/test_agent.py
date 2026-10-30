@@ -2501,3 +2501,20 @@ def test_a_reused_test_id_under_a_new_label_is_never_clicked_blind(runner, monke
     assert runner._replay_step() is False
     assert runner.state["replay"]["healing"]["reason"].startswith("commit-like")
     runner.state["browser"].act.assert_not_called()
+
+
+def test_review_evidence_carries_usage_once(runner):
+    recorded = []
+
+    class FakeEvidence:
+        def record(self, kind, **fields):
+            recorded.append((kind, fields))
+
+    runner.evidence = FakeEvidence()
+    runner.private_values = set()
+    runner._review_apply({"step": 1, "on_track": True, "subgoal": None, "reason": "fine",
+                          "latency_ms": 5, "model": "m", "error": None, "url": "https://example.test/",
+                          "usage": {"prompt_tokens": 10}})
+    assert recorded == [("review", {**recorded[0][1]})]
+    assert recorded[0][1]["usage"] == {"prompt_tokens": 10}
+    assert runner.state["reviews"][-1]["usage"] == {"prompt_tokens": 10}

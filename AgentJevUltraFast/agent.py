@@ -754,7 +754,7 @@ class Agent:
         state.setdefault("reviews", []).append(record)
         evidence = getattr(self, "evidence", None)
         if evidence is not None:
-            evidence.record("review", **record, usage=result.get("usage"))
+            evidence.record("review", **record)              # record carries its usage
         return record["applied"]
 
     def _review_close(self):
@@ -834,7 +834,7 @@ class Agent:
         state.setdefault("supervision", []).append(record)
         evidence = getattr(self, "evidence", None)
         if evidence is not None:
-            evidence.record("supervision", **record, usage=telemetry.get("usage"),
+            evidence.record("supervision", **record,          # record carries its usage
                             subgoal=redact((verdict or {}).get("subgoal"), private),
                             element_id=(verdict or {}).get("element_id"))
         if verdict is None:

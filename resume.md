@@ -56,6 +56,9 @@ after 2 identical verified recordings (maybe); miss reasons in report; Playwrigh
 - 23:01 StudyCanvas is being edited by ANOTHER session (HMR storms hung my :5173 Vite). Restarted my
   Vite with scratchpad\vite.frozen.config.ts (hmr off, watch ignored; NODE_PATH=frontend\node_modules).
   Night runs restarted (pid 48488). Earlier checklist numbers (8/25) were partly hit by the HMR storm.
+- 23:13 Opus review: 16 findings; all high/medium fixed in b53fa85 (439 tests). Night runs straddled
+  the fix. NEXT: after night-runs DONE, clean final round on fixed code: core.md --repeat 3, the 5
+  checklist sections (regenerate with importer first), decision-lab smoke; then fill REPORT.md.
 - Remaining ideas (older): REPORT.md (morning summary), `jev test --repeat N` flake rate, landing page draft,
   maybe Linux CI action.yml.
 - OLD NEXT: MCP browser_test tool (async, beat 120 s cap); second project (Nebius Decision Lab ?mock=1,
