@@ -84,6 +84,24 @@
       e.getAttribute('aria-expanded'),e.getAttribute('aria-checked'),e.getAttribute('aria-selected'),
       mask(e.getAttribute('href')),mask(scope?.innerText?.slice(0,6000)||'')];
   };
+  // Stable identity for replay only (never sent to a model): what a recorded step can re-find
+  // the element by when its visible label drifts or repeats. Generated ids are ignored.
+  const generatedId=/^(:r|radix-|headlessui-|mui-|react-aria|ember\d)|[0-9a-f]{8,}|\d{4,}/i;
+  const anchor=(e)=>{
+    const a={}, test=e.getAttribute('data-testid')||e.getAttribute('data-test')||
+      e.getAttribute('data-qa')||e.getAttribute('data-cy');
+    if (test) a.testid=mask(test);
+    if (e.id && !generatedId.test(e.id)) a.id=mask(e.id);
+    const field=e.getAttribute('name'); if (field) a.name=mask(field);
+    const hint=e.getAttribute('placeholder'); if (hint) a.placeholder=mask(hint);
+    const link=e.getAttribute('href');
+    if (link && !/^(javascript|data):/i.test(link)) { try { a.href=mask(new URL(link,location.href).pathname); } catch {} }
+    const box=e.closest('dialog,[role="dialog"],[role="alertdialog"],form,section,nav,aside,header,[role="region"],[role="menu"]');
+    const title=box && (box.getAttribute('aria-label') ||
+      box.querySelector('h1,h2,h3,h4,legend,[role="heading"]')?.innerText);
+    if (title) a.container=mask(title.trim().slice(0,60));
+    return a;
+  };
   const actions=[];
   for (const e of document.querySelectorAll(selector)) {
     if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
@@ -92,7 +110,7 @@
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
     const base={node:identity(e),role:rname,label:mask(name(e)||rname),
       form_submit:(!!e.form && e.type==='submit'),
-      rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
+      rect:{x:r.x,y:r.y,w:r.width,h:r.height}, anchor:anchor(e)};
     for (const key of ['checked','selected','expanded','pressed']) {
       const value=e.getAttribute('aria-'+key);
       if (value!==null) base[key]=value;

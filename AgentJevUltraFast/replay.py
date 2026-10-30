@@ -105,25 +105,64 @@ def normalize(label):
 
 
 def match_step(step, actions):
-    """The live action a recorded step refers to, or None when the match is not unique.
+    """The live action a recorded step refers to, or None when the match is not unique."""
+    return locate(step, actions)[0]
 
-    An ambiguous match is a miss on purpose: guessing between two same-labelled controls
-    is exactly the kind of silent wrong answer replay must not produce.
+
+def _anchor(action, key):
+    return ((action.get("anchor") or {}).get(key) or "").strip()
+
+
+def _narrow(candidates, step):
+    """Cut same-labelled candidates down to one by role, then by recorded anchors."""
+    if len(candidates) > 1 and step.get("role"):
+        roled = [action for action in candidates if action.get("role") == step["role"]]
+        if roled:
+            candidates = roled
+    recorded = step.get("anchor") or {}
+    for key in ("container", "testid", "id", "name", "placeholder", "href"):
+        if len(candidates) <= 1:
+            break
+        if recorded.get(key):
+            kept = [action for action in candidates if _anchor(action, key) == recorded[key]]
+            if kept:
+                candidates = kept
+    return candidates
+
+
+def locate(step, actions):
+    """(live action, tier) for a recorded step, or (None, reason).
+
+    A cascade in the spirit of browser-use's rerun matcher, but stricter: every tier must
+    resolve to exactly ONE element, and an ambiguity is a miss on purpose, because guessing
+    between two same-labelled controls is the silent wrong answer replay must never produce.
+      testid / id -> the developer's own stable handle, trusted when unique
+      label       -> kind + normalized accessible name, narrowed by role and anchors
+      anchor      -> the label drifted, but name / placeholder / href still name one element
     """
+    kind = step.get("kind")
+    if not kind:
+        return None, "no kind"
+    same_kind = [action for action in actions if action.get("kind") == kind]
+    recorded = step.get("anchor") or {}
+    for key in ("testid", "id"):
+        if recorded.get(key):
+            hits = [action for action in same_kind if _anchor(action, key) == recorded[key]]
+            if len(hits) == 1:
+                return hits[0], key
     wanted = normalize(step.get("label"))
-    if not wanted or not step.get("kind"):
-        return None
-    same = [
-        action for action in actions
-        if action.get("kind") == step["kind"] and normalize(action.get("label")) == wanted
-    ]
-    if len(same) == 1:
-        return same[0]
-    if len(same) > 1 and step.get("role"):
-        roled = [action for action in same if action.get("role") == step["role"]]
-        if len(roled) == 1:
-            return roled[0]
-    return None
+    if wanted:
+        same = _narrow([action for action in same_kind if normalize(action.get("label")) == wanted], step)
+        if len(same) == 1:
+            return same[0], "label"
+        if len(same) > 1:
+            return None, "ambiguous"
+    for key in ("name", "placeholder", "href"):
+        if recorded.get(key):
+            hits = [action for action in same_kind if _anchor(action, key) == recorded[key]]
+            if len(hits) == 1:
+                return hits[0], f"anchor:{key}"
+    return None, "not found"
 
 
 def descriptor(action, decision, outcome, text, value_ref=None):
@@ -141,6 +180,8 @@ def descriptor(action, decision, outcome, text, value_ref=None):
     }
     if fills and value_ref is not None:
         step["value_ref"] = value_ref
+    if action.get("anchor"):
+        step["anchor"] = dict(action["anchor"])
     return step
 
 

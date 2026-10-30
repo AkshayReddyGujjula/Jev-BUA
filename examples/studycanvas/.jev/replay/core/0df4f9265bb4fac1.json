@@ -3,19 +3,9 @@
   "url": "http://localhost:5173/workspace?storage=idb",
   "goal": "Create a new canvas named Jev Biology Chapter 3.",
   "goal_hash": "0df4f9265bb4fac18345f486f53ec8917bcd7c3fca28c66c3b430dd5aaad3224",
-  "recorded_at": 1793398639.674732,
+  "recorded_at": 1793399452.3223836,
   "verified": true,
   "steps": [
-    {
-      "kind": "click",
-      "label": "End tutorial",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.22,
-      "irreversible": 0.09
-    },
     {
       "kind": "click",
       "label": "New canvas",
@@ -23,8 +13,8 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.78,
-      "irreversible": 0.13
+      "confidence": 0.88,
+      "irreversible": 0.1
     },
     {
       "kind": "fill",
@@ -33,8 +23,13 @@
       "operation": "TYPE_TEXT",
       "text": "Jev Biology Chapter 3",
       "outcome": "page changed",
-      "confidence": 0.99,
-      "irreversible": 0.16
+      "confidence": 0.98,
+      "irreversible": 0.14,
+      "anchor": {
+        "id": "_r_3_-name",
+        "placeholder": "e.g. Biology Chapter 3",
+        "container": "New canvas"
+      }
     },
     {
       "kind": "click",
@@ -43,14 +38,17 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page changed",
-      "confidence": 0.96,
-      "irreversible": 0.15
+      "confidence": 0.99,
+      "irreversible": 0.17,
+      "anchor": {
+        "container": "New canvas"
+      }
     }
   ],
   "heals": [
     {
-      "at_step": 1,
-      "resumed_at": 2,
+      "at_step": 0,
+      "resumed_at": 1,
       "reason": "recorded step does not match this page",
       "jev_actions": 1
     }

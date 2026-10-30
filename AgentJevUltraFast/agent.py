@@ -1011,7 +1011,7 @@ class Agent:
             self.replay_plan = None
             return self._finish_replay_by_readback()
         step = steps[index]
-        action = replay.match_step(step, page["actions"])
+        action, tier = replay.locate(step, page["actions"])
         waited_until = time.monotonic() + REPLAY_WAIT_S
         while action is None and time.monotonic() < waited_until:
             # Auto-wait, reads only: the recorded element is often a transition away (a dialog
@@ -1024,7 +1024,7 @@ class Agent:
                 break
             state["page"] = page
             self.note_progress(page)
-            action = replay.match_step(step, page["actions"])
+            action, tier = replay.locate(step, page["actions"])
         if action is None:
             return self._heal(index, "recorded step does not match this page")
         if committal(action) and not getattr(self, "replay_commits", REPLAY_COMMITS):
@@ -1058,7 +1058,7 @@ class Agent:
         evidence = getattr(self, "evidence", None)
         if evidence is not None:
             evidence.record(
-                "replay_step", index=index, action_kind=action["kind"],
+                "replay_step", index=index, action_kind=action["kind"], tier=tier,
                 label=action.get("label"), operation=decision["operation"],
             )
         try:

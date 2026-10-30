@@ -2379,3 +2379,43 @@ def test_a_covered_target_presses_escape_once_then_is_routed_around(runner):
     runner._covered("e3")                       # same URL: no second Escape
     assert browser.act.call_count == 1
     assert issubclass(CoveredTarget, StalePage)  # every existing StalePage handler still applies
+
+
+def test_replay_cascade_prefers_a_unique_test_id_over_a_renamed_label():
+    from AgentJevUltraFast import replay
+
+    actions = [
+        {"id": "a", "kind": "click", "label": "Save draft", "anchor": {"testid": "save"}},
+        {"id": "b", "kind": "click", "label": "Save", "anchor": {"testid": "publish"}},
+    ]
+    step = {"kind": "click", "label": "Save", "anchor": {"testid": "save"}}
+    assert replay.locate(step, actions) == (actions[0], "testid")
+
+
+def test_replay_cascade_narrows_repeated_labels_by_their_container():
+    from AgentJevUltraFast import replay
+
+    actions = [
+        {"id": "a", "kind": "click", "label": "Delete", "anchor": {"container": "Biology"}},
+        {"id": "b", "kind": "click", "label": "Delete", "anchor": {"container": "Chemistry"}},
+    ]
+    step = {"kind": "click", "label": "Delete", "anchor": {"container": "Chemistry"}}
+    assert replay.locate(step, actions) == (actions[1], "label")
+    assert replay.locate({"kind": "click", "label": "Delete"}, actions) == (None, "ambiguous")
+
+
+def test_replay_cascade_follows_a_field_whose_label_drifted_by_its_name():
+    from AgentJevUltraFast import replay
+
+    actions = [{"id": "a", "kind": "fill", "label": "Work email address", "anchor": {"name": "email"}}]
+    step = {"kind": "fill", "label": "Email", "anchor": {"name": "email"}}
+    assert replay.locate(step, actions) == (actions[0], "anchor:name")
+    assert replay.locate({"kind": "fill", "label": "Email"}, actions) == (None, "not found")
+
+
+def test_descriptors_keep_the_element_anchor():
+    from AgentJevUltraFast import replay
+
+    step = replay.descriptor({"kind": "click", "label": "Go", "anchor": {"testid": "go"}},
+                             {"operation": "CLICK"}, "page changed", None)
+    assert step["anchor"] == {"testid": "go"}
