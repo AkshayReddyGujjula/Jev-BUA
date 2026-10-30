@@ -176,6 +176,7 @@ def run_worker(job, out_path):
                        commit_floor=job.get("commit_floor"),
                        replay_commits=job.get("replay_commits", local_host(job["url"])),
                        stop_on_expect=job.get("stop_on_expect", True),
+                       check_wait=job.get("check_wait"),
                        max_steps=step.get("max_steps", job.get("max_steps", STEP_ACTIONS))) as agent:
                 for _ in agent.run():
                     if time.monotonic() > deadline:

@@ -477,8 +477,12 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
     result = None
     hedged = None
     stored = cache.load(key) if use_cache else None
-    if stored is not None and not _cached_heads_valid(stored, operations, targets):
-        # A poisoned entry must not make the same state fail until its TTL expires.
+    if stored is not None and (not _cached_heads_valid(stored, operations, targets)
+                               or _abstains(stored, operations)):
+        # A poisoned entry must not make the same state fail until its TTL expires. Neither
+        # may an old refusal: ABSTAIN is the model's uncertainty on one call, and serving it
+        # again from the cache turns one shaky reading into a permanent one (measured: a
+        # suite test abstained with zero model calls on a page it had passed before).
         cache.delete(key)
         stored = None
     if stored is not None:
@@ -552,7 +556,7 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
         if value and value["choice"] != COMPOSE and value["choice"].split(":")[0] == target:
             decision["literal"] = {"text": literal_values[value["choice"]],
                                    "confidence": value["confidence"]}
-    if stored is None:
+    if stored is None and operation != "ABSTAIN":
         # Store only after every head this decision can execute has validated.
         cache.store(key, result)
     return decision
@@ -568,6 +572,13 @@ def _cached_heads_valid(result, operations, targets):
     except (KeyError, TypeError, ValueError):
         return False
     return True
+
+
+def _abstains(result, operations):
+    try:
+        return validate_choice(result["answers"].get("operation", {}), operations)["choice"] == "ABSTAIN"
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
 
 
 def field_context(goal, action, page, history, mode_state=None):

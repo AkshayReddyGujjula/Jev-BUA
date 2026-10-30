@@ -87,6 +87,7 @@ EXPECT_WAIT_S = max(0.0, float(os.environ.get("JEV_EXPECT_WAIT_S", "3")))
 # asking Jev again. Off by default; for a disposable test environment whose owner trusts it.
 REPLAY_COMMITS = os.environ.get("JEV_REPLAY_COMMITS", "0").strip().lower() in {"1", "true", "yes", "on"}
 # Times a DONE contradicted by the caller's checks is turned back into "keep going" per run.
+CHECK_WAIT_MAX_S = 60.0
 CHECK_DONE_LIMIT = int(os.environ.get("JEV_CHECK_DONE_LIMIT", "2"))
 # Checks that something IS on the page. Only these can end a run early (see _finish_on_readback).
 POSITIVE_CHECKS = {"text_contains", "text_contains_all", "url_contains", "url_matches",
@@ -233,7 +234,7 @@ class Agent:
     def __init__(self, url, goals, *, record_dir=None, screenshots=False, values=None, find=None,
                  expect=None, browser=None, evidence_dir=None, replay_dir=None, mode=None,
                  collect_steps=None, steps=None, commit_floor=None,
-                 replay_commits=None, stop_on_expect=False, max_steps=None):
+                 replay_commits=None, stop_on_expect=False, max_steps=None, check_wait=None):
         task = goals.strip() if isinstance(goals, str) else "\n".join(goals).strip()
         if not task:
             raise ValueError("Supply a task")
@@ -276,6 +277,11 @@ class Agent:
         # End the run as soon as the caller's checks hold after a step (test-runner semantics:
         # the checks define done), instead of waiting for Jev to choose DONE.
         self.stop_on_expect = bool(stop_on_expect)
+        # How long the final readback keeps re-reading for the checks to hold (Playwright's
+        # expect timeout). A caller whose app does slow work after a click (a model writing a
+        # page, an upload) raises it; capped so a typo cannot hold a run for minutes.
+        self.expect_wait_s = (EXPECT_WAIT_S if check_wait is None
+                              else min(CHECK_WAIT_MAX_S, max(0.0, float(check_wait))))
         self._max_steps = _budget(spec.get("max_steps"), None)
         if max_steps is not None:
             # A caller's cap (a test step) lowers the mode's, never raises it.
@@ -898,7 +904,7 @@ class Agent:
             # assertion: a DONE right after a click often lands mid-transition (measured: an
             # access gate still on screen while its "Opening your workspace" animation ran).
             # Every read is a fresh, independent readback; the last one is the verdict.
-            deadline = time.monotonic() + EXPECT_WAIT_S
+            deadline = time.monotonic() + getattr(self, "expect_wait_s", EXPECT_WAIT_S)
             facts = None
             while True:
                 try:
@@ -1187,7 +1193,7 @@ class Agent:
         page by the same auto-waiting readback that judges every run. Without one, or when
         the checks do not hold yet, Jev decides what is left as usual.
         """
-        return self._finish_on_readback(EXPECT_WAIT_S, via="replay")
+        return self._finish_on_readback(getattr(self, "expect_wait_s", EXPECT_WAIT_S), via="replay")
 
     def _finish_on_readback(self, wait_s, via="expect"):
         """Finish the run as done when the caller's expectation holds on the live page now.

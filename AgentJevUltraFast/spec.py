@@ -35,9 +35,9 @@ so nothing here can weaken a verdict: a malformed check rejects the whole file.
 import re
 
 SUITE_KEYS = {"base_url", "isolate", "commit_floor", "max_seconds", "max_steps", "tab", "review", "viewport", "dialogs",
-              "replay_commits", "stop_on_expect", "mode"}
+              "replay_commits", "stop_on_expect", "mode", "check_wait"}
 TEST_KEYS = {"path", "isolate", "commit_floor", "max_seconds", "max_steps", "tab", "review", "viewport", "dialogs",
-             "replay_commits", "stop_on_expect", "mode"}
+             "replay_commits", "stop_on_expect", "mode", "check_wait"}
 BEFORE_EACH = {"before each", "before each test", "setup"}
 BEFORE_ALL = {"before all", "before all tests", "global setup"}
 STEP = re.compile(r"^\s*(\d+)[.)]\s+(.+?)\s*$")
@@ -65,8 +65,8 @@ def _scalar(key, raw):
         return True
     if lowered in {"false", "no", "off"}:
         return False
-    if key in {"commit_floor"}:
-        return float(value)
+    if key in {"commit_floor", "check_wait"}:
+        return float(value.removesuffix("s").strip())
     if key in {"max_seconds", "max_steps"}:
         return int(value)
     return value

@@ -1458,6 +1458,23 @@ def test_cache_bypass_is_a_real_second_reading(monkeypatch, tmp_path):
     assert len(calls) == 2 and second["cached"] is False
 
 
+def test_a_refusal_is_never_served_from_the_cache(monkeypatch, tmp_path):
+    calls = []
+
+    def post(_url, _key, body, **_kwargs):
+        calls.append(body)
+        return _complete_answer(body, "ABSTAIN")
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setenv("JEV_CACHE", "1")
+    monkeypatch.setenv("JEV_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(model, "post_json", post)
+
+    first = model.choose(page(), "Find a book", [])
+    second = model.choose(page(), "Find a book", [])
+    assert first["choice"] == "ABSTAIN" and second["cached"] is False and len(calls) == 2
+
+
 def test_changed_state_is_a_cache_miss(monkeypatch, tmp_path):
     calls = []
 
@@ -2518,3 +2535,12 @@ def test_review_evidence_carries_usage_once(runner):
     assert recorded == [("review", {**recorded[0][1]})]
     assert recorded[0][1]["usage"] == {"prompt_tokens": 10}
     assert runner.state["reviews"][-1]["usage"] == {"prompt_tokens": 10}
+
+
+def test_check_wait_sets_the_readback_window_and_is_capped(monkeypatch):
+    monkeypatch.setattr(loop.modes, "resolve", lambda *a, **k: (None, {}))
+    browser = Mock(observe=Mock(return_value=page()), private_values=[])
+    assert loop.Agent("https://example.test/", "goal", browser=browser).expect_wait_s == loop.EXPECT_WAIT_S
+    assert loop.Agent("https://example.test/", "goal", browser=browser, check_wait=20).expect_wait_s == 20
+    assert loop.Agent("https://example.test/", "goal", browser=browser,
+                      check_wait=900).expect_wait_s == loop.CHECK_WAIT_MAX_S
