@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rehearse — plain-English browser tests</title>
+<meta name="description" content="Plain-English browser tests your coding agent can run. Verified on the real page. Reruns cost nothing.">
+<style>
+  :root {
+    --bg: #fbfaf7; --ink: #17161a; --muted: #5f5c66; --line: #e4e1da; --card: #ffffff;
+    --accent: #1f6f5c; --accent-ink: #ffffff; --code: #f2efe8; --pass: #1f6f5c; --warn: #9a5b00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111114; --ink: #ecebef; --muted: #a3a0ab; --line: #2a2930; --card: #18181d;
+      --accent: #46b393; --accent-ink: #0d1411; --code: #1d1d23; --pass: #46b393; --warn: #e0a64a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 17px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 0 16px 80px; }
+  nav { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; }
+  .brand { font-weight: 700; letter-spacing: -0.01em; }
+  .brand small { color: var(--muted); font-weight: 500; margin-left: 6px; }
+  nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: 15px; }
+  h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.05; letter-spacing: -0.03em; margin: 48px 0 16px; max-width: 14ch; }
+  h2 { font-size: 28px; letter-spacing: -0.02em; margin: 72px 0 12px; }
+  p.lead { font-size: 20px; color: var(--muted); max-width: 46ch; margin: 0 0 28px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn { background: var(--accent); color: var(--accent-ink); padding: 12px 18px; border-radius: 10px;
+         text-decoration: none; font-weight: 600; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
+  .install { background: var(--code); border: 1px solid var(--line); padding: 11px 14px; border-radius: 10px; }
+  .hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 40px; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .panel header { font-size: 13px; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .panel pre { margin: 0; padding: 14px; overflow-x: auto; white-space: pre; }
+  .ok { color: var(--pass); font-weight: 700; }
+  .num-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 18px; }
+  .num { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .num b { display: block; font-size: 30px; letter-spacing: -0.02em; }
+  .num span { color: var(--muted); font-size: 14px; }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .step h3 { margin: 0 0 6px; font-size: 17px; }
+  .step p { margin: 0; color: var(--muted); font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line);
+          border-radius: 14px; overflow: hidden; font-size: 15px; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  .tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .tier { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  .tier b { font-size: 28px; }
+  .tier ul { padding-left: 18px; color: var(--muted); font-size: 15px; }
+  .fine { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  footer { color: var(--muted); font-size: 14px; margin-top: 80px; border-top: 1px solid var(--line); padding-top: 20px; }
+  @media (max-width: 760px) {
+    .hero-grid, .steps, .tiers { grid-template-columns: 1fr; }
+    .num-grid { grid-template-columns: repeat(2, 1fr); }
+    nav a { display: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <nav>
+    <div class="brand">Rehearse<small>powered by Jev</small></div>
+    <div><a href="#how">How it works</a><a href="#numbers">Numbers</a><a href="#pricing">Pricing</a></div>
+  </nav>
+
+  <h1>Your app, tested in plain English.</h1>
+  <p class="lead">Write what a user does. A real browser does it. The page itself decides pass or fail, and every rerun replays the verified flow with no model calls.</p>
+  <div class="cta">
+    <code class="install">jev init --url http://localhost:3000 &amp;&amp; jev test jev-tests/smoke.md</code>
+    <a class="btn" href="#pricing">Get early access</a>
+  </div>
+
+  <div class="hero-grid">
+    <section class="panel">
+      <header>jev-tests/checkout.md</header>
+<pre>## Before each
+path: /login
+1. Sign in.
+   - see: Dashboard
+
+## Adding to cart updates the badge
+path: /products
+1. Add the first product to the cart.
+   - see: Added to cart
+2. Open the cart.
+   - see: Subtotal
+   - not see: Your cart is empty
+   - no page errors</pre>
+    </section>
+    <section class="panel">
+      <header>jev test jev-tests/checkout.md</header>
+<pre>check                          assert  calls       usd
+Adding to cart updates badge   <span class="ok">PASS</span>        0  0.000000
+Coupon rejects bad codes       <span class="ok">PASS</span>        1  0.000077
+Guest checkout reaches review  <span class="ok">PASS</span>        0  0.000000
+
+3/3 verified
+cost ~$0.000077 for 1 model call;
+41 steps replayed with no model call</pre>
+    </section>
+  </div>
+  <p class="fine">Illustrative output in the real format. Measured numbers are below.</p>
+
+  <h2 id="numbers">Measured on a real app</h2>
+  <p>StudyCanvas (Vite + React, localhost). Every test first passes an access gate and a five-question onboarding.</p>
+  <div class="num-grid">
+    <div class="num"><b>5/5</b><span>tests verified, first run and replay</span></div>
+    <div class="num"><b>$0.0085</b><span>first run, 61 model calls, nothing recorded</span></div>
+    <div class="num"><b>$0.00028</b><span>third run, 3 model calls</span></div>
+    <div class="num"><b>~13 s</b><span>per test, including sign-in and onboarding</span></div>
+  </div>
+
+  <h2 id="how">How it works</h2>
+  <div class="steps">
+    <div class="step"><h3>1. Steps are goals</h3><p>“Create a project named Apollo.” Jev, a decision model, picks the next control on the live page in about 0.4 s. No selectors, no screenshots, no code to maintain.</p></div>
+    <div class="step"><h3>2. The page is the verdict</h3><p><code>see:</code>, <code>not see:</code>, <code>url contains:</code>, <code>no page errors</code> are read off the real page. A pass is a fact, never a model’s opinion.</p></div>
+    <div class="step"><h3>3. Reruns are free</h3><p>Verified flows are recorded by meaning and replayed with zero model calls. When the app changes, one step is re-decided and the plan heals itself.</p></div>
+  </div>
+
+  <h2>Built for your coding agent</h2>
+  <p>One MCP server, one CLI. Your agent writes a spec, calls <code>browser_test</code>, and gets back pass/fail, cost, the failing check and what the page showed. Specs and replay plans live in your repo, so CI reruns cost nothing.</p>
+  <pre class="install">claude mcp add jev -- jev-mcp</pre>
+
+  <h2>Why not just…</h2>
+  <table>
+    <tr><th></th><th>Verdict</th><th>Rerun cost</th><th>Runs where</th></tr>
+    <tr><td><b>Rehearse</b></td><td>Read off the real page</td><td>~$0 (replay)</td><td>Your machine or CI</td></tr>
+    <tr><td>Playwright agents + frontier model</td><td>Generated code; model heals</td><td>Frontier tokens each heal</td><td>Your machine</td></tr>
+    <tr><td>LLM browser agents</td><td>Often the model’s judgement</td><td>Model call every step</td><td>Varies</td></tr>
+    <tr><td>Managed AI QA</td><td>Varies</td><td>Hundreds of $/month</td><td>Their cloud</td></tr>
+  </table>
+
+  <h2 id="pricing">Pricing</h2>
+  <div class="tiers">
+    <div class="tier"><h3>Local</h3><b>$0</b><ul><li>Unlimited local and self-hosted runs</li><li>CLI, MCP server, replay, healing</li><li>Bring your own model keys</li></ul></div>
+    <div class="tier"><h3>Pro</h3><b>$19<small>/mo</small></b><ul><li>5,000 hosted test runs</li><li>GitHub pull-request comments</li><li>30-day run history</li></ul></div>
+    <div class="tier"><h3>Team</h3><b>$99<small>/mo</small></b><ul><li>50,000 runs, 10 in parallel</li><li>Flake and heal analytics</li><li>5 seats</li></ul></div>
+  </div>
+  <p class="fine">Hosted tiers are planned. Local is available today.</p>
+
+  <footer>Rehearse is a working name. Jev is TypeSafe’s decision model. Numbers from runs on 30 Oct 2026; see REPORT.md.</footer>
+</main>
+</body>
+</html>

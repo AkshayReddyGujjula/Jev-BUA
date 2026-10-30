@@ -3,7 +3,7 @@
   "url": "http://localhost:5173/workspace?storage=idb",
   "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish.",
   "goal_hash": "675fe0116d05c00ae3533951ab7ff61344d6d07b7824d37580924ddd37a5c572",
-  "recorded_at": 1793400762.106726,
+  "recorded_at": 1793400807.3317049,
   "verified": true,
   "steps": [
     {
@@ -109,13 +109,82 @@
     },
     {
       "kind": "click",
-      "label": "End tutorial",
+      "label": "Home 0",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "navigated",
+      "confidence": 0.91,
+      "irreversible": 0.16
+    },
+    {
+      "kind": "click",
+      "label": "StudyCanvas",
       "role": "button",
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.66,
-      "irreversible": 0.14
+      "confidence": 0.8,
+      "irreversible": 0.15
+    },
+    {
+      "kind": "click",
+      "label": "Open Search workspace",
+      "role": "combobox",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.8,
+      "irreversible": 0.18,
+      "anchor": {
+        "placeholder": "Search canvases, folders, spaces"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Open Search workspace",
+      "role": "combobox",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.72,
+      "irreversible": 0.17,
+      "anchor": {
+        "placeholder": "Search canvases, folders, spaces"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Open Search workspace",
+      "role": "combobox",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.64,
+      "irreversible": 0.15,
+      "anchor": {
+        "placeholder": "Search canvases, folders, spaces"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Usage",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.52,
+      "irreversible": 0.19
+    },
+    {
+      "kind": "click",
+      "label": "Usage",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.6,
+      "irreversible": 0.2
     }
   ]
 }
