@@ -1,0 +1,71 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Open a canvas and press \"?\". Read the Canvas group.",
+  "goal_hash": "0f2cb6c755f6c9a755c73fbf1654140a22d30c498fe665edcdca83d889063363",
+  "recorded_at": 1793400079.5233483,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "New canvas",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.87,
+      "irreversible": 0.13
+    },
+    {
+      "kind": "fill",
+      "label": "Name",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": "Java OOP",
+      "outcome": "page changed",
+      "confidence": 0.81,
+      "irreversible": 0.13,
+      "anchor": {
+        "id": "_r_5_-name",
+        "placeholder": "e.g. Biology Chapter 3",
+        "container": "New canvas"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Create",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.94,
+      "irreversible": 0.17,
+      "anchor": {
+        "container": "New canvas"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Open",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "navigated",
+      "confidence": 0.63,
+      "irreversible": 0.13,
+      "anchor": {
+        "container": "Continue where you left off"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Keyboard shortcuts",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.59,
+      "irreversible": 0.12
+    }
+  ]
+}

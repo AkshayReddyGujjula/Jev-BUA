@@ -151,7 +151,10 @@ class Browser:
     def __init__(self, url, *, follow_tabs=None):
         if chrome.dedicated():
             chrome.ensure_chrome()
-        ensure_daemon()
+        # JEV_DAEMON_WAIT_S bounds the wait for a browser connection, including the user
+        # Chrome's approval prompt, which otherwise waits for a person indefinitely.
+        wait = os.environ.get("JEV_DAEMON_WAIT_S")
+        ensure_daemon(wait=float(wait) if wait else None)
         self.context = None
         self.private_values = []
         self.follow_tabs = follow_tabs

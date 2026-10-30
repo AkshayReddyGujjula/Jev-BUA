@@ -3,7 +3,7 @@
   "url": "http://localhost:5173/workspace?storage=idb",
   "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish.",
   "goal_hash": "675fe0116d05c00ae3533951ab7ff61344d6d07b7824d37580924ddd37a5c572",
-  "recorded_at": 1793399938.060077,
+  "recorded_at": 1793399966.4045808,
   "verified": true,
   "steps": [
     {
@@ -101,16 +101,6 @@
       }
     },
     {
-      "kind": "key",
-      "label": "Press Escape",
-      "role": null,
-      "operation": "KEY_ESCAPE",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.42,
-      "irreversible": 0.29
-    },
-    {
       "kind": "click",
       "label": "End tutorial",
       "role": "button",
@@ -132,101 +122,31 @@
     },
     {
       "kind": "click",
-      "label": "New canvas",
+      "label": "End tutorial",
       "role": "button",
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.71,
-      "irreversible": 0.12
-    },
-    {
-      "kind": "fill",
-      "label": "Name",
-      "role": "textbox",
-      "operation": "TYPE_TEXT",
-      "text": null,
-      "outcome": "page changed",
-      "confidence": 1.0,
-      "irreversible": 0.15,
-      "anchor": {
-        "id": "_r_n_-name",
-        "placeholder": "e.g. Biology Chapter 3",
-        "container": "New canvas"
-      }
+      "confidence": 0.87,
+      "irreversible": 0.11
     },
     {
       "kind": "click",
-      "label": "Create",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page changed",
-      "confidence": 0.96,
-      "irreversible": 0.16,
-      "anchor": {
-        "container": "New canvas"
-      }
-    },
-    {
-      "kind": "click",
-      "label": "Menu",
+      "label": "End tutorial",
       "role": "button",
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.53,
-      "irreversible": 0.23
-    },
+      "confidence": 0.8,
+      "irreversible": 0.13
+    }
+  ],
+  "heals": [
     {
-      "kind": "click",
-      "label": "Add node",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.54,
-      "irreversible": 0.19
-    },
-    {
-      "kind": "click",
-      "label": "Add node",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.54,
-      "irreversible": 0.2
-    },
-    {
-      "kind": "click",
-      "label": "Menu",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.53,
-      "irreversible": 0.26
-    },
-    {
-      "kind": "click",
-      "label": "Add node",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.68,
-      "irreversible": 0.23
-    },
-    {
-      "kind": "click",
-      "label": "Add node",
-      "role": "button",
-      "operation": "CLICK",
-      "text": null,
-      "outcome": "page content changed",
-      "confidence": 0.63,
-      "irreversible": 0.24
+      "at_step": 7,
+      "resumed_at": 8,
+      "reason": "replayed step had no visible effect",
+      "jev_actions": 1
     }
   ]
 }

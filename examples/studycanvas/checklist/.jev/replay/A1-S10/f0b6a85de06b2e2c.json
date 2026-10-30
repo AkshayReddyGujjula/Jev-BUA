@@ -1,0 +1,105 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Open a Space and expand its sidebar. Switch between the \"Instructions\" and \"Sources\" tabs.",
+  "goal_hash": "f0b6a85de06b2e2cc0e27a329e01850f62b9e23efacf1149eea0d964c8630d8c",
+  "recorded_at": 1793400309.537172,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Chapter 2 of 6. Open the tutorial map",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.38,
+      "irreversible": 0.09
+    },
+    {
+      "kind": "click",
+      "label": "Show step",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.36,
+      "irreversible": 0.07,
+      "anchor": {
+        "container": "Tutorial map"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.5,
+      "irreversible": 0.08
+    },
+    {
+      "kind": "key",
+      "label": "Press Escape",
+      "role": null,
+      "operation": "KEY_ESCAPE",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.29,
+      "irreversible": 0.1
+    },
+    {
+      "kind": "click",
+      "label": "New space",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.34,
+      "irreversible": 0.08
+    },
+    {
+      "kind": "fill",
+      "label": "Name",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 1.0,
+      "irreversible": 0.11,
+      "anchor": {
+        "id": "_r_a_-name",
+        "placeholder": "e.g. Organic Chemistry",
+        "container": "New Space"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Create",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.92,
+      "irreversible": 0.19,
+      "anchor": {
+        "container": "New Space"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Sources",
+      "role": "tab",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.94,
+      "irreversible": 0.1,
+      "anchor": {
+        "id": "space-tab-sources",
+        "container": "Lecture Space Space settings"
+      }
+    }
+  ]
+}

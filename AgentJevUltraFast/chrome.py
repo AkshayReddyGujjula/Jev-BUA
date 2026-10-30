@@ -58,6 +58,19 @@ def _load_env_files():
                 os.environ.setdefault(key, value.strip().strip('"').strip("'"))
 
 
+UNATTENDED_COMMANDS = {"test", "draft"}
+
+
+def unattended_command(argv=None):
+    """True when this process is `jev test|draft` (console script or `-m AgentJevUltraFast.cli`)."""
+    argv = sys.argv if argv is None else argv
+    if len(argv) < 2 or argv[1] not in UNATTENDED_COMMANDS:
+        return False
+    program = Path(argv[0]).name.lower()
+    return program.startswith("jev") or program in {"cli.py", "-m", "-c"} or argv[0].endswith(
+        ("AgentJevUltraFast\\cli.py", "AgentJevUltraFast/cli.py"))
+
+
 def mode():
     value = os.environ.get("JEV_CHROME", "user").strip().lower()
     return "dedicated" if value in {"dedicated", "own", "separate"} else "user"
@@ -87,6 +100,12 @@ def apply_env():
     name would otherwise be silently reused. An explicit BU_CDP_WS/BU_CDP_URL always wins.
     """
     _load_env_files()
+    if "JEV_CHROME" not in os.environ and unattended_command():
+        # `jev test` / `jev draft` run unattended by design. Deciding here, at import, is the
+        # only safe place: by the time the command's own code runs, Browser Harness has already
+        # read BU_NAME, and a late switch once attached to the user's Chrome and waited forever
+        # on its "Allow remote debugging?" prompt (observed 30 Oct 2026, 23:05).
+        os.environ["JEV_CHROME"] = "dedicated"
     if not dedicated() or os.environ.get("BU_CDP_WS") or os.environ.get("BU_CDP_URL"):
         return
     os.environ["BU_CDP_URL"] = endpoint()

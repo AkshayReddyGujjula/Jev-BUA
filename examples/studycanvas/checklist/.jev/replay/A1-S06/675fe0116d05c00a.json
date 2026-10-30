@@ -1,0 +1,104 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish.",
+  "goal_hash": "675fe0116d05c00ae3533951ab7ff61344d6d07b7824d37580924ddd37a5c572",
+  "recorded_at": 1793400001.839537,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "fill",
+      "label": "Your name",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.94,
+      "irreversible": 0.43,
+      "value_ref": "Your name",
+      "anchor": {
+        "id": "onboarding-name",
+        "placeholder": "e.g. Akshay",
+        "container": "Welcome to StudyCanvas"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Continue",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.81,
+      "irreversible": 0.48,
+      "anchor": {
+        "container": "Welcome to StudyCanvas"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Skip",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 1.0,
+      "irreversible": 0.4,
+      "anchor": {
+        "container": "What level are you studying at, Ada?"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Skip",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.98,
+      "irreversible": 0.4,
+      "anchor": {
+        "container": "What do you study?"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Skip",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.99,
+      "irreversible": 0.33,
+      "anchor": {
+        "container": "What would make this term a win?"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Balanced",
+      "role": "radio",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.73,
+      "irreversible": 0.42,
+      "anchor": {
+        "container": "How long should answers be?"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "Start the tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.91,
+      "irreversible": 0.37,
+      "anchor": {
+        "container": "How long should answers be?"
+      }
+    }
+  ]
+}

@@ -7,7 +7,10 @@ from AgentJevUltraFast import chrome
 def clean_env(monkeypatch):
     for name in ("JEV_CHROME", "JEV_CHROME_PORT", "JEV_CHROME_PATH", "JEV_CHROME_HEADLESS",
                  "BU_CDP_WS", "BU_CDP_URL", "BU_NAME"):
-        monkeypatch.delenv(name, raising=False)
+        # set-then-delete so teardown restores the original state even for variables the
+        # code under test writes straight into os.environ.
+        monkeypatch.setenv(name, "x")
+        monkeypatch.delenv(name)
     monkeypatch.setattr(chrome, "ENV_FILES", ())
 
 
@@ -69,3 +72,22 @@ def test_missing_chrome_is_reported(monkeypatch):
     monkeypatch.setattr(chrome, "find_chrome", lambda: None)
     with pytest.raises(RuntimeError, match="dedicated-chrome-missing"):
         chrome.ensure_chrome()
+
+
+@pytest.mark.parametrize("argv, expected", [
+    (["jev", "test", "suite.md"], True),
+    ([r"C:\venv\Scripts\jev.exe", "draft", "http://localhost:3000"], True),
+    (["-m", "test", "suite.md"], True),                       # python -m AgentJevUltraFast.cli test
+    (["jev", "--brief", "open youtube"], False),              # "do X in my browser" keeps the user's Chrome
+    (["jev"], False),
+    (["pytest", "test"], False),
+])
+def test_unattended_commands_choose_the_dedicated_chrome(argv, expected):
+    assert chrome.unattended_command(argv) is expected
+
+
+def test_jev_test_selects_dedicated_chrome_before_any_browser_import(monkeypatch):
+    import os
+    monkeypatch.setattr(chrome.sys, "argv", ["jev", "test", "suite.md"])
+    chrome.apply_env()
+    assert os.environ["JEV_CHROME"] == "dedicated" and os.environ["BU_CDP_URL"].endswith(":9333")
