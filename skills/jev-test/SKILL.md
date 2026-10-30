@@ -44,6 +44,8 @@ Rules that make tests cheap and trustworthy:
   default 3; raise it for steps that start slow work such as a model call).
 - `## Before all` instead of `## Before each` signs in once per run and the tests start from its
   state: use it when sign-in is slow or rate-limited (tests then run one at a time).
+- To test a keyboard shortcut, name the key in the step: `Press "?"`, `Ctrl+K`, `ArrowDown`,
+  `the Tab key`. Words like Home, End or Delete alone are not keys.
 - A step without checks reports suggested `see:` lines from what it changed on screen; adopt the
   right ones (never the ones that were true before the step).
 

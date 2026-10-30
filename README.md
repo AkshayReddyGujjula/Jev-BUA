@@ -61,7 +61,12 @@ lines taken from what it changed on screen.
 and the tests start from the state it left (signed in, onboarded): use it when signing in is slow or
 rate-limited, and note that its tests then run one at a time. `check_wait: 20` (suite or test) lets
 the checks keep re-reading for up to 20 s, for steps that start slow work such as a model call or
-an upload (default 3 s). A JSON test checklist
+an upload (default 3 s).
+
+Keyboard shortcuts: a step that names a key ("Press \"?\" to open the shortcuts", "Open the command
+bar with Ctrl+K", "move down with ArrowDown", "the Tab key") gets that key as an action, parsed from
+the step's own words; Jev never invents a key. Several `jev test` runs (or coding agents) can run at
+once on one machine: each takes its own set of browser connections. A JSON test checklist
 can be drafted the same way with `scripts/import_checklist.py`.
 
 Measured on a real app ([StudyCanvas](examples/studycanvas/core.md), Vite + React on localhost; every
