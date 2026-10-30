@@ -1833,7 +1833,9 @@ def test_reattach_rearms_the_render_keepalive(monkeypatch):
     methods = []
     monkeypatch.setattr(browser, "cdp", lambda method, **k: methods.append(method) or {"sessionId": "s2"})
     assert b.reattach() is True
-    assert methods == ["Target.attachToTarget", "Page.startScreencast"]
+    # The page-error recorder is re-installed on the new session before the keepalive.
+    assert methods == ["Target.attachToTarget", "Page.addScriptToEvaluateOnNewDocument",
+                       "Runtime.evaluate", "Page.startScreencast"]
 
 
 def test_a_decision_that_changed_nothing_is_evicted_from_the_cache(runner, monkeypatch):

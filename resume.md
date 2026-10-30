@@ -1,0 +1,44 @@
+# Overnight run: resume notes
+
+Deadline: 02:30 on 31 Oct 2026. Branch: `overnight/jev-qa` (local only, never push).
+Goal: cheapest browser agent that keeps quality and speed; first real use is repeatable app testing
+(Study Canvas pre-production checklist on localhost).
+
+## Rules from the user
+- Study Canvas (`C:\Users\aksha\Desktop\Hackathons\Hack London KCL\StudyCanvas`) is read-only. Run it on
+  localhost only (backend :8000, frontend :5173); any access code works locally. Test files live in this repo.
+- OpenCode: DeepSeek V4.1 Flash only, no spend cap. Jev API: stay under $2.
+- At 95% Claude usage (5-hour or weekly): update this file and stop; the cron job (every 20 min at :07/:27/:47)
+  wakes the session. Weekly was 69% at 21:33 and resets 03:00, so it is the binding limit.
+- Never use the user's real Chrome: launch the separate profile
+  `~/.jev-ultrafast/chrome-test-profile` with `--remote-debugging-port=9333` and set `BU_CDP_WS`.
+  Verified 21:40: no "Allow remote debugging" prompt.
+- Run tests with `.venv\Scripts\python.exe -m pytest` (uv sync fails while a daemon holds the venv).
+- Nothing may be Study-Canvas-specific: build generic localhost app testing. Also trial on 1-2 other
+  projects in Desktop\GitHub or Desktop\Hackathons (read-only, few API calls).
+- Keep RAM under 90% (slow down if near), close stale tabs/processes, prune old artifacts.
+- New DeepSeek key works (verified 21:59). OpenCode CLI also works.
+- Study Canvas: backend `..\.venv\Scripts\python.exe -m uvicorn main:app --port 8000` in backend\,
+  frontend `npm run dev -- --port 5173 --strictPort` in frontend\. Use `?storage=idb` (dev switch, no
+  folder picker). One-tab lock: use isolated contexts per check. Logs in scratchpad sc-*.out.
+
+## Research conclusions (done)
+- Landscape: record/replay with zero LLM calls (Stagehand, Momentic, Skyvern, workflow-use); semantic
+  fingerprint re-match; heal only the broken step + heal log; pre/post conditions; variables for values;
+  Markdown specs (Playwright planner style) compiled to expect; never LLM-judged verdicts.
+- Audit gaps: JEV_CHROME only honoured if set in the process env (apply_env runs at import, before
+  .env loads); run_checks should ensure_chrome once; replay breaks on supplied values, never heals, never
+  re-records, skips gates; text_contains is any-of; JS dialogs unhandled; MCP browser_checks 120 s cap;
+  reviewer on by default (up to 12 calls/run) and not in cost reports.
+
+## Done so far
+- chrome.py dedicated Chrome + tests; expect auto-wait (JEV_EXPECT_WAIT_S=3), text_contains_all,
+  no_page_errors (page error recorder installed per document).
+
+## Status
+- [x] Branch created, WIP snapshot committed (995fee6), 385 tests pass.
+- [ ] Research (landscape, Jev cost audit, Study Canvas checklist digest)
+- [ ] Harden unattended runs
+- [ ] Test scripts + zero-model replay
+- [ ] Study Canvas trial
+- [ ] Packaging, docs, REPORT.md

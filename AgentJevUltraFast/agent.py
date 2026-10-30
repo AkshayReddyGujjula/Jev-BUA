@@ -80,6 +80,9 @@ STALL_HARD_S = float(os.environ.get("JEV_STALL_HARD_SECONDS", "20"))
 # Never start a model call with less than this much of the hard window left: a decision
 # that cannot finish inside the backstop must not be started at all.
 MIN_DECIDE_S = float(os.environ.get("JEV_MIN_DECIDE_SECONDS", "0.6"))
+# How long the final readback keeps re-reading the page for the caller's expectation to hold.
+# Readbacks are plain page reads, never model calls; 0 reads exactly once.
+EXPECT_WAIT_S = max(0.0, float(os.environ.get("JEV_EXPECT_WAIT_S", "3")))
 # Backstop for the deadline: consecutive decisions with no progress at all. The clock can
 # be held open by a page that keeps changing; a decision count cannot.
 STALL_MAX_ROUNDS = int(os.environ.get("JEV_STALL_MAX_ROUNDS", "8"))
@@ -827,21 +830,33 @@ class Agent:
         checks = None
         expect = getattr(self, "expect", None)
         if expect:
-            try:
-                facts = page_facts(
-                    state["browser"], selectors_for(expect), value_selectors_for(expect)
-                )
-            except Exception as error:
-                # The last observation is not an independent verification. In
-                # particular, an absent-text assertion could otherwise pass when
-                # the browser stopped answering.
-                state["readback_error"] = type(error).__name__
-            else:
+            # Re-read until every check holds or the window closes, like an auto-waiting test
+            # assertion: a DONE right after a click often lands mid-transition (measured: an
+            # access gate still on screen while its "Opening your workspace" animation ran).
+            # Every read is a fresh, independent readback; the last one is the verdict.
+            deadline = time.monotonic() + EXPECT_WAIT_S
+            facts = None
+            while True:
+                try:
+                    facts = page_facts(
+                        state["browser"], selectors_for(expect), value_selectors_for(expect)
+                    )
+                except Exception as error:
+                    # The last observation is not an independent verification. In
+                    # particular, an absent-text assertion could otherwise pass when
+                    # the browser stopped answering.
+                    state["readback_error"] = type(error).__name__
+                    facts = None
+                    break
                 facts["harvest"] = {
                     "items": (state.get("harvest") or {}).get("items", 0),
                     "file": (state.get("harvest") or {}).get("file"),
                 }
-                _, checks = evaluate_expectations(expect, facts)
+                passed, checks = evaluate_expectations(expect, facts)
+                if passed or time.monotonic() >= deadline:
+                    break
+                time.sleep(0.25)
+            if facts is not None:
                 checks = redact(checks, getattr(self, "private_values", ()))
                 state["checks"] = checks
                 state["readback"] = {

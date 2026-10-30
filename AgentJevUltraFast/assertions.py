@@ -12,10 +12,26 @@ import re
 # Every key an expectation may carry. Anything else is a caller mistake, and a mistake must
 # never read as a pass: an unknown key would add no check, and "all of zero checks passed"
 # is True.
-TEXT_LIST_KEYS = ("text_contains", "text_absent")
+TEXT_LIST_KEYS = ("text_contains", "text_contains_all", "text_absent")
 STRING_KEYS = ("url_contains", "url_matches", "title_contains")
 EXPECT_KEYS = frozenset(
-    TEXT_LIST_KEYS + STRING_KEYS + ("selector_count", "value_contains", "harvest_at_least")
+    TEXT_LIST_KEYS + STRING_KEYS
+    + ("selector_count", "value_contains", "harvest_at_least", "no_page_errors")
+)
+
+# Installed before any page script on every document the run's tab loads, so uncaught
+# exceptions, unhandled rejections and console.error calls are visible to the readback.
+# It only records; it never changes how the page behaves.
+ERROR_RECORDER = (
+    "(() => { if (window.__jevErrors) return; const out = window.__jevErrors = [];"
+    "const keep = m => { if (out.length < 50) out.push(String(m).slice(0, 300)); };"
+    "addEventListener('error', e => keep(e.message || (e.target && e.target.src"
+    " ? 'failed to load ' + e.target.src : 'error')), true);"
+    "addEventListener('unhandledrejection', e => keep('unhandled rejection: '"
+    " + ((e.reason && e.reason.message) || e.reason)));"
+    "const original = console.error; console.error = function (...args) {"
+    " keep(args.map(a => (a && a.message) || a).join(' ')); return original.apply(this, args); };"
+    "})()"
 )
 
 
@@ -79,6 +95,11 @@ def normalize_expect(expect):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError("expect.harvest_at_least must be an integer >= 1")
         out["harvest_at_least"] = value
+    if "no_page_errors" in expect:
+        # Only `true` asks for anything; `false` would be a check that can never fail.
+        if expect["no_page_errors"] is not True:
+            raise ValueError("expect.no_page_errors must be true")
+        out["no_page_errors"] = True
     return out
 
 
@@ -114,6 +135,10 @@ def evaluate_expectations(expect, page_state):
         wanted = expect["text_contains"]
         hits = [w for w in wanted if w.lower() in lower]
         record("text_contains", bool(hits), f"matched {hits} of {wanted}")
+    if "text_contains_all" in expect:
+        wanted = expect["text_contains_all"]
+        missing = [w for w in wanted if w.lower() not in lower]
+        record("text_contains_all", not missing, f"missing {missing} of {wanted}")
     if "text_absent" in expect:
         unwanted = expect["text_absent"]
         hits = [w for w in unwanted if w.lower() in lower]
@@ -136,6 +161,13 @@ def evaluate_expectations(expect, page_state):
         count = int((page_state.get("harvest") or {}).get("items") or 0)
         record("harvest_at_least", count >= int(expect["harvest_at_least"]),
                f"harvest -> {count} (need >= {expect['harvest_at_least']})")
+    if "no_page_errors" in expect:
+        errors = page_state.get("errors")
+        if errors is None:
+            # The recorder was not installed on this document; absence of evidence is no pass.
+            record("no_page_errors", False, "page error recorder unavailable")
+        else:
+            record("no_page_errors", not errors, f"{len(errors)} error(s): {errors[:3]}")
     if not detail:
         # Unreachable after normalize_expect, and kept so zero checks can never verify.
         return None, []
@@ -172,7 +204,8 @@ def page_facts(browser, selectors=(), value_selectors=()):
         f"const values = Object.fromEntries({json.dumps(list(value_selectors))}.map(s => "
         "[s, document.querySelector(s)?.value ?? '']));"
         "return {url:location.href,title:document.title,text:document.body.innerText,"
-        "selector_counts:counts,values:values};"
+        "selector_counts:counts,values:values,"
+        "errors:Array.isArray(window.__jevErrors)?window.__jevErrors.slice():null};"
         "})()"
     )
     facts = browser.evaluate(expression)

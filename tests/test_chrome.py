@@ -1,0 +1,60 @@
+import pytest
+
+from AgentJevUltraFast import chrome
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch):
+    for name in ("JEV_CHROME", "JEV_CHROME_PORT", "JEV_CHROME_PATH", "JEV_CHROME_HEADLESS",
+                 "BU_CDP_WS", "BU_CDP_URL", "BU_NAME"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_user_mode_leaves_harness_env_alone():
+    chrome.apply_env()
+    import os
+    assert "BU_CDP_URL" not in os.environ and "BU_NAME" not in os.environ
+
+
+def test_dedicated_mode_routes_to_its_own_daemon_and_port(monkeypatch):
+    import os
+    monkeypatch.setenv("JEV_CHROME", "dedicated")
+    monkeypatch.setenv("JEV_CHROME_PORT", "9444")
+    monkeypatch.setenv("BU_NAME", "jev-check-03")
+    chrome.apply_env()
+    chrome.apply_env()  # idempotent: the suffix is added once
+    assert os.environ["BU_CDP_URL"] == "http://127.0.0.1:9444"
+    assert os.environ["BU_NAME"] == "jev-check-03-chrome9444"
+
+
+def test_explicit_cdp_endpoint_wins(monkeypatch):
+    import os
+    monkeypatch.setenv("JEV_CHROME", "dedicated")
+    monkeypatch.setenv("BU_CDP_WS", "ws://remote")
+    chrome.apply_env()
+    assert "BU_CDP_URL" not in os.environ and "BU_NAME" not in os.environ
+
+
+def test_running_browser_is_reused_without_launch(monkeypatch):
+    monkeypatch.setattr(chrome, "version", lambda timeout=1.0: {"Browser": "Chrome/150"})
+    monkeypatch.setattr(chrome.subprocess, "Popen", lambda *a, **k: pytest.fail("launched"))
+    assert chrome.ensure_chrome()["Browser"] == "Chrome/150"
+
+
+def test_browser_that_never_answers_is_an_error_not_a_hang(monkeypatch, tmp_path):
+    monkeypatch.setenv("JEV_CHROME_PROFILE", str(tmp_path / "profile"))
+    monkeypatch.setattr(chrome, "version", lambda timeout=1.0: None)
+    monkeypatch.setattr(chrome, "find_chrome", lambda: "chrome")
+    launched = []
+    monkeypatch.setattr(chrome.subprocess, "Popen", lambda command, **k: launched.append(command))
+    with pytest.raises(RuntimeError, match="dedicated-chrome-timeout"):
+        chrome.ensure_chrome(timeout=0.3)
+    assert "--remote-debugging-port=9333" in launched[0]
+    assert f"--user-data-dir={tmp_path / 'profile'}" in launched[0]
+
+
+def test_missing_chrome_is_reported(monkeypatch):
+    monkeypatch.setattr(chrome, "version", lambda timeout=1.0: None)
+    monkeypatch.setattr(chrome, "find_chrome", lambda: None)
+    with pytest.raises(RuntimeError, match="dedicated-chrome-missing"):
+        chrome.ensure_chrome()

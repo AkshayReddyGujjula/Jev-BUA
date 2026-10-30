@@ -8,6 +8,9 @@ import time
 from pathlib import Path
 
 from browser_harness.admin import ensure_daemon
+
+from . import chrome
+from .assertions import ERROR_RECORDER
 from browser_harness.helpers import activate_tab, cdp
 
 # Atomically read visible content and controls, preserving actual DOM node identity.
@@ -108,6 +111,8 @@ def _visible_page_target():
 
 class Browser:
     def __init__(self, url, *, follow_tabs=None):
+        if chrome.dedicated():
+            chrome.ensure_chrome()
         ensure_daemon()
         self.private_values = []
         self.follow_tabs = follow_tabs
@@ -136,6 +141,7 @@ class Browser:
                 )
         self._known_targets = {t["targetId"] for t in self._page_targets()}
         self.owned_targets = [self.target] if self.owns_target else []
+        self._install_recorders()
         # Keep rAF/menus rendering even when the tab is not the visible one.
         self.call("Emulation.setFocusEmulationEnabled", enabled=True)
         self.rendering = self.mode != "background"
@@ -256,9 +262,22 @@ class Browser:
             self._known_targets.add(target)
             self.target = target
         self.session = cdp("Target.attachToTarget", targetId=target, flatten=True)["sessionId"]
+        self._install_recorders()
         # A screencast belongs to the session it was started on.
         self._keep_rendering()
         return True
+
+    def _install_recorders(self):
+        """Record page errors on this target's current and future documents (best effort).
+
+        A new-document script belongs to the CDP session that added it, so every attach
+        installs it again; the recorder itself is idempotent per document.
+        """
+        try:
+            self.call("Page.addScriptToEvaluateOnNewDocument", source=ERROR_RECORDER)
+            self.call("Runtime.evaluate", expression=ERROR_RECORDER)
+        except Exception:
+            pass
 
     def _browser_operation(self, request):
         try:
@@ -392,6 +411,7 @@ class Browser:
                 target = real[0]["targetId"]
                 self.session = cdp("Target.attachToTarget", targetId=target, flatten=True)["sessionId"]
                 self.target = target
+                self._install_recorders()
                 self._known_targets.add(target)
                 if self.owns_target:
                     self.owned_targets.append(target)

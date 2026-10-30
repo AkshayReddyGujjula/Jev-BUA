@@ -1,0 +1,12 @@
+{
+  "base_url": "http://localhost:5173",
+  "defaults": { "max_seconds": 60, "tab": "background" },
+  "checks": [
+    {
+      "name": "onboarding accepts a made-up student name",
+      "path": "/workspace?storage=idb",
+      "goal": "Answer the first onboarding question with a realistic student first name and continue.",
+      "expect": { "text_absent": ["First, what should we call you?"], "no_page_errors": true }
+    }
+  ]
+}

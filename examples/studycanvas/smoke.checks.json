@@ -1,0 +1,19 @@
+{
+  "base_url": "http://localhost:5173",
+  "defaults": { "max_seconds": 60, "tab": "background" },
+  "checks": [
+    {
+      "name": "A1-S05-01 unknown URL shows the 404 page and Go home leaves it",
+      "path": "/workspace/no-such-place-xyz?storage=idb",
+      "goal": "Click Go home.",
+      "expect": { "text_absent": ["Page not found"] }
+    },
+    {
+      "name": "A1-S02-04 any code passes the local access gate",
+      "path": "/workspace?storage=idb",
+      "goal": "Enter the access code and continue into the workspace.",
+      "values": { "Access code": "jev-local-test" },
+      "expect": { "text_absent": ["Enter your access code"] }
+    }
+  ]
+}
