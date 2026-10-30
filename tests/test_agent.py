@@ -294,6 +294,19 @@ def test_stale_observation_preserves_executed_action(runner):
     runner.state["browser"].act.assert_called_once()
 
 
+def test_lost_session_on_a_page_action_reattaches_and_continues(runner):
+    runner.state["decision"] = decision("wait")
+    runner.state["browser"].act.side_effect = RuntimeError("Session with given id not found.")
+    runner.state["browser"].reattach.return_value = True
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state["status"] == "ready" and not state.get("uncertain_execution")
+    runner.state["browser"].reattach.assert_called_once()
+    # A click that lost its session may have committed something: that still ends the run.
+    runner.state["decision"] = decision("e3")
+    state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert state["status"] == "blocked" and state["uncertain_execution"] is True
+
+
 def test_lost_mutation_reply_blocks_further_actions(runner):
     runner.state["decision"] = decision("e3")
     runner.state["browser"].act.side_effect = RuntimeError("session lost after dispatch")
@@ -417,6 +430,49 @@ def test_key_action_dispatches_key_down_and_up(monkeypatch):
     assert cdp.call_count == 2
     assert cdp.call_args_list[0].args[0] == "Input.dispatchKeyEvent"
 
+
+
+def test_page_shortcut_with_control_sends_no_text_and_clears_field_focus(monkeypatch):
+    import AgentJevUltraFast.browser as browser
+
+    cdp = Mock(return_value={})
+    monkeypatch.setattr(browser, "cdp", cdp)
+    browser.browser_operation({"operation": "act", "session": "s", "action": {
+        "id": "key_control_enter", "kind": "key", "key": "Enter", "code": "Enter", "vk": 13,
+        "modifiers": 2, "shortcut": True, "label": "Press Control+Enter (page shortcut: Send)",
+    }})
+    methods = [c.args[0] for c in cdp.call_args_list]
+    assert methods == ["Runtime.evaluate", "Input.dispatchKeyEvent", "Input.dispatchKeyEvent"]
+    assert "blur()" in cdp.call_args_list[0].kwargs["expression"]
+    down = cdp.call_args_list[1].kwargs
+    assert down["modifiers"] == 2 and "text" not in down
+
+
+@pytest.mark.parametrize("label, gated", [
+    ("Press Control+Enter (page shortcut: Send)", True),     # gated like clicking Send
+    ("Press f (page shortcut: Full screen (f))", False),
+])
+def test_page_shortcuts_are_gated_like_their_element(label, gated):
+    from AgentJevUltraFast import gates
+
+    action = {"kind": "key", "shortcut": True, "role": "button", "label": label}
+    verdict = gates.check({"confidence": 0.4, "irreversible": 0.1}, action)
+    assert (verdict is not None) is gated
+    # A built-in Escape or Enter is not a page element and stays ungated.
+    assert gates.check({"confidence": 0.1, "irreversible": 0.9},
+                       {"kind": "key", "label": "Press Enter"}) is None
+
+
+def test_video_state_and_pressed_state_reach_the_decision():
+    assert model.media_line({"speed": 1.5, "fullscreen": True, "paused": False, "muted": False,
+                             "captions": None}) == "[video: speed 1.5x, fullscreen, playing, sound on]"
+    assert model.media_line(None) == ""
+    state = {"url": "u", "title": "t", "text": "body", "media": {"speed": 2}}
+    assert model.page_text(state) == "[video: speed 2x]\nbody"
+    elements, _, _ = model.action_space([
+        {"id": "e1", "kind": "click", "node": 1, "role": "button", "label": "Bold", "pressed": "true"},
+    ])
+    assert elements[0]["pressed"] == "true"
 
 def _dead_streak(runner):
     runner.state["history"] = [
@@ -643,11 +699,11 @@ def test_call_never_replays_an_ambiguous_cdp_command(monkeypatch):
 
 
 def test_run_task_never_retries_an_ambiguous_session_error(monkeypatch):
-    import run_task
+    from AgentJevUltraFast import cli as run_task
 
     calls = {"n": 0}
 
-    def fake_run_once(args):
+    def fake_run_once(args, **_kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("{'code': -32001, 'message': 'Session with given id not found.'}")
@@ -1183,6 +1239,8 @@ def test_low_confidence_mutation_reobserves_then_skips(runner, reversible_floor)
 
 
 def test_second_low_confidence_irreversible_reading_abstains(runner):
+    # The chosen element must itself be committal; a page-level reading alone does not gate.
+    runner.state["page"]["actions"][2]["label"] = "Place order"
     runner.state["decision"] = {**decision("e3"), "confidence": 0.7, "irreversible": 0.95}
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert runner.state["gate"]["resolution"] == "reobserve"
@@ -1233,6 +1291,7 @@ def test_a_skipped_choice_is_routed_around(runner, monkeypatch):
 
 
 def test_irreversible_action_gates_above_the_reversible_floor(runner):
+    runner.state["page"]["actions"][2]["label"] = "Place order"
     runner.state["decision"] = {**decision("e3"), "confidence": 0.7, "irreversible": 0.95}
     state = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert state["gate"]["reason"].startswith("irreversible")
@@ -1269,6 +1328,22 @@ def test_a_mode_may_lower_the_irreversible_floor():
     assert verdict is not None and verdict["floor"] == 0.7
     clamped = gates.check({"confidence": 0.4, "irreversible": 0.9}, click, irreversible_floor=0.1)
     assert clamped["floor"] == 0.5                    # never below MODE_FLOOR_MIN
+
+
+@pytest.mark.parametrize("action,gated", [
+    ({"kind": "click", "label": "Search", "role": "button", "form_submit": True}, False),
+    ({"kind": "click", "label": "Comments", "role": "button"}, False),
+    ({"kind": "click", "label": "iPhone 17 Review", "role": "button"}, False),
+    ({"kind": "click", "label": "Create account", "role": "button", "form_submit": True}, True),
+    ({"kind": "click", "label": "Comment", "role": "button"}, True),
+    ({"kind": "click", "label": "Post", "role": "button"}, True),
+])
+def test_page_level_irreversibility_gates_only_committal_clicks(action, gated):
+    """YouTube reads 0.7+ irreversible on every page; Search and Comments must still run."""
+    from AgentJevUltraFast import gates
+
+    verdict = gates.check({"confidence": 0.34, "irreversible": 0.79}, action)
+    assert (verdict is not None) is gated
 
 
 def test_reversible_roles_do_not_inherit_a_submit_buttons_risk():
@@ -2088,3 +2163,111 @@ def test_back_stays_offered_when_history_cannot_be_read():
     assert agent._back_available() is True
     agent.browser = SimpleNamespace(target="t")
     assert agent._back_available() is True
+
+
+def test_ambient_text_does_not_stale_a_page_level_action():
+    """A playing video's clock changes every second; a key press or DONE must still land."""
+    import AgentJevUltraFast.browser as browser
+
+    b = browser.Browser.__new__(browser.Browser)
+    page = {"page_key": ["doc", "https://v/", 0, 0], "marker": ["doc", "0:01", "focus-player"],
+            "guards": {"7": ["box"]}}
+
+    def evaluate(expression):
+        if "focusKey" in expression:
+            return [["doc", "https://v/", 0, 0], "focus-player"]
+        if "guard(" in expression:
+            return [["doc", "https://v/", 0, 0], ["box"]]
+        return ["doc", "0:02", "focus-player"]          # full marker: the clock moved
+
+    b.evaluate = evaluate
+    assert b.fresh(page, {"kind": "key", "key": "c"}) is True
+    assert b.fresh(page, verdict=True) is True
+    assert b.fresh(page, {"kind": "fill", "node": 7}) is True
+    assert b.fresh(page) is False                        # "observe again?" stays strict
+    page["marker"][-1] = "focus-search-box"              # focus moved: a key would type
+    assert b.fresh(page, {"kind": "key", "key": "c"}) is False
+
+
+@pytest.mark.parametrize("goal,expected", [
+    ("Open YouTube, type in MKBHD, go to click on its first iPhone 17 video, and reply to the "
+     "first comment saying bango that's it", ["MKBHD", "bango that's it"]),
+    ('search for mkbhd channel, reply to the top comment saying "banger - jev" and then fullscreen',
+     ["banger - jev", "mkbhd channel"]),
+    ("fill in the form with name 'Ada Lovelace'", ["Ada Lovelace"]),
+    ("open studycanvas, go inside the canvas and type the word hello", ["hello"]),
+    ("Open MKBHD's iPhone 17 review", []),
+])
+def test_goal_literals_are_found_by_code(goal, expected):
+    from AgentJevUltraFast.model import goal_literals
+
+    assert goal_literals(goal) == expected
+
+
+def test_a_matched_goal_literal_skips_the_text_model(runner, monkeypatch):
+    helper = Mock(return_value=("wrong", {"model": "test", "latency_ms": 10}))
+    monkeypatch.setattr(loop, "field_text", helper)
+    runner.state["decision"] = {**decision(), "literal": {"text": "MKBHD", "confidence": 0.9}}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    helper.assert_not_called()
+    assert "'MKBHD'" in str(runner.state["browser"].act.call_args)
+    assert runner.state["text_calls"][-1]["model"] == "goal-literal"
+
+
+def test_a_goal_literal_is_typed_into_a_field_at_most_once(runner, monkeypatch):
+    """Retyping the same literal into the same field is how "banger" looped in the search box."""
+    helper = Mock(return_value=("MrBeast", {"model": "test", "latency_ms": 10}))
+    monkeypatch.setattr(loop, "field_text", helper)
+    for _ in range(2):
+        runner.state["decision"] = {**decision(), "literal": {"text": "banger", "confidence": 0.9}}
+        runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    helper.assert_called_once()
+    assert "'MrBeast'" in str(runner.state["browser"].act.call_args)
+
+
+def test_a_weak_goal_literal_falls_back_to_the_text_model(runner, monkeypatch):
+    helper = Mock(return_value=("book", {"model": "test", "latency_ms": 10}))
+    monkeypatch.setattr(loop, "field_text", helper)
+    runner.state["decision"] = {**decision(), "literal": {"text": "MKBHD", "confidence": 0.3}}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    helper.assert_called_once()
+
+
+@pytest.mark.parametrize("picked,expected", [("1:2", "MKBHD"), ("1:1", "banger"), ("COMPOSE", None)])
+def test_a_goal_literal_rides_the_decision_request_as_field_value_pairs(monkeypatch, picked, expected):
+    calls = []
+
+    def post(_url, _key, body, **_kwargs):
+        calls.append(body)
+        pairs = body["questions"]["type_value"]["criteria"]
+        return {"model": "test", "answers": {
+            "operation": choice(body["questions"]["operation"]["criteria"], "TYPE_TEXT"),
+            "type_text_target": choice(["1"], "1"),
+            "type_value": choice(pairs, picked),
+        }}
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", post)
+    monkeypatch.setattr(model.cache, "load", lambda _key: None)
+    d = model.choose(page(), 'type in MKBHD, then reply saying "banger"', [], use_cache=False)
+    assert len(calls) == 1                       # no extra round trip
+    pairs = calls[0]["questions"]["type_value"]["criteria"]
+    assert pairs["1:2"] == 'type "MKBHD" into [1] Search' and "COMPOSE" in pairs
+    assert (d.get("literal") or {}).get("text") == expected
+
+
+def test_a_covered_target_presses_escape_once_then_is_routed_around(runner):
+    """A search dropdown over the results made the same cached click fail eight times."""
+    from AgentJevUltraFast.browser import CoveredTarget
+
+    browser = runner.state["browser"]
+    runner.state["decision"] = {**decision("e3"), "operation": "CLICK", "target": "2"}
+    first = runner._covered("e3")
+    assert browser.act.call_args.args[0]["key"] == "Escape"
+    assert runner.state["history"][-1]["operation"] == "KEY_ESCAPE"
+    assert runner.state["skip_cache_once"] is True
+    assert "e3" in runner.state["skipped"][runner.state["page"]["fingerprint"]]
+    assert first["status"] == "ready"
+    runner._covered("e3")                       # same URL: no second Escape
+    assert browser.act.call_count == 1
+    assert issubclass(CoveredTarget, StalePage)  # every existing StalePage handler still applies

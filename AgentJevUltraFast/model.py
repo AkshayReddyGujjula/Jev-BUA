@@ -7,6 +7,7 @@ items from a collected page. All three calls share one bounded, JSON-only text c
 import json
 import math
 import os
+import re
 import time
 import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -28,6 +29,7 @@ from .questions import (
     TARGET,
     TEXT_VALUE,
     TEXT_VALUES,
+    TYPE_VALUE,
 )
 
 # httpx drops an idle pooled connection after 5 s by default, and a new one costs ~325 ms of
@@ -278,7 +280,8 @@ def action_space(actions):
         if node not in indices:
             index = str(len(elements) + 1)
             indices[node] = index
-            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded") if k in action}
+            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded", "pressed")
+                       if k in action}
             element.update(index=index, label=action["label"].split(" → ")[0], operations=[])
             if kind == "select":
                 element["value"] = action.get("current_value", "")
@@ -296,6 +299,66 @@ def action_space(actions):
             element["options"].append({"index": target, "label": action["label"], "value": action["value"]})
         group[target] = action
     return elements, targets, controls
+
+
+# Literal values the user wrote into the goal. Code finds the spans; Jev only chooses which
+# one a field takes, in the same request as the operation. Measured 2026-09-24: typing "MKBHD"
+# waited 2.6 s on the text model although the goal said "type in MKBHD" verbatim.
+COMPOSE = "COMPOSE"
+QUOTED = re.compile(
+    r'"([^"\n]{1,200})"|“([^”\n]{1,200})”|(?:(?<=\s)|^)' + r"'([^'\n]{1,200})'(?=[\s,.;:!?]|$)"
+)
+LITERAL_VERB = re.compile(
+    r"\b(?:type(?:\s+in)?|enter|search(?:\s+for)?|write|fill\s+in|saying|say|named|called|"
+    r"reply(?:ing)?\s+with|put)\s+",
+    re.IGNORECASE,
+)
+LITERAL_STOP = re.compile(
+    r"[,;.!?\"“]|\s(?:and|then|in the|into|on|to|so|before|after|once|from|via)\b", re.IGNORECASE
+)
+LEAD_IN = re.compile(r"^(?:the\s+)?(?:word|words|text|phrase|term|query|message)\s+", re.IGNORECASE)
+MAX_LITERALS = 6
+MAX_LITERAL_PAIRS = 48
+
+
+def goal_literals(goal):
+    """Candidate exact values from the goal: quoted strings, then words after a typing verb."""
+    found = []
+    for match in QUOTED.finditer(goal):
+        found.append(next(g for g in match.groups() if g is not None))
+    for match in LITERAL_VERB.finditer(goal):
+        # Each verb's own tail: "type in MKBHD, ... saying bango" yields both values.
+        phrase = LITERAL_STOP.split(" " + goal[match.end():], maxsplit=1)[0].strip()
+        phrase = LEAD_IN.sub("", phrase)
+        if QUOTED.search(phrase) or phrase[:1] == "'" or any(q in phrase for q in '"“”'):
+            continue                                  # a quoted value was taken above
+        if 0 < len(phrase.split()) <= 8:
+            found.append(phrase)
+    unique = []
+    for value in (v.strip() for v in found):
+        if value and value.lower() not in {u.lower() for u in unique}:
+            unique.append(value)
+    return unique[:MAX_LITERALS]
+
+
+def media_line(media):
+    """The main video's state as one line, or "". Page text never shows a player's speed,
+    fullscreen or mute state, so a goal like "watch at 1.5x" was otherwise judged blind."""
+    if not isinstance(media, dict):
+        return ""
+    parts = []
+    if isinstance(media.get("speed"), (int, float)):
+        parts.append(f"speed {media['speed']:g}x")
+    for key, on, off in (("fullscreen", "fullscreen", "not fullscreen"), ("paused", "paused", "playing"),
+                         ("muted", "muted", "sound on"), ("captions", "captions on", "captions off")):
+        if isinstance(media.get(key), bool):
+            parts.append(on if media[key] else off)
+    return f"[video: {', '.join(parts)}]" if parts else ""
+
+
+def page_text(state):
+    line = media_line(state.get("media"))
+    return line + "\n" + state["text"] if line else state["text"]
 
 
 def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=True,
@@ -364,7 +427,7 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
                 index: {
                     "element": f"[{index}] {a['label']}",
                     "current_value": a.get("current_value", a.get("value", "")),
-                    **{k: a[k] for k in ("role", "checked", "selected", "expanded") if k in a},
+                    **{k: a[k] for k in ("role", "checked", "selected", "expanded", "pressed") if k in a},
                 }
                 for index, a in ordered
             },
@@ -372,10 +435,28 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
                 "goal": goal, **steer, "operation": operation, "rules": [NEXT_ACTION, TARGET],
             },
         }
+    # One option per (field, literal) pair, so the answer names the field it is for: with
+    # bare literals Jev had to guess which field the question meant, and typed a reply text
+    # ("banger") into the search box 17 times (measured 2026-09-24).
+    literals = goal_literals(goal) if "TYPE_TEXT" in targets else []
+    fields = targets.get("TYPE_TEXT") or {}
+    literal_criteria = {
+        f"{index}:{n}": f'type "{value}" into [{index}] {field["label"]}'
+        for index, field in fields.items() for n, value in enumerate(literals, 1)
+    }
+    literal_values = {f"{index}:{n}": value for index in fields for n, value in enumerate(literals, 1)}
+    if len(literal_criteria) > MAX_LITERAL_PAIRS:
+        literal_criteria = {}
+    if literal_criteria:
+        literal_criteria[COMPOSE] = "None of these pairs: the field's value must be composed."
+        questions["type_value"] = {
+            "type": "choice", "criteria": literal_criteria,
+            "instructions": {"goal": goal, "rules": TYPE_VALUE},
+        }
     body = {
         "model": model_id or os.environ.get("TYPESAFE_MODEL", "jev-latest"),
         "state": {
-            "page": {k: state[k] for k in ("url", "title", "text")},
+            "page": {**{k: state[k] for k in ("url", "title")}, "text": page_text(state)},
             "elements": elements,
             # Mode memory is user-authored context for this task class. It is data, not
             # page instructions, and the decision contract still comes from the questions.
@@ -462,6 +543,15 @@ def choose(state, goal, history, timeout=None, allow_reobserve=True, use_cache=T
         "cache_key": key,
         "request": body,
     }
+    if operation == "TYPE_TEXT" and literal_criteria:
+        try:
+            value = validate_choice(result["answers"].get("type_value", {}), literal_criteria)
+        except (ValueError, TypeError, AttributeError):
+            value = None      # optional head: a malformed answer leaves the text model in charge
+        # Used only when the pair names the very field the target head chose.
+        if value and value["choice"] != COMPOSE and value["choice"].split(":")[0] == target:
+            decision["literal"] = {"text": literal_values[value["choice"]],
+                                   "confidence": value["confidence"]}
     if stored is None:
         # Store only after every head this decision can execute has validated.
         cache.store(key, result)

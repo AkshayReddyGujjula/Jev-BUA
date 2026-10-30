@@ -33,7 +33,7 @@ This repo is the browser engine other agents drive. Three ways in, pick by what 
   (`fresh: true` forces a new one); every run can write JSONL evidence under `artifacts/evidence/`
   (`JEV_EVIDENCE_DIR=0` disables it). Start the server directly with
   `.venv\Scripts\python.exe jev_mcp_server.py` if an agent needs it explained.
-- **CLI, one task:** `uv run --env-file .env python run_task.py --goal "<goal>" --url <url> --tab background [--values '<json>'] [--expect '<json>'] [--mode auto|<slug>]`
+- **CLI, one task:** `jev --brief [--url <url>] [--tab background] [--values '<json>'] [--expect '<json>'] [--mode auto|<slug>] "<goal>"` (installed by `uv tool install --editable .`; `jev` alone is interactive; `run_task.py` remains as a shim). Without `--url` the start page comes from the goal (`AgentJevUltraFast/start.py`), never from a model.
 - **CLI, parallel app testing:** write a check file and run
   `uv run --env-file .env python scripts/run_checks.py checks.json --workers 6`
   (up to 10). Assertions in `expect` are read off the real page and are the verdict — not the agent's

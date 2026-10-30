@@ -375,7 +375,7 @@ class FakeBrowser:
         self.acted = []
         self.last_url = self.pages[0]["url"]
 
-    def fresh(self, _page):
+    def fresh(self, _page, _action=None, verdict=False):
         return True
 
     def act(self, action, _page, text=None):
@@ -792,7 +792,7 @@ def test_collect_reports_steps_when_the_limit_is_reached(root, monkeypatch):
 
 
 def test_run_task_remember_writes_mode_memory(root, monkeypatch):
-    import run_task
+    from AgentJevUltraFast import cli as run_task
 
     mode = internship_mode(root)
     monkeypatch.setenv("JEV_MODES", "off")
@@ -805,7 +805,7 @@ def test_run_task_remember_writes_mode_memory(root, monkeypatch):
 
 
 def test_run_task_remember_needs_an_explicit_mode(root, monkeypatch):
-    import run_task
+    from AgentJevUltraFast import cli as run_task
 
     internship_mode(root)
     monkeypatch.setattr(sys, "argv", [

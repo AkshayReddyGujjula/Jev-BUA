@@ -19,6 +19,7 @@ def _offline_defaults(monkeypatch):
     monkeypatch.delenv("TEXT_MODEL_API_KEY", raising=False)
     monkeypatch.delenv("SUPERVISOR_API_KEY", raising=False)
     monkeypatch.setenv("JEV_SUPERVISOR", "off")
+    monkeypatch.setenv("JEV_REVIEW", "off")
     # A test that sets a fake key must not open a real connection from Agent().
     monkeypatch.setenv("JEV_PREWARM", "0")
     # The recorded flights task date must stay pinned in tests, whatever the shell has.

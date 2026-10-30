@@ -32,6 +32,8 @@ Every observation produces a new element table:
 
 The operations are `CLICK`, `TYPE_TEXT`, `SELECT`, `SCROLL_UP`, `SCROLL_DOWN`, `WAIT`, `REOBSERVE`, `ABSTAIN`, `DONE`, and `BLOCKED`. Only supported operations and targets are offered, and `REOBSERVE` is withdrawn after its per-run budget.
 
+Element state rides along: `checked`, `selected`, `expanded` and `pressed` from ARIA, field values, and, when the page has a real video player, one `[video: speed 1.5x, fullscreen, playing, sound on]` line from the standard media API. Keyboard operations are `Escape`, `Enter`, and only the shortcuts the page itself declares with `aria-keyshortcuts`, labelled with the control they stand for (`Press f (page shortcut: Full screen (f))`). Nothing site-specific is hardcoded; a shortcut is gated exactly like a click on its control, so `Control+Enter (page shortcut: Send)` keeps the commit floor.
+
 ```text
                       one TypeSafe request
                      ┌───────────────────────────┐
@@ -48,6 +50,8 @@ page → element table → operation                 │
                    small LLM → text → browser
 ```
 
+When the goal itself contains the text to type ("type in MKBHD", `saying "banger"`), code extracts those literals and the same request carries a `type_value` choice head: Jev picks which literal belongs in the field, or `COMPOSE`, and only then does the small LLM write the value. Measured on YouTube: decision-to-typed dropped from 2.6 s to 0.6 s.
+
 Target questions are speculative. If the operation is `CLICK`, only `click_target` can execute. Two decisions, **one network round trip**. Each target head contains only compatible elements. Native dropdown choices carry an observed element/option index.
 
 There are no site-specific action scripts or prepared field strings in the policy. The Flights example supplies a goal and independently verifies the outcome. The screenshot renderer adds labels afterward; it does not drive the browser.
@@ -55,14 +59,38 @@ There are no site-specific action scripts or prepared field strings in the polic
 ## Try it
 
 ```bash
-cd AgentJevUltraFast
-uv sync
-cp .env.example .env
-# Add TYPESAFE_API_KEY and TEXT_MODEL_API_KEY.
-uv run agent-jev
+git clone <this repo> jev-ultrafast && cd jev-ultrafast
+uv tool install --editable .          # puts `jev` on your PATH
+cp .env.example .env                  # add TYPESAFE_API_KEY and TEXT_MODEL_API_KEY
+jev "open youtube, type in MKBHD and open his iPhone 17 review, then turn on captions"
 ```
 
-Open **http://127.0.0.1:8766** and click **Start demo → Run automatically**. The inspector shows numbered elements, operation probabilities, target probabilities, and executed actions. **Choose next** pauses before execution.
+Your words go **straight to Jev**: no chat model reads, plans or rewrites them first. The start
+page comes from the goal itself (a URL or domain it names, else the site after "open / go to /
+visit", resolved by one HTTP lookup), each step streams to the terminal as it executes, and the
+final result is JSON on stdout. Run `jev` with no arguments for an interactive prompt that keeps
+one Chrome tab warm; a line that names no site continues on the current page:
+
+```text
+$ jev "Open YouTube, type in MKBHD, go to click on its first iPhone 17 video, click on captions, turn on captions"
+  -> https://youtube.com/  (first result for 'YouTube')
+    1  fill   Search                                               0.85    8.8s
+    2  click  mkbhd iphone 17                                      0.88   11.1s
+    3  click  iPhone 17 Review: No Asterisks! 11 minutes, 20 seconds  0.93   17.2s
+    4  key    Toggle captions (C)                                  0.49   23.3s
+  done (unknown) 23.7s, 4 actions
+```
+
+(Measured 2026-09-24, foreground tab, cold process; times are from the command's start. Every
+Jev decision took 250-580 ms: the rest is YouTube loading its pages. `unknown` because no
+`--expect` readback was given.)
+
+Coding agents call the same command. The `jev-browser` skill tells Claude Code, Codex, opencode
+and Command Code to run `jev --brief "<the user's words verbatim>"` instead of planning, and
+`!jev "..."` in those tools skips the model turn entirely. The MCP server (`jev-mcp`) remains for
+structured testing: parallel checks, assertions and delegated tasks.
+
+The web inspector is `jev-ui`: open **http://127.0.0.1:8766** and click **Start demo → Run automatically**. The inspector shows numbered elements, operation probabilities, target probabilities, and executed actions. **Choose next** pauses before execution.
 
 Chrome connects through [Browser Harness](https://github.com/browser-use/browser-harness), installed by `uv sync`. Run `uv run browser-harness --doctor` if it needs connecting. Allow remote debugging in Chrome when prompted.
 
@@ -104,6 +132,9 @@ uv run --env-file .env python examples/run.py \
 - **Keep hidden tabs rendering.** Focus emulation alone is not enough: measured on Chrome 153, a background tab of a real site ran 0–2 animation frames per 500 ms, so JavaScript menus never finished opening and their options stayed invisible to the snapshot. A tiny, never-acknowledged screencast makes Chrome render the tab like a visible one (30–32 frames, menus open within 50 ms, screenshots in ~100 ms) without switching Chrome's visible tab. `JEV_RENDER_KEEPALIVE=0` turns it off.
 - **Send visible text.** Offscreen article bodies and footers do not fill the model context.
 - **Draft field values while Jev decides.** One text-helper call drafts every fillable, non-sensitive field on the page in parallel with the decision, so TYPE_TEXT does not wait on it (Flights: two ~1.35 s waits became 0 ms). A draft is used only under the identical goal and only for a field it saw; a null draft falls back to a single-field call. `JEV_TEXT_PREFETCH=0` turns it off.
+- **Click what is visible, the way a person does.** The pointer moves onto the target before the press, so hover-revealed controls (a video player's faded bar, a row's action buttons) respond. If a popover or sticky bar covers the centre of a control, the click lands on an uncovered point of the same element; only a fully covered control counts as covered, which presses Escape once per URL and then routes to the next-best choice.
+- **Re-read a page mid-navigation.** An observation retries a document that is being replaced for up to `JEV_NAV_READ_TIMEOUT` (3 s): 0.2 s ended a heavy results page (eBay) as unreadable.
+- **Settle ignores a playing video.** The player's own text (clock, captions) is left out of the settle signature: observing a watch page dropped from 2.3 s to about 0.1 s.
 - **Reuse an interrupted text request.** A generated value survives a stale-page retry only if the entire text-helper input is unchanged.
 
 Every executed target is resolved from an observed node. The executor rechecks page freshness and click occlusion. Model output never becomes selectors, coordinates, shell commands, or executable JavaScript. Text-helper output must parse as a small JSON object before typing.
@@ -133,6 +164,12 @@ Jev decides every step. A second, slower model (DeepSeek v4.1 Flash by default, 
 - `done`, `impossible`, `needs_human`: end the run. `done` is no more proof than Jev's own DONE — the outcome still comes from the `expect` readback.
 
 No coordinates, selectors or scripts are ever accepted. At most `JEV_SUPERVISOR_LIMIT` (2) consults per run, each bounded by `JEV_SUPERVISOR_TIMEOUT` (8 s); every consult is returned in `supervision` and written to evidence. `JEV_SUPERVISOR=off` disables it.
+
+## While Jev works: the parallel reviewer
+
+The supervisor is late by design: it waits for a stuck check. The reviewer asks the same model the same question continuously, off the critical path. After each executed step the loop hands it a redacted snapshot (goal, recent actions and outcomes, page text, elements, video state) and moves on at once. One review is in flight at a time; a newer snapshot replaces a queued one. Each decision polls without blocking, and a finished review that says the run is off track becomes a sub-goal on the supervisor's guidance channel for six steps, only if the page it judged is still the current one. It cannot click, type or end a run.
+
+Before a `DONE` is accepted, the loop waits for one review of the final page (bounded by `JEV_REVIEW_TIMEOUT`, credited to the stall clock) that compares every requested value exactly against the page; an off-track verdict turns the DONE into a sub-goal, at most `JEV_REVIEW_DONE_LIMIT` (2) times per run. `JEV_REVIEW=off` disables it; `JEV_REVIEW_LIMIT` (12) caps reviews per run. Verdicts are in the result's `reviews` and in evidence.
 
 ## Navigate there and show me
 
@@ -185,11 +222,11 @@ A mode is a folder for one repeated kind of work — internship applications, sc
 
 ```bash
 # Match an existing mode by keyword, or let the text model create one for a durable task.
-uv run --env-file .env python run_task.py --mode auto --goal "..." --url https://x.com/home
+jev --mode auto --url https://x.com/home "..."
 
 # Manage the memory of a mode you own.
-uv run --env-file .env python run_task.py --mode internship-application --remember "Name: Ada Lovelace"
-uv run --env-file .env python run_task.py --mode internship-application --forget "Email"
+jev --mode internship-application --remember "Name: Ada Lovelace"
+jev --mode internship-application --forget "Email"
 ```
 
 - Folders live in `JEV_MODES_DIR` (default `~/.jev-ultrafast/modes`, outside git). Each holds `mode.json`, a human-editable `AGENTS.md` (about me / standing instructions / interests), `learned/` field values, `harvest/` collected items and `replay/` plans.
@@ -226,7 +263,7 @@ In six alternating runs with identical models and settings, both versions passed
 
 The same policy opened the requested Wikipedia article in **2.798 s** and passed a local hotel search/filter task in **1.896 s**. Runs, failures, source hashes, and measurement boundaries are in [performance.md](docs/performance.md).
 
-A `DONE` choice still requires independent outcome verification. The DOM reader handles common HTML and ARIA controls, not the full accessible-name specification. Shadow roots, frames, canvas, uploads, pop-up tabs, nested scrolling, and arbitrary keyboard widgets remain outside this MVP. Owned tabs share the existing Chrome profile.
+A `DONE` choice still requires independent outcome verification. The DOM reader handles common HTML and ARIA controls, not the full accessible-name specification. Shadow roots, frames, canvas, uploads, pop-up tabs, nested scrolling, and keyboard widgets without declared shortcuts remain outside this MVP. Owned tabs share the existing Chrome profile.
 
 ## Development
 

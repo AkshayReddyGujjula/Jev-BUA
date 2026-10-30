@@ -11,9 +11,17 @@ dependencies = ["browser-harness==0.1.13", "httpx[http2]>=0.28,<1"]
 cloud = ["browser-use-sdk>=3.11.3,<4"]
 
 [project.scripts]
-agent-jev = "AgentJevUltraFast.demo:main"
+jev = "AgentJevUltraFast.cli:main"
 jev-cloud = "AgentJevUltraFast.cloud_runner:main"
-jev = "AgentJevUltraFast.demo:main"
+jev-mcp = "jev_mcp_server:main"
+jev-ui = "AgentJevUltraFast.demo:main"
+agent-jev = "AgentJevUltraFast.demo:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["AgentJevUltraFast"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"jev_mcp_server.py" = "jev_mcp_server.py"
 
 [build-system]
 requires = ["hatchling"]

@@ -32,6 +32,8 @@ INTERNAL_URL_PREFIXES = ("chrome://", "chrome-untrusted://", "devtools://", "chr
 # fresh() already handle a page that is still loading, so this only has to cover the
 # common case.
 NAV_TIMEOUT = float(os.environ.get("JEV_NAV_TIMEOUT", "4"))
+# How long an observation keeps re-reading a document that is still being replaced.
+NAV_READ_TIMEOUT = float(os.environ.get("JEV_NAV_READ_TIMEOUT", "3"))
 # How long to wait for a tab opened by the last action to appear. 4 s was disproportionate
 # to the 5 s no-progress deadline it sits inside.
 FOLLOW_TAB_TIMEOUT = float(os.environ.get("JEV_FOLLOW_TAB_TIMEOUT", "1.5"))
@@ -65,6 +67,10 @@ def target_visible(page, target):
 
 class StalePage(ValueError):
     """A decision no longer refers to the observed page."""
+
+
+class CoveredTarget(StalePage):
+    """The target is present but another element sits on top of it; nothing was dispatched."""
 
 
 def _visible_page_target():
@@ -294,11 +300,27 @@ class Browser:
         """
         return self.evaluate(self.SCROLL_CONTENT.replace("__DELTA__", str(int(delta))))
 
-    SETTLE_SIGNATURE = (
-        "(document.readyState==='complete'?1:0)+':'+"
-        "((document.body?document.body.innerText.length:0)+':'+"
-        "document.querySelectorAll('a,button,input,select,textarea').length)"
-    )
+    # The text length leaves out a playing video's own player (its clock and live captions):
+    # they change every frame, so settle() never saw two equal samples and ran to its cap -
+    # measured 2.1 s on EVERY observation of a YouTube watch page. The player is the largest
+    # ancestor of the biggest <video> that is still about the video's size; no site selectors.
+    SETTLE_SIGNATURE = """(() => {
+      const body=document.body; if (!body) return '0';
+      let length=body.innerText.length;
+      const video=[...document.querySelectorAll('video')].map(v=>[v,v.getBoundingClientRect()])
+        .sort((a,b)=>b[1].width*b[1].height-a[1].width*a[1].height)[0];
+      if (video && video[1].width*video[1].height>0) {
+        const area=video[1].width*video[1].height; let player=video[0];
+        while (player.parentElement && player.parentElement!==body) {
+          const r=player.parentElement.getBoundingClientRect();
+          if (r.width*r.height>area*1.5) break;
+          player=player.parentElement;
+        }
+        length-=player.innerText.length;
+      }
+      return (document.readyState==='complete'?1:0)+':'+length+':'+
+        document.querySelectorAll('a,button,input,select,textarea').length;
+    })()"""
 
     # A rendering frame is ~16.7 ms. Two equal samples must span at least SETTLE_EVIDENCE
     # before the page counts as settled: a shorter window can straddle a pause mid-load
@@ -456,7 +478,11 @@ class Browser:
             except RuntimeError:
                 pass
         self.settle(deadline=deadline)
-        for attempt in range(10):
+        # Reading is side-effect free, so a document mid-navigation is simply read again. Ten
+        # 20 ms retries (0.2 s) were shorter than a heavy results page takes to replace its
+        # document: eBay's search ended the run as "could not be read" (measured 2026-09-24).
+        give_up = time.monotonic() + NAV_READ_TIMEOUT
+        for attempt in range(1000):
             try:
                 page = self._browser_operation(
                     {"operation": "observe", "session": self.session,
@@ -466,17 +492,27 @@ class Browser:
                 self.last_url = page.get("url", getattr(self, "last_url", ""))
                 return page
             except StalePage:
-                if attempt == 9 or (
+                if time.monotonic() > give_up or (
                     deadline is not None and attempt >= 2 and time.monotonic() > deadline
                 ):
                     # Past the run's deadline: a short retry budget, so the stop is not
                     # waiting on a long loop of reads.
                     raise
-                time.sleep(0.02)
+                time.sleep(min(0.02 * 1.5 ** attempt, 0.25))
         raise StalePage("Page did not settle")
 
-    def _fresh(self, page, action=None):
-        if action is not None and action["kind"] in {"click", "select"}:
+    # Freshness asks "would this action still land where Jev decided?", not "is every word on
+    # the page unchanged?". Comparing all visible text made a decision on a playing video
+    # permanently stale - the clock and live captions change every second - and the loop
+    # re-decided KEY_CAPTIONS three times over 8 s before one executed (measured 2026-09-24).
+    # Element actions keep the element's own guard (identity, value, state, and its form or
+    # row text); page-level actions keep document, URL, scroll, every form value and focus.
+    ELEMENT_KINDS = {"click", "select", "fill"}
+    PAGE_KINDS = {"key", "scroll", "wait"}
+
+    def _fresh(self, page, action=None, verdict=False):
+        kind = action["kind"] if action is not None else None
+        if kind in self.ELEMENT_KINDS:
             node = action["node"]
             if type(node) is not int:
                 return False
@@ -485,15 +521,23 @@ class Browser:
                 f"return c ? [c.pageKey(),c.guard(c.nodes.get({node}))] : null; }})()"
             )
             return current == [page["page_key"], page["guards"].get(str(node))]
+        marker = page.get("marker")
+        # A plain fresh(page) - "should I observe again before deciding?" - stays strict:
+        # results that load in place must reach Jev. `verdict` is the act-time DONE/BLOCKED check.
+        if (verdict or kind in self.PAGE_KINDS) and "page_key" in page and isinstance(marker, list):
+            current = self.evaluate(
+                "(() => { const c=window.__jevFast; return c ? [c.pageKey(),c.focusKey()] : null; })()"
+            )
+            return current == [page["page_key"], marker[-1]]
         return self.evaluate(private_snapshot(getattr(self, "private_values", []), marker=True)) == page["marker"]
 
-    def fresh(self, page, action=None):
+    def fresh(self, page, action=None, verdict=False):
         try:
-            return self._fresh(page, action)
+            return self._fresh(page, action, verdict)
         except RuntimeError as error:
             if not self._session_lost(error) or not self.reattach():
                 raise
-            return self._fresh(page, action)
+            return self._fresh(page, action, verdict)
 
     def value_present(self, node, text):
         """Read only a boolean from Chrome; never return the private DOM value."""
@@ -567,14 +611,23 @@ def browser_operation(request):
                 deltaY=action["delta"],
             )
         elif kind == "key":
+            modifiers = int(action.get("modifiers", 8 if action.get("shift") else 0))
             event = {
                 "key": action["key"],
                 "code": action.get("code", ""),
-                "modifiers": 8 if action.get("shift") else 0,
+                "modifiers": modifiers,
                 "windowsVirtualKeyCode": action.get("vk", 0),
                 "nativeVirtualKeyCode": action.get("vk", 0),
             }
-            if len(action["key"]) == 1:
+            if action.get("shortcut"):
+                # A page shortcut is meant for the page. With focus left in a text field
+                # (after a search) "f" would be typed into it instead of toggling anything.
+                evaluate(
+                    "(() => { const a=document.activeElement;"
+                    " if (a && (a.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(a.tagName)))"
+                    " a.blur(); })()"
+                )
+            if len(action["key"]) == 1 and not modifiers & 7:
                 event["text"] = action["key"]
             call("Input.dispatchKeyEvent", type="keyDown", **event)
             call("Input.dispatchKeyEvent", type="keyUp", **event)
@@ -612,12 +665,23 @@ def browser_operation(request):
             # Code-owned node IDs refer to actual observed elements, never model-generated selectors.
             target = evaluate("""(action => {
               const e=window.__jevFast?.nodes.get(action.node);
+              const player=window.__jevFast.player;
               if (!e?.isConnected || e.matches(':disabled') || e.closest('[aria-disabled="true"],[inert]') ||
-                  !e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return null;
+                  !(e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}) ||
+                    (player?.isConnected && player.contains(e) && e.checkVisibility({checkVisibilityCSS:true}))))
+                return null;
               if (action.kind==='fill' && (e.readOnly || e.getAttribute('aria-readonly')==='true')) return null;
-              const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2;
-              if (!r.width || !r.height || x<0 || y<0 || x>=innerWidth || y>=innerHeight) return null;
-              if (!e.contains(document.elementFromPoint(x,y))) return null;
+              const r=e.getBoundingClientRect();
+              if (!r.width || !r.height || r.x+r.width/2<0 || r.y+r.height/2<0 ||
+                  r.x+r.width/2>=innerWidth || r.y+r.height/2>=innerHeight) return null;
+              // A popover, badge or sticky bar often covers only part of a control; a person
+              // clicks the part they can see. Centre first, then points across the element.
+              const spots=[[.5,.5],[.25,.5],[.75,.5],[.1,.5],[.9,.5],[.5,.2],[.5,.8]]
+                .map(([fx,fy])=>[r.x+r.width*fx,r.y+r.height*fy])
+                .filter(([x,y])=>x>=0 && y>=0 && x<innerWidth && y<innerHeight);
+              const spot=spots.find(([x,y])=>e.contains(document.elementFromPoint(x,y)));
+              if (!spot) return {covered:true};
+              const [x,y]=spot;
               if (action.kind==='select') {
                 if (e.tagName!=='SELECT' || ![...e.options].some(o=>o.value===action.value &&
                     !o.disabled && !o.closest('optgroup[disabled]'))) return null;
@@ -627,12 +691,18 @@ def browser_operation(request):
               }
               return {x,y};
             })(""" + json.dumps(action) + ")")
+            if isinstance(target, dict) and target.get("covered"):
+                # Checked before any input (a select's value is set only after this test).
+                raise CoveredTarget("Target is covered by another element (an open menu or popup).")
             if target is None:
                 if kind == "select":
                     raise RuntimeError("Dropdown execution was not confirmed; inspect before retrying.")
-                raise StalePage("Target changed or is covered. Observe again.")
+                raise StalePage("Target changed or is hidden. Observe again.")
             if kind != "select":
                 x, y = target["x"], target["y"]
+                # Point first, as a person does: hover-revealed controls (a video player's
+                # faded bar, a row's action buttons) expect movement before the press.
+                call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y)
                 for event in ("mousePressed", "mouseReleased"):
                     call("Input.dispatchMouseEvent", type=event, x=x, y=y, button="left", clickCount=1)
                 if kind == "fill":

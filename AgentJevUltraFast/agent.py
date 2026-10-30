@@ -8,7 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import cache, modes, replay, supervisor
+from . import cache, modes, replay, reviewer, supervisor
 from .assertions import (
     evaluate_expectations,
     normalize_expect,
@@ -16,7 +16,7 @@ from .assertions import (
     selectors_for,
     value_selectors_for,
 )
-from .browser import SCAN_MAX_S, Browser, StalePage, target_visible
+from .browser import SCAN_MAX_S, Browser, CoveredTarget, StalePage, target_visible
 from .evidence import Evidence
 from .gates import IRREVERSIBLE_NOUL
 from .gates import check as gate_check
@@ -43,6 +43,8 @@ TERMINAL_STATUS = {"done", "blocked", "stalled", "abstained", "budget_exhausted"
 RECOVERY_LIMIT = 6
 # Text prefetch: one helper call drafts every fillable field while Jev decides, so TYPE_TEXT
 # rarely waits on the helper (measured 2026-09-23: two waits of ~1.35 s on the Flights path).
+# A goal literal Jev matched to the field is typed at this confidence or above (JEV_LITERAL_MIN).
+LITERAL_MIN = float(os.environ.get("JEV_LITERAL_MIN", "0.6"))
 PREFETCH_ENABLED = os.environ.get("JEV_TEXT_PREFETCH", "1") not in {"0", "off", "false"}
 PREFETCH_FIELDS = 12
 # Shared by every agent in the process: parallel checks (up to 10 workers) must not queue
@@ -50,6 +52,8 @@ PREFETCH_FIELDS = 12
 _PREFETCH_POOL = ThreadPoolExecutor(max_workers=12, thread_name_prefix="jev-prefetch")
 # A supervisor sub-goal steers this many actions, then Jev is back on the caller's goal alone.
 GUIDANCE_STEPS = 6
+# Times per run a reviewer verdict may turn Jev's DONE back into work (JEV_REVIEW_DONE_LIMIT).
+REVIEW_DONE_LIMIT = int(os.environ.get("JEV_REVIEW_DONE_LIMIT", "2"))
 DEAD_OUTCOMES = {"no visible change", "action failed", "loop detected"}
 
 # How many times one run may choose REOBSERVE before the option is withdrawn. Re-observing
@@ -154,7 +158,7 @@ def progress_key(page):
     controls = tuple(sorted(
         (
             a.get("kind"), a.get("label"), a.get("role"),
-            str(a.get("value", "")), a.get("checked"), a.get("selected"),
+            str(a.get("value", "")), a.get("checked"), a.get("selected"), a.get("pressed"),
         )
         for a in (page.get("actions") or [])
     ))
@@ -614,6 +618,85 @@ class Agent:
         floor = floors.setdefault(str(getattr(self.browser, "target", "")), index)
         return index > floor
 
+    def _review_submit(self):
+        """Hand the parallel reviewer the step just executed. Never waits on it."""
+        if getattr(self, "_strategy", "decide") == "collect" or getattr(self, "_review_closed", False):
+            return
+        if getattr(self, "_reviewer", None) is None:
+            config = reviewer.settings()
+            if config is None or config["limit"] == 0:
+                self._review_closed = True
+                return
+            self._reviewer = reviewer.Reviewer(config)
+        state = self.state
+        private = getattr(self, "private_values", ())
+        self._reviewer.submit(redact(reviewer.payload(
+            state["goal"], state["page"], state["history"], len(state["history"]),
+            guidance=self._guidance(),
+        ), private))
+
+    def _review_poll(self):
+        """Apply a finished review, if any: off track becomes a sub-goal for a few steps."""
+        active = getattr(self, "_reviewer", None)
+        result = active.poll() if active is not None else None
+        if result:
+            self._review_apply(result)
+
+    def _review_before_done(self):
+        """Jev chose DONE: wait (bounded) for the reviewer's verdict on THIS state.
+
+        The one place the reviewer is waited on. DONE ends the run, so a missed requirement
+        cannot be fixed later - measured 2026-09-24: "put it in 2x speed" ended at 1.25x, the
+        DONE coming ~0.3 s after the speed key and before its review. At most
+        REVIEW_DONE_LIMIT overrides per run; the wait is credited like any model wait.
+        True when the reviewer found the goal unmet and its sub-goal now steers the run.
+        """
+        state = self.state
+        active = getattr(self, "_reviewer", None)
+        if active is None or state.get("done_overrides", 0) >= REVIEW_DONE_LIMIT:
+            return False
+        step = len(state["history"])
+        private = getattr(self, "private_values", ())
+        active.submit(redact(reviewer.payload(
+            state["goal"], state["page"], state["history"], step, guidance=self._guidance(),
+            done=True,
+        ), private))
+        asked = time.monotonic()
+        try:
+            results = active.wait_for(step, active.config["timeout"])
+        finally:
+            self._credit_wait(asked)
+        applied = False
+        for result in results:
+            applied = self._review_apply(result) or applied
+        if applied:
+            state["done_overrides"] = state.get("done_overrides", 0) + 1
+            state["decision"] = None
+        return applied
+
+    def _review_apply(self, result):
+        state = self.state
+        record = redact({k: result.get(k) for k in
+                         ("step", "on_track", "subgoal", "reason", "latency_ms", "model", "error")},
+                        getattr(self, "private_values", ()))
+        record["applied"] = False
+        # A verdict about a page the run has since left is about nothing Jev can act on.
+        if result.get("on_track") is False and result.get("url") == state["page"].get("url"):
+            state["guidance"] = {"subgoal": result["subgoal"], "source": "reviewer",
+                                 "until_step": len(state["history"]) + GUIDANCE_STEPS}
+            record["applied"] = True
+        state.setdefault("reviews", []).append(record)
+        evidence = getattr(self, "evidence", None)
+        if evidence is not None:
+            evidence.record("review", **record, usage=result.get("usage"))
+        return record["applied"]
+
+    def _review_close(self):
+        self._review_closed = True
+        active = getattr(self, "_reviewer", None)
+        if active is not None:
+            active.close()
+
     def _guidance(self):
         """The supervisor's current sub-goal, or None once it has steered GUIDANCE_STEPS actions."""
         guidance = self.state.get("guidance")
@@ -738,6 +821,7 @@ class Agent:
         against, so the outcome stays `unknown`: a DONE choice is not proof of success.
         """
         state = self.state
+        self._review_close()
         if state.get("outcome"):
             return
         checks = None
@@ -917,6 +1001,64 @@ class Agent:
             evidence.record(
                 "replay_stopped", at_step=index, done=replay_state.get("used"), reason=reason,
             )
+
+    ESCAPE = {"id": "key_escape", "kind": "key", "key": "Escape", "code": "Escape", "vk": 27,
+              "label": "Close overlay (Escape)"}
+
+    def _covered(self, choice):
+        """A chosen element is covered by an open menu or popup; nothing was dispatched.
+
+        First time on this URL: press Escape, which closes dropdowns, menus and popovers on
+        nearly every site and is reversible. After that the covered choice is skipped for
+        this page state, so the next-best option is used instead of the same cached answer.
+        """
+        state = self.state
+        page = state["page"]
+        state["decision"] = None
+        state["status"] = "ready"
+        state["skip_cache_once"] = True
+        if choice:
+            skipped = state.setdefault("skipped", {}).setdefault(page["fingerprint"], [])
+            if choice not in skipped:
+                skipped.append(choice)
+        escaped = state.setdefault("escaped_urls", [])
+        error = None
+        if page.get("url") not in escaped and not self.stalled():
+            escaped.append(page.get("url"))
+            try:
+                state["browser"].act(self.ESCAPE, page)
+            except StalePage:
+                error = "page changed before Escape"
+            except Exception as exc:
+                error = str(exc) or type(exc).__name__
+            if error != "page changed before Escape":
+                state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+                state["history"].append({
+                    "step": len(state["history"]) + 1, "action": self.ESCAPE["label"],
+                    "kind": "key", "choice": self.ESCAPE["id"], "probability": 0.0,
+                    "confidence": None, "irreversible": 0.0, "cached": False, "model": None,
+                    "latency_ms": 0, "text": None, "text_helper": None, "text_latency_ms": 0,
+                    "operation": "KEY_ESCAPE", "target": None,
+                    "recovery": "the chosen element was covered by an overlay; pressed Escape",
+                    "scan": None, "error": error, "outcome": None, "page_changed": None,
+                    "url": page.get("url"), "usage": {},
+                    "executed_ms": state["elapsed_ms"], "elapsed_ms": state["elapsed_ms"],
+                })
+                evidence = getattr(self, "evidence", None)
+                if evidence is not None:
+                    evidence.record(
+                        "execution", step=state["history"][-1]["step"], action=self.ESCAPE["label"],
+                        action_kind="key", choice=self.ESCAPE["id"], operation="KEY_ESCAPE",
+                        recovery=state["history"][-1]["recovery"], error=error, url=page.get("url"),
+                    )
+        state["page"] = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
+        self.note_progress(state["page"])
+        if state["history"] and state["history"][-1].get("choice") == self.ESCAPE["id"]:
+            outcome = action_outcome(page, state["page"], error)
+            state["history"][-1].update(outcome=outcome, page_changed=outcome != "no visible change",
+                                        fingerprint=state["page"]["fingerprint"])
+        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+        return self.snapshot()
 
     def _reveal_below(self, page):
         """One code-owned downward scroll after the gate refused the model's choices here.
@@ -1394,8 +1536,23 @@ class Agent:
                     # A watcher or the anti-loop deadline stopped the run during prediction,
                     # or the supervisor handed back a sub-goal: nothing to execute this tick.
                     return self.snapshot()
-                return self.command("act", {"fingerprint": state["page"]["fingerprint"]})
-            except StalePage:
+                executed = len(state["history"])
+                result = self.command("act", {"fingerprint": state["page"]["fingerprint"]})
+                if len(state["history"]) > executed and state["status"] not in TERMINAL_STATUS:
+                    self._review_submit()
+                return result
+            except CoveredTarget:
+                # Nothing was dispatched. Re-deciding on the same page returned the same covered
+                # element from the cache eight times in a row (measured 2026-09-24: a search
+                # dropdown lay over the results): close the overlay once, then route around it.
+                return self._covered((state.get("decision") or {}).get("choice"))
+            except StalePage as exc:
+                # Nothing was dispatched. Recorded, so a loop of refused choices is visible in
+                # the evidence rather than only as "repeated decisions with no progress".
+                evidence = getattr(self, "evidence", None)
+                if evidence is not None:
+                    evidence.record("stale", step=len(state["history"]) + 1,
+                                    choice=(state.get("decision") or {}).get("choice"), reason=str(exc)[:200])
                 state["decision"] = None
                 state["status"] = "ready"
                 state["page"] = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
@@ -1417,6 +1574,7 @@ class Agent:
             state["decision"] = None
             if state["status"] in TERMINAL_STATUS:
                 raise ValueError("This run has stopped. Start a fresh demo.")
+            self._review_poll()
             pending = state.pop("supervisor_decision", None)
             if pending and pending["fingerprint"] == state["page"]["fingerprint"]:
                 # The supervisor already chose an observed, reversible element on THIS page;
@@ -1638,7 +1796,12 @@ class Agent:
                     request=request,
                 )
             if decision.get("goal_done", 0.0) > 0.85 and state["history"]:
-                # The completion cross-check fired: stop without executing the proposed action.
+                # The completion cross-check fired: stop without executing the proposed action,
+                # unless the reviewer's look at this state finds a requirement still unmet.
+                if self._review_before_done():
+                    state["decision"] = None
+                    state["status"] = "ready"
+                    return self.snapshot()
                 state["decision"] = None
                 state["status"] = "done"
                 state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
@@ -1676,10 +1839,13 @@ class Agent:
                         state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
                         state["status"] = "ready"
                         return self.snapshot()
-                if not state["browser"].fresh(page):
+                if not state["browser"].fresh(page, verdict=True):
                     state["status"] = "ready"
                     raise StalePage("Page changed since the decision. Choose again.")
                 if selected == "BLOCKED" and self._supervise("model_blocked"):
+                    return self.snapshot()
+                if selected == "DONE" and self._review_before_done():
+                    state["status"] = "ready"
                     return self.snapshot()
                 state["status"] = "done" if selected == "DONE" else "blocked"
                 state["plan_index"] = int(selected == "DONE")
@@ -1839,9 +2005,27 @@ class Agent:
                         "model": "supervisor", "latency_ms": 0, "usage": {},
                         "field": action["label"], "value": "[redacted]",
                     })
+                elif (
+                    (decision.get("literal") or {}).get("confidence", 0) >= LITERAL_MIN
+                    and (action.get("label"), decision["literal"]["text"])
+                    not in getattr(self, "_literals_typed", set())
+                ):
+                    # The user wrote this exact value into the goal and Jev matched it to this
+                    # field in the decision request itself: no text-model round trip. Typed at
+                    # most once per field: being asked to type into the same field again means
+                    # the literal was the wrong value for it, so the text model decides instead.
+                    text = decision["literal"]["text"]
+                    text_source = "goal"
+                    self._literals_typed = getattr(self, "_literals_typed", set())
+                    self._literals_typed.add((action.get("label"), text))
+                    state["text_calls"].append({
+                        "model": "goal-literal", "latency_ms": 0, "usage": {},
+                        "confidence": decision["literal"]["confidence"],
+                        "field": action["label"], "value": "[redacted]",
+                    })
                 else:
                     text_source = "model"
-                    if not state["browser"].fresh(page):
+                    if not state["browser"].fresh(page, action):
                         raise StalePage("Page changed before text generation. Choose again.")
                     context = field_context(
                         state["goal"], action, page, state["history"],
@@ -1995,6 +2179,16 @@ class Agent:
                     error=record.get("error"),
                     url=record.get("url"),
                 )
+            if (
+                dispatch_error
+                and action["kind"] in Browser.PAGE_KINDS
+                and "session with given id" in str(error).lower()
+                and getattr(state["browser"], "reattach", lambda: False)()
+            ):
+                # Chrome swapped the tab's CDP target mid-press (entering fullscreen did it,
+                # measured 2026-09-24). A key, scroll or wait commits nothing, and the next
+                # observation shows whether it landed, so the run goes on instead of ending.
+                dispatch_error = False
             if dispatch_error:
                 # The browser may have performed the mutation before its reply was
                 # lost. Re-observing is useful, but another model decision could
@@ -2070,7 +2264,7 @@ class Agent:
                     replay.descriptor(
                         action, decision, outcome,
                         modes.redact_for_replay(action.get("label"), text)
-                        if text_source == "model" else None,
+                        if text_source in {"model", "goal"} else None,
                     )
                 )
             if (
@@ -2179,6 +2373,7 @@ class Agent:
                 yield self.snapshot()
 
     def close(self):
+        self._review_close()
         if getattr(self, "_owns_browser", True):
             # An injected browser belongs to the caller (the MCP warm session) and stays open.
             self.browser.close()

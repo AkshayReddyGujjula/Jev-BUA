@@ -20,8 +20,26 @@
       [e.getAttribute('aria-label'),e.getAttribute('placeholder'),e.getAttribute('name'),
         e.getAttribute('id'),[...(e.labels||[])].map(l=>l.innerText).join(' ')].join(' '));
   const safe = e => !['password','file','hidden'].includes(e.type) && !privateCode(e);
+  // The main video and the player around it (smallest ancestor up to 1.5x the video's area).
+  const videos=[...document.querySelectorAll('video')];
+  // A thumbnail-sized paused clip in an article is not the page's player.
+  const video=videos.map(v=>[v,v.getBoundingClientRect()])
+    .filter(([v,r])=>r.width*r.height>0 && (!v.paused || (r.width>=320 && r.height>=180)))
+    .sort((a,b)=>b[1].width*b[1].height-a[1].width*a[1].height).map(([v])=>v)[0] || null;
+  let player=null;
+  if (video) {
+    const r=video.getBoundingClientRect(), area=r.width*r.height;
+    for (let p=video.parentElement; p && p!==document.body; p=p.parentElement) {
+      const q=p.getBoundingClientRect(); if (q.width*q.height>area*1.5) break; player=p;
+    }
+  }
+  cache.player=player;   // act() accepts the same auto-hidden player controls
+  // Video players fade their controls to opacity 0 while playing; they stay clickable and
+  // reappear on pointer movement. Only inside the player is opacity ignored: elsewhere an
+  // opacity-0 element is usually a closed menu mid-transition.
   const visible = e => !e.closest('[aria-hidden="true"],[inert]') &&
-    e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});
+    (e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}) ||
+      (!!player && player.contains(e) && e.checkVisibility({checkVisibilityCSS:true})));
   const name = (e,seen=new Set()) => {
     if (!e || seen.has(e)) return '';
     seen.add(e);
@@ -57,6 +75,7 @@
   cache.pageKey=()=>[performance.timeOrigin,location.href,scrollX,scrollY,innerWidth,innerHeight,
     [...document.querySelectorAll('input,textarea,select')].filter(safe)
       .map(e=>[identity(e),mask(e.value),e.checked,e.selectedIndex,e.disabled,e.readOnly])];
+  cache.focusKey=()=>document.activeElement ? identity(document.activeElement) : null;
   cache.guard=e=>{
     if (!e?.isConnected || !visible(e)) return null;
     const scope=e.closest('form,dialog,[role="dialog"],article,li,tr,[role="row"]') || e.parentElement;
@@ -74,7 +93,7 @@
     const base={node:identity(e),role:rname,label:mask(name(e)||rname),
       form_submit:(!!e.form && e.type==='submit'),
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
-    for (const key of ['checked','selected','expanded']) {
+    for (const key of ['checked','selected','expanded','pressed']) {
       const value=e.getAttribute('aria-'+key);
       if (value!==null) base[key]=value;
     }
@@ -127,15 +146,56 @@
   actions.push({id:'wait',kind:'wait',label:'Wait for the page to update'});
   const keys=[{id:'key_escape',key:'Escape',code:'Escape',vk:27,label:'Press Escape'},
     {id:'key_enter',key:'Enter',code:'Enter',vk:13,label:'Press Enter'}];
-  if (document.querySelector('video')) keys.push(
-    {id:'key_fullscreen',key:'f',code:'KeyF',vk:70,label:'Toggle fullscreen (F)'},
-    {id:'key_captions',key:'c',code:'KeyC',vk:67,label:'Toggle captions (C)'},
-    {id:'key_play',key:'k',code:'KeyK',vk:75,label:'Play or pause (K)'},
-    {id:'key_mute',key:'m',code:'KeyM',vk:77,label:'Mute (M)'},
-    {id:'key_speed_up',key:'>',code:'Period',vk:190,shift:true,label:'Increase playback speed (Shift+.)'},
-    {id:'key_speed_down',key:'<',code:'Comma',vk:188,shift:true,label:'Decrease playback speed (Shift+,)'},
-    {id:'key_seek_forward',key:'l',code:'KeyL',vk:76,label:'Seek forward 10 seconds (L)'},
-    {id:'key_seek_backward',key:'j',code:'KeyJ',vk:74,label:'Seek backward 10 seconds (J)'});
+  // Shortcuts the page itself advertises with the standard aria-keyshortcuts attribute
+  // (video players, mail and document apps). Nothing site-specific is hardcoded: a key the
+  // page does not declare is never offered. Each carries its element's role and name, so the
+  // confidence gate treats "Press Control+Enter (page shortcut: Send)" like clicking Send.
+  const NAMED={Enter:13,Escape:27,Esc:27,Tab:9,Space:32,Spacebar:32,Backspace:8,Delete:46,Home:36,
+    End:35,PageUp:33,PageDown:34,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40};
+  const PUNCT={'/':[191,'Slash'],'?':[191,'Slash'],'.':[190,'Period'],'>':[190,'Period'],
+    ',':[188,'Comma'],'<':[188,'Comma'],';':[186,'Semicolon'],'=':[187,'Equal'],'-':[189,'Minus'],
+    '[':[219,'BracketLeft'],']':[221,'BracketRight'],"'":[222,'Quote']};
+  const BITS={alt:1,control:2,ctrl:2,meta:4,shift:8};
+  const combo=spec=>{
+    const parts=spec.split('+'); let key=parts.pop();
+    const mods=parts.map(m=>m.toLowerCase());
+    if (!key || mods.some(m=>!(m in BITS))) return null;
+    const modifiers=mods.reduce((n,m)=>n|BITS[m],0);
+    if (/^[a-z]$/i.test(key)) {
+      key=modifiers&8 ? key.toUpperCase() : key.toLowerCase();
+      return {key,code:'Key'+key.toUpperCase(),vk:key.toUpperCase().charCodeAt(0),modifiers};
+    }
+    if (/^[0-9]$/.test(key)) return {key,code:'Digit'+key,vk:key.charCodeAt(0),modifiers};
+    if (key in PUNCT) return {key,code:PUNCT[key][1],vk:PUNCT[key][0],modifiers};
+    if (key in NAMED) {
+      const code=key==='Esc' ? 'Escape' : key.startsWith('Space') ? 'Space' : key;
+      return {key:code==='Space' ? ' ' : code,code,vk:NAMED[key],modifiers};
+    }
+    return null;
+  };
+  const advertised=new Set(['Escape','Enter']);
+  for (const e of document.querySelectorAll('[aria-keyshortcuts]')) {
+    if (keys.length>=14) break;
+    if (e.closest('[inert]') || !e.checkVisibility({checkVisibilityCSS:true}) ||
+      e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
+    // A link's shortcut only navigates, and clicking the link does the same; offer controls.
+    if (['link',null].includes(role(e)) && e.tagName!=='BUTTON') continue;
+    const spec=(e.getAttribute('aria-keyshortcuts')||'').trim().split(/\s+/)[0], k=combo(spec);
+    const what=mask(name(e)||e.getAttribute('title')||'').replace(/\s+/g,' ').trim().slice(0,80);
+    if (!k || !what || advertised.has(spec)) continue;
+    advertised.add(spec);
+    const state=['pressed','checked','expanded'].map(a=>[a,e.getAttribute('aria-'+a)])
+      .filter(([,v])=>v!==null).map(([a,v])=>a+'='+v).join(', ');
+    keys.push({id:'key_'+spec.toLowerCase().replace(/[^a-z0-9]+/g,'_'),...k,shortcut:true,
+      role:role(e)||'button',label:'Press '+spec+' (page shortcut: '+what+')'+(state ? ' ['+state+']' : '')});
+  }
+  // The main video's live state from the standard media API; not visible in page text.
+  let media=null;
+  if (video) {
+    const tracks=[...(video.textTracks||[])].filter(t=>['captions','subtitles'].includes(t.kind));
+    media={speed:video.playbackRate,fullscreen:!!document.fullscreenElement,paused:video.paused,
+      muted:video.muted||video.volume===0,captions:tracks.length ? tracks.some(t=>t.mode==='showing') : null};
+  }
   for (const k of keys) actions.push({...k, kind:'key'});
   // Only presence flags cross this boundary. Passwords, one-time codes and
   // challenge contents stay in the user's Chrome session.
@@ -147,5 +207,5 @@
         (e.getAttribute('src')||'')+' '+(e.getAttribute('title')||'')+' '+(e.getAttribute('class')||''))),
   };
   return {url:mask(location.href),title:mask(document.title),w:innerWidth,h:innerHeight,text,
-    scroll:{y:scrollY,height},actions,marker,page_key,guards,omitted_actions,human};
+    scroll:{y:scrollY,height},actions,marker,page_key,guards,omitted_actions,human,media};
 })()

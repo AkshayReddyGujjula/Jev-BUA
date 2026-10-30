@@ -55,6 +55,7 @@ COMMIT_LABEL = re.compile(
     r"\b(publish|deploy|launch|go live|buy|purchase|pay|checkout|place order|"
     r"delete|remove|destroy|terminate|close account|deactivate|unsubscribe|submit|send|"
     r"transfer|save changes|apply changes|archive|unpublish|revoke|disconnect|refund|confirm|"
+    r"post|comment|"
     r"activate|connect domain|cancel subscription|change password|"
     r"disable (?:2fa|mfa)|enable (?:2fa|mfa))\b",
     re.IGNORECASE,
@@ -78,6 +79,23 @@ def commit_labelled(action):
         and bool(COMMIT_LABEL.search(label) or SECURITY_LABEL.search(label))
     )
 IRREVERSIBLE_NOUL = _threshold("JEV_IRREVERSIBLE_THRESHOLD", 0.5)
+# A submit button of a search or filter form navigates to results; it commits nothing.
+SEARCH_LABEL = re.compile(r"\b(search|find|filter|filters|go|look up|lookup)\b", re.IGNORECASE)
+
+
+def committal(action):
+    """True when the chosen element itself looks like a commit, not merely the page.
+
+    Jev's `irreversible` head rates the most consequential action the page OFFERS, so on a
+    site that always shows Subscribe or Post (YouTube read 0.69-0.79 on every page) it put
+    every button - Search, Comments - behind the 0.9 floor and the run abstained on step 2
+    (measured 2026-09-24). The page reading now sets how high the floor is; this decides
+    whether the chosen click is the kind of element that can commit at all.
+    """
+    if commit_labelled(action):
+        return True
+    label = str(action.get("label") or "")
+    return bool(action.get("form_submit")) and not SEARCH_LABEL.search(label)
 
 
 def check(decision, action, irreversible_floor=None):
@@ -87,6 +105,10 @@ def check(decision, action, irreversible_floor=None):
     for work the operator trusts (never below MODE_FLOOR_MIN); lowering it is a
     deliberate, user-authored choice recorded in the mode file, not a model decision.
     """
+    if action.get("kind") == "key" and action.get("shortcut"):
+        # A page-advertised shortcut does what its element does: "Press Control+Enter (page
+        # shortcut: Send)" is gated exactly like clicking Send.
+        action = {**action, "kind": "click"}
     if action.get("kind") not in GATED_KINDS:
         return None
     confidence = decision.get("confidence")
@@ -108,6 +130,7 @@ def check(decision, action, irreversible_floor=None):
         irreversible >= IRREVERSIBLE_NOUL
         and action.get("kind") in COMMITTABLE_KINDS
         and (action.get("role") or "").lower() not in REVERSIBLE_ROLES
+        and committal(action)
     )
     labelled = commit_labelled(action)
     floor = IRREVERSIBLE_MIN if high_stakes else REVERSIBLE_MIN
