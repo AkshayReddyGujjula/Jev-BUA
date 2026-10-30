@@ -47,7 +47,16 @@ after 2 identical verified recordings (maybe); miss reasons in report; Playwrigh
   headless verified (5/5), step cap 25, dialogs policy (trap /dialog passes), viewport, checklist
   importer (scripts/import_checklist.py -> examples/studycanvas/checklist/*.md), docs/go-to-market.md.
   Running: 5 draft checklist sections (log in scratchpad checklist-run.log).
-- Remaining ideas: REPORT.md (morning summary), `jev test --repeat N` flake rate, landing page draft,
+- 22:58 since then: jev draft, --repeat, DONE veto by checks, stale-replay retry, dialogs/beforeunload,
+  accessible-name/placeholder-aware checks, action.yml (untested), landing page docs/site/index.html,
+  REPORT.md draft (fill RESULTS_PLACEHOLDER from night-runs.log). Detached script night-runs.ps1
+  (pid 22648) runs 5 checklist sections --fresh + core --repeat 3; log scratchpad\night-runs.log.
+  Opus code review running in background; apply its verified findings.
+  INCIDENT: jev draft hit user's Chrome approval prompt once (~22:45), fixed (959f15a).
+- 23:01 StudyCanvas is being edited by ANOTHER session (HMR storms hung my :5173 Vite). Restarted my
+  Vite with scratchpad\vite.frozen.config.ts (hmr off, watch ignored; NODE_PATH=frontend\node_modules).
+  Night runs restarted (pid 48488). Earlier checklist numbers (8/25) were partly hit by the HMR storm.
+- Remaining ideas (older): REPORT.md (morning summary), `jev test --repeat N` flake rate, landing page draft,
   maybe Linux CI action.yml.
 - OLD NEXT: MCP browser_test tool (async, beat 120 s cap); second project (Nebius Decision Lab ?mock=1,
   run web on another port); anchors cascade; product docs + landing page; REPORT.md.

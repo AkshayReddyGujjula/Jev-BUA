@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://localhost:5180/?mock=1",
+  "goal": "Fit the planning graph to view",
+  "goal_hash": "60fd50f7c1aba52c55461e9ac9441648ae3efbdb1fd22ea91ec0cc34af6c6417",
+  "recorded_at": 1793401067.6199865,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Fit to view",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.95,
+      "irreversible": 0.12
+    }
+  ]
+}

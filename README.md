@@ -47,8 +47,14 @@ path: /
 
 ```bash
 jev init --url http://localhost:3000     # writes jev-tests/smoke.md
+jev draft http://localhost:3000 --about "a recipe planner"   # or: one page read + one cheap call
 jev test jev-tests/smoke.md              # runs it; plans land in jev-tests/.jev/replay
+jev test jev-tests/smoke.md --repeat 3   # pass rate per test (flaky / always failing) and cost per run
 ```
+
+`jev draft` marks every check it could not see on the start page as *predicted* and every check that
+was already true before its step as *weak*; review those before trusting a pass. A JSON test checklist
+can be drafted the same way with `scripts/import_checklist.py`.
 
 Measured on a real app ([StudyCanvas](examples/studycanvas/core.md), Vite + React on localhost; every
 test first passes an access gate and a five-question onboarding):

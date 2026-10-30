@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://localhost:5180/?mock=1",
+  "goal": "Click the 3 open models button",
+  "goal_hash": "3ea3b746a10a0bf412889e507150cadea6c80d1877f605c96694782101ffe3e6",
+  "recorded_at": 1793401043.3012488,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "3 open models",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.99,
+      "irreversible": 0.09
+    }
+  ]
+}

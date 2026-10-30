@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://localhost:5180/?mock=1",
+  "goal": "Zoom in the planning graph",
+  "goal_hash": "22d9bbe8291162e5e3a8b0df1286290accf1c11a00c628e80b22857114f853dc",
+  "recorded_at": 1793401066.738042,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Zoom in",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 1.0,
+      "irreversible": 0.12
+    }
+  ]
+}

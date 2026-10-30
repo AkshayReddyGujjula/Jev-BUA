@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "url": "http://localhost:5180/?mock=1",
+  "goal": "Go back to the Conversation tab",
+  "goal_hash": "5d777222dfbab9381cdba4489503013c6308160c73d957403c53e21a7a3aa887",
+  "recorded_at": 1793401054.743967,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Conversation",
+      "role": "tab",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 1.0,
+      "irreversible": 0.15,
+      "anchor": {
+        "container": "Conversation"
+      }
+    }
+  ]
+}

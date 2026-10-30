@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://localhost:5180/?mock=1",
+  "goal": "Collapse the live feed",
+  "goal_hash": "f675059a563fd5cc55ba9ccaa3aa443fa39043220d7e578311b8b8a42ad4bd19",
+  "recorded_at": 1793401059.0869746,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Collapse the live feed",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.94,
+      "irreversible": 0.09
+    }
+  ]
+}

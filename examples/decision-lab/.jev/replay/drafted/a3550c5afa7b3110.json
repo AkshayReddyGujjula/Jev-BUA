@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "url": "http://localhost:5180/?mock=1",
+  "goal": "Open the Research tab",
+  "goal_hash": "a3550c5afa7b311076116b357863680b9e4afcec3e4c40c83df67a89f568a7ee",
+  "recorded_at": 1793401049.085778,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Research",
+      "role": "tab",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.99,
+      "irreversible": 0.09,
+      "anchor": {
+        "container": "Conversation"
+      }
+    }
+  ]
+}

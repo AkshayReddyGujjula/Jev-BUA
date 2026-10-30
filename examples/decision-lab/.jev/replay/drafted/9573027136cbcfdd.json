@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://localhost:5180/?mock=1",
+  "goal": "Zoom out the planning graph",
+  "goal_hash": "9573027136cbcfdd2c379e0ee0edfadec3289478638eb7b75c90edbf58fd81b3",
+  "recorded_at": 1793401064.9801877,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Zoom out",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.98,
+      "irreversible": 0.09
+    }
+  ]
+}
