@@ -231,7 +231,7 @@ class Agent:
     def __init__(self, url, goals, *, record_dir=None, screenshots=False, values=None, find=None,
                  expect=None, browser=None, evidence_dir=None, replay_dir=None, mode=None,
                  collect_steps=None, steps=None, commit_floor=None,
-                 replay_commits=None, stop_on_expect=False):
+                 replay_commits=None, stop_on_expect=False, max_steps=None):
         task = goals.strip() if isinstance(goals, str) else "\n".join(goals).strip()
         if not task:
             raise ValueError("Supply a task")
@@ -275,6 +275,10 @@ class Agent:
         # the checks define done), instead of waiting for Jev to choose DONE.
         self.stop_on_expect = bool(stop_on_expect)
         self._max_steps = _budget(spec.get("max_steps"), None)
+        if max_steps is not None:
+            # A caller's cap (a test step) lowers the mode's, never raises it.
+            caller = _budget(max_steps, None)
+            self._max_steps = min(filter(None, (self._max_steps, caller)), default=None)
         self.use_cache = spec.get("cache") is not False
         collect = spec.get("collect") if isinstance(spec.get("collect"), dict) else {}
         self._harvest_enabled = bool(collect.get("harvest")) and self._strategy == "collect"

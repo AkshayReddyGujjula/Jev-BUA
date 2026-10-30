@@ -1,0 +1,485 @@
+{
+  "base_url": "http://localhost:5180",
+  "workers": 3,
+  "wall_s": 26.59,
+  "serial_equivalent_s": 35.16,
+  "passed": 3,
+  "total": 3,
+  "stalled": 0,
+  "usd_estimate": 0.012845,
+  "model_calls": 60,
+  "replay_dir": "C:\\Users\\aksha\\Desktop\\GitHub\\JEV\\My Projects\\jev-ultrafast\\examples\\decision-lab\\.jev\\replay\\smoke",
+  "steps_replayed": 0,
+  "heals": 0,
+  "results": [
+    {
+      "name": "The mock run shows the live feed and its cost meter",
+      "url": "http://localhost:5180/?mock=1",
+      "goal": "Read the page.",
+      "bu_name": "jev-check-00-chrome9333",
+      "pid": 17848,
+      "status": "done",
+      "outcome": "verified",
+      "verified": true,
+      "checks": [
+        {
+          "check": "text_contains_all",
+          "pass": true,
+          "note": "missing [] of ['Live feed', 'COST']"
+        },
+        {
+          "check": "no_page_errors",
+          "pass": true,
+          "note": "0 error(s): []"
+        }
+      ],
+      "wall_s": 1.94,
+      "actions": 0,
+      "decisions": 1,
+      "final_url": "http://localhost:5180/?mock=1",
+      "title": "Decision Lab",
+      "text_calls": [],
+      "trail": [],
+      "error": null,
+      "stall": null,
+      "steps": [
+        {
+          "goal": "Read the page.",
+          "status": "done",
+          "outcome": "verified",
+          "verified": true,
+          "checks": [
+            {
+              "check": "text_contains_all",
+              "pass": true,
+              "note": "missing [] of ['Live feed', 'COST']"
+            },
+            {
+              "check": "no_page_errors",
+              "pass": true,
+              "note": "0 error(s): []"
+            }
+          ],
+          "decisions": 1,
+          "cost": {
+            "calls": {
+              "jev": 0,
+              "jev_hedges": 0,
+              "jev_cached": 1,
+              "text": 0,
+              "review": 0,
+              "supervisor": 0
+            },
+            "jev_input_tokens": 0,
+            "jev_input_usd_estimate": 0.0,
+            "text_input_tokens": 0,
+            "side_usd_reported": 0,
+            "usd_estimate": 0.0,
+            "cache_hits": 1,
+            "cache_misses": 0,
+            "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+          },
+          "replay": {
+            "available": false,
+            "used": 0,
+            "completed": false,
+            "stopped": null,
+            "heals": [],
+            "finished_by_readback": false,
+            "recorded": null
+          }
+        }
+      ],
+      "cost": {
+        "calls": {
+          "jev": 0,
+          "jev_hedges": 0,
+          "jev_cached": 1,
+          "text": 0,
+          "review": 0,
+          "supervisor": 0
+        },
+        "jev_input_tokens": 0,
+        "jev_input_usd_estimate": 0.0,
+        "text_input_tokens": 0,
+        "side_usd_reported": 0,
+        "usd_estimate": 0.0,
+        "cache_hits": 1,
+        "cache_misses": 0,
+        "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+      },
+      "replay": {
+        "steps_replayed": 0,
+        "heals": 0,
+        "zero_model_steps": 0
+      },
+      "readback_error": null,
+      "blocked_reason": null,
+      "supervision": [],
+      "skipped": 0
+    },
+    {
+      "name": "Answering the waiting question moves the conversation on",
+      "url": "http://localhost:5180/?mock=1",
+      "goal": "Wait for the question addressed to you, answer it with the first option, and send it.",
+      "bu_name": "jev-check-01-chrome9333",
+      "pid": 34656,
+      "status": "budget_exhausted",
+      "outcome": "verified",
+      "verified": true,
+      "checks": [
+        {
+          "check": "text_absent",
+          "pass": true,
+          "note": "unexpectedly present: []"
+        }
+      ],
+      "wall_s": 25.46,
+      "actions": 18,
+      "decisions": 50,
+      "final_url": "http://localhost:5180/?mock=1",
+      "title": "Decision Lab",
+      "text_calls": [
+        {
+          "model": "deepseek-v4.1-flash",
+          "latency_ms": 1348,
+          "usage": {
+            "prompt_tokens": 939,
+            "completion_tokens": 28,
+            "total_tokens": 967,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "cost": 0,
+            "opencode": {
+              "billing_source": "go",
+              "list_cost": 0.00015765,
+              "allowance": 0.00011824,
+              "tokens": {
+                "input": 939,
+                "output": 28,
+                "reasoning": 0,
+                "cache_read": 0,
+                "cache_write_5m": 0,
+                "cache_write_1h": 0
+              }
+            }
+          },
+          "prefetched": true,
+          "waited_ms": 0,
+          "field": "Type or say it \u2014 e.g. Resits are in August, capped at 40%",
+          "value": "[redacted]"
+        }
+      ],
+      "trail": [
+        {
+          "action": "Wait for the page to update",
+          "outcome": "no visible change",
+          "error": null
+        },
+        {
+          "action": "Question for you",
+          "outcome": "page changed",
+          "error": null
+        },
+        {
+          "action": "Question for you",
+          "outcome": "page changed",
+          "error": null
+        },
+        {
+          "action": "Question for you",
+          "outcome": "page changed",
+          "error": null
+        },
+        {
+          "action": "Question for you",
+          "outcome": "loop detected",
+          "error": null
+        },
+        {
+          "action": "Skip",
+          "outcome": "page content changed",
+          "error": null
+        },
+        {
+          "action": "Wait for the page to update",
+          "outcome": "page changed",
+          "error": null
+        },
+        {
+          "action": "For you 10:25:27 PM A question is waiting for you New",
+          "outcome": "page content changed",
+          "error": null
+        },
+        {
+          "action": "Wait for the page to update",
+          "outcome": "page content changed",
+          "error": null
+        },
+        {
+          "action": "Answer it",
+          "outcome": "page content changed",
+          "error": null
+        },
+        {
+          "action": "Open Type or say it \u2014 e.g. Resits are in August, capped at 40%",
+          "outcome": "page changed",
+          "error": null
+        },
+        {
+          "action": "Type or say it \u2014 e.g. Resits are in August, capped at 40%",
+          "outcome": "page changed",
+          "error": null
+        },
+        {
+          "action": "Open A1 \u00b7 high",
+          "outcome": "page changed",
+          "error": null
+        },
+        {
+          "action": "Save answer",
+          "outcome": "page changed",
+          "error": null
+        },
+        {
+          "action": "Close overlay (Escape)",
+          "outcome": "page content changed",
+          "error": null
+        },
+        {
+          "action": "Answer it",
+          "outcome": "page content changed",
+          "error": null
+        }
+      ],
+      "error": null,
+      "stall": null,
+      "steps": [
+        {
+          "goal": "Wait for the question addressed to you, answer it with the first option, and send it.",
+          "status": "budget_exhausted",
+          "outcome": "verified",
+          "verified": true,
+          "checks": [
+            {
+              "check": "text_absent",
+              "pass": true,
+              "note": "unexpectedly present: []"
+            }
+          ],
+          "decisions": 50,
+          "cost": {
+            "calls": {
+              "jev": 48,
+              "jev_hedges": 0,
+              "jev_cached": 2,
+              "text": 1,
+              "review": 6,
+              "supervisor": 0
+            },
+            "jev_input_tokens": 285928,
+            "jev_input_usd_estimate": 0.01200898,
+            "text_input_tokens": 939,
+            "side_usd_reported": 0.00015765,
+            "usd_estimate": 0.01216663,
+            "cache_hits": 2,
+            "cache_misses": 48,
+            "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+          },
+          "replay": {
+            "available": false,
+            "used": 0,
+            "completed": false,
+            "stopped": null,
+            "heals": [],
+            "finished_by_readback": false,
+            "recorded": "C:\\Users\\aksha\\Desktop\\GitHub\\JEV\\My Projects\\jev-ultrafast\\examples\\decision-lab\\.jev\\replay\\smoke\\0d67731edc766da2.json"
+          }
+        }
+      ],
+      "cost": {
+        "calls": {
+          "jev": 48,
+          "jev_hedges": 0,
+          "jev_cached": 2,
+          "text": 1,
+          "review": 6,
+          "supervisor": 0
+        },
+        "jev_input_tokens": 285928,
+        "jev_input_usd_estimate": 0.01200898,
+        "text_input_tokens": 939,
+        "side_usd_reported": 0.00015765,
+        "usd_estimate": 0.01216663,
+        "cache_hits": 2,
+        "cache_misses": 48,
+        "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+      },
+      "replay": {
+        "steps_replayed": 0,
+        "heals": 0,
+        "zero_model_steps": 0
+      },
+      "readback_error": null,
+      "blocked_reason": null,
+      "supervision": [],
+      "skipped": 0
+    },
+    {
+      "name": "A question can be skipped",
+      "url": "http://localhost:5180/?mock=1",
+      "goal": "Wait for the question addressed to you and skip it.",
+      "bu_name": "jev-check-02-chrome9333",
+      "pid": 53764,
+      "status": "blocked",
+      "outcome": "verified",
+      "verified": true,
+      "checks": [
+        {
+          "check": "text_absent",
+          "pass": true,
+          "note": "unexpectedly present: []"
+        }
+      ],
+      "wall_s": 7.76,
+      "actions": 7,
+      "decisions": 7,
+      "final_url": "http://localhost:5180/?mock=1",
+      "title": "Decision Lab",
+      "text_calls": [
+        {
+          "model": "error",
+          "latency_ms": 0,
+          "usage": {},
+          "field": "Describe your decision",
+          "value": null,
+          "error": "Text helper returned no valid field value; nothing typed."
+        }
+      ],
+      "trail": [
+        {
+          "action": "Wait for the page to update",
+          "outcome": "page changed",
+          "error": null
+        },
+        {
+          "action": "Wait for the page to update",
+          "outcome": "loop detected",
+          "error": null
+        },
+        {
+          "action": "New decision",
+          "outcome": "page content changed",
+          "error": null
+        },
+        {
+          "action": "Open Describe your decision",
+          "outcome": "page changed",
+          "error": null
+        },
+        {
+          "action": "Open Describe your decision",
+          "outcome": "loop detected",
+          "error": null
+        },
+        {
+          "action": "Describe your decision",
+          "outcome": "action failed",
+          "error": "no text was produced for this field"
+        },
+        {
+          "action": "Open Describe your decision",
+          "outcome": "loop detected",
+          "error": null
+        }
+      ],
+      "error": null,
+      "stall": null,
+      "steps": [
+        {
+          "goal": "Wait for the question addressed to you and skip it.",
+          "status": "blocked",
+          "outcome": "verified",
+          "verified": true,
+          "checks": [
+            {
+              "check": "text_absent",
+              "pass": true,
+              "note": "unexpectedly present: []"
+            }
+          ],
+          "decisions": 7,
+          "cost": {
+            "calls": {
+              "jev": 4,
+              "jev_hedges": 0,
+              "jev_cached": 3,
+              "text": 0,
+              "review": 0,
+              "supervisor": 1
+            },
+            "jev_input_tokens": 16146,
+            "jev_input_usd_estimate": 0.00067813,
+            "text_input_tokens": 0,
+            "side_usd_reported": 0,
+            "usd_estimate": 0.00067813,
+            "cache_hits": 3,
+            "cache_misses": 4,
+            "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+          },
+          "replay": {
+            "available": false,
+            "used": 0,
+            "completed": false,
+            "stopped": null,
+            "heals": [],
+            "finished_by_readback": false,
+            "recorded": "C:\\Users\\aksha\\Desktop\\GitHub\\JEV\\My Projects\\jev-ultrafast\\examples\\decision-lab\\.jev\\replay\\smoke\\e2c27e8574f338cc.json"
+          }
+        }
+      ],
+      "cost": {
+        "calls": {
+          "jev": 4,
+          "jev_hedges": 0,
+          "jev_cached": 3,
+          "text": 0,
+          "review": 0,
+          "supervisor": 1
+        },
+        "jev_input_tokens": 16146,
+        "jev_input_usd_estimate": 0.00067813,
+        "text_input_tokens": 0,
+        "side_usd_reported": 0,
+        "usd_estimate": 0.00067813,
+        "cache_hits": 3,
+        "cache_misses": 4,
+        "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+      },
+      "replay": {
+        "steps_replayed": 0,
+        "heals": 0,
+        "zero_model_steps": 0
+      },
+      "readback_error": null,
+      "blocked_reason": "supervisor: impossible: Page is Decision Lab landing; no question addressed to the user exists here to wait for or skip.",
+      "supervision": [
+        {
+          "trigger": "dead_streak",
+          "verdict": "impossible",
+          "step": 7,
+          "latency_ms": 1647,
+          "model": "deepseek-v4.1-flash",
+          "screenshot": true,
+          "error": null,
+          "reason": "Page is Decision Lab landing; no question addressed to the user exists here to wait for or skip."
+        }
+      ],
+      "skipped": 0
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "name": "The mock run shows the live feed and its cost meter",
+  "url": "http://localhost:5180/?mock=1",
+  "goal": "Read the page.",
+  "bu_name": "jev-check-00-chrome9333",
+  "pid": 17848,
+  "status": "done",
+  "outcome": "verified",
+  "verified": true,
+  "checks": [
+    {
+      "check": "text_contains_all",
+      "pass": true,
+      "note": "missing [] of ['Live feed', 'COST']"
+    },
+    {
+      "check": "no_page_errors",
+      "pass": true,
+      "note": "0 error(s): []"
+    }
+  ],
+  "wall_s": 1.94,
+  "actions": 0,
+  "decisions": 1,
+  "final_url": "http://localhost:5180/?mock=1",
+  "title": "Decision Lab",
+  "text_calls": [],
+  "trail": [],
+  "error": null,
+  "stall": null,
+  "steps": [
+    {
+      "goal": "Read the page.",
+      "status": "done",
+      "outcome": "verified",
+      "verified": true,
+      "checks": [
+        {
+          "check": "text_contains_all",
+          "pass": true,
+          "note": "missing [] of ['Live feed', 'COST']"
+        },
+        {
+          "check": "no_page_errors",
+          "pass": true,
+          "note": "0 error(s): []"
+        }
+      ],
+      "decisions": 1,
+      "cost": {
+        "calls": {
+          "jev": 0,
+          "jev_hedges": 0,
+          "jev_cached": 1,
+          "text": 0,
+          "review": 0,
+          "supervisor": 0
+        },
+        "jev_input_tokens": 0,
+        "jev_input_usd_estimate": 0.0,
+        "text_input_tokens": 0,
+        "side_usd_reported": 0,
+        "usd_estimate": 0.0,
+        "cache_hits": 1,
+        "cache_misses": 0,
+        "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+      },
+      "replay": {
+        "available": false,
+        "used": 0,
+        "completed": false,
+        "stopped": null,
+        "heals": [],
+        "finished_by_readback": false,
+        "recorded": null
+      }
+    }
+  ],
+  "cost": {
+    "calls": {
+      "jev": 0,
+      "jev_hedges": 0,
+      "jev_cached": 1,
+      "text": 0,
+      "review": 0,
+      "supervisor": 0
+    },
+    "jev_input_tokens": 0,
+    "jev_input_usd_estimate": 0.0,
+    "text_input_tokens": 0,
+    "side_usd_reported": 0,
+    "usd_estimate": 0.0,
+    "cache_hits": 1,
+    "cache_misses": 0,
+    "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+  },
+  "replay": {
+    "steps_replayed": 0,
+    "heals": 0,
+    "zero_model_steps": 0
+  },
+  "readback_error": null,
+  "blocked_reason": null,
+  "supervision": [],
+  "skipped": 0
+}

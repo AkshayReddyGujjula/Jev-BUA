@@ -1,0 +1,40 @@
+{
+  "version": 2,
+  "url": "http://localhost:5180/?mock=1",
+  "goal": "Wait for the question addressed to you and skip it.",
+  "goal_hash": "e2c27e8574f338cc9a99de530e59389ac0d349b2b850863c057dc342c8f6308a",
+  "recorded_at": 1793399132.0359156,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "wait",
+      "label": "Wait for the page to update",
+      "role": null,
+      "operation": "WAIT",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.17,
+      "irreversible": 0.13
+    },
+    {
+      "kind": "click",
+      "label": "New decision",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.15,
+      "irreversible": 0.12
+    },
+    {
+      "kind": "click",
+      "label": "Open Describe your decision",
+      "role": "textbox",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.13,
+      "irreversible": 0.21
+    }
+  ]
+}

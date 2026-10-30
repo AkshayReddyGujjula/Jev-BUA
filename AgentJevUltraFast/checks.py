@@ -51,6 +51,10 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 
 MAX_WORKERS = 10
+# Actions one test step may take before it ends as budget_exhausted. A step is one goal; a page
+# that keeps offering new work (a live feed, a chat that keeps asking) must not turn one
+# step into a minute of decisions (measured: 117 calls, $0.03, in a 60 s budget).
+STEP_ACTIONS = int(os.environ.get("JEV_STEP_ACTIONS", "25"))
 # Added to a check's own max_seconds to bound its whole process: browser start-up, the final
 # readback and teardown. A worker past it is killed and reported, never waited on - one
 # instance parked behind Chrome's "Allow remote debugging?" prompt used to hang the run.
@@ -164,7 +168,8 @@ def run_worker(job, out_path):
                        evidence_dir=job.get("evidence_dir"),
                        commit_floor=job.get("commit_floor"),
                        replay_commits=job.get("replay_commits", local_host(job["url"])),
-                       stop_on_expect=job.get("stop_on_expect", True)) as agent:
+                       stop_on_expect=job.get("stop_on_expect", True),
+                       max_steps=step.get("max_steps", job.get("max_steps", STEP_ACTIONS))) as agent:
                 for _ in agent.run():
                     if time.monotonic() > deadline:
                         result["error"] = f"exceeded the {job.get('max_seconds', 60)}s budget"
@@ -329,6 +334,15 @@ def run_parent(args):
         except ValueError as error:
             raise SystemExit(f"{job['name']}: {error}") from error
         jobs.append(job)
+    from AgentJevUltraFast.agent import POSITIVE_CHECKS
+    for job in jobs:
+        for number, step in enumerate(check_steps(job), 1):
+            expect = step.get("expect") or {}
+            if expect and not any(key in POSITIVE_CHECKS for key in expect):
+                # Not an error, but the costly case: only "not see" checks cannot tell the run
+                # it has arrived, so it runs until Jev chooses DONE or the step budget ends it.
+                print(f"note: {job['name']} step {number} has only negative checks; add a "
+                      "'see:' check so it can stop the moment it succeeds")
     if workers > 1 and any(job.get("isolate") == "storage" for job in jobs):
         # Storage isolation wipes the app origin's data in the shared browser context, which
         # would pull state out from under any check running at the same time.
