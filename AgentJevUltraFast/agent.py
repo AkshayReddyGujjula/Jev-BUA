@@ -86,6 +86,9 @@ EXPECT_WAIT_S = max(0.0, float(os.environ.get("JEV_EXPECT_WAIT_S", "3")))
 # Replay commit-like clicks (Delete, Submit, Save changes) from a recorded plan instead of
 # asking Jev again. Off by default; for a disposable test environment whose owner trusts it.
 REPLAY_COMMITS = os.environ.get("JEV_REPLAY_COMMITS", "0").strip().lower() in {"1", "true", "yes", "on"}
+# Checks that something IS on the page. Only these can end a run early (see _finish_on_readback).
+POSITIVE_CHECKS = {"text_contains", "text_contains_all", "url_contains", "url_matches",
+                   "title_contains", "selector_count", "value_contains"}
 # How long a replayed step waits for its recorded element before handing the step to Jev.
 REPLAY_WAIT_S = max(0.0, float(os.environ.get("JEV_REPLAY_WAIT_S", "2")))
 # Backstop for the deadline: consecutive decisions with no progress at all. The clock can
@@ -1124,6 +1127,11 @@ class Agent:
         state = self.state
         expect = getattr(self, "expect", None)
         if not expect or state["status"] in TERMINAL_STATUS:
+            return False
+        if via != "replay" and not any(key in POSITIVE_CHECKS for key in expect):
+            # Absence is not arrival: "not see: question 1" already holds on question 2 of 5.
+            # Only a check that something IS there can say the goal was reached mid-run. A
+            # fully replayed plan is different: it re-ran every step of a verified flow.
             return False
         deadline = time.monotonic() + wait_s
         confirmations = 0

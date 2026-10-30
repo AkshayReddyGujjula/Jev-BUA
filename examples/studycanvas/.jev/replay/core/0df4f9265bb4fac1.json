@@ -1,0 +1,58 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Create a new canvas named Jev Biology Chapter 3.",
+  "goal_hash": "0df4f9265bb4fac18345f486f53ec8917bcd7c3fca28c66c3b430dd5aaad3224",
+  "recorded_at": 1793398639.674732,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "End tutorial",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.22,
+      "irreversible": 0.09
+    },
+    {
+      "kind": "click",
+      "label": "New canvas",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.78,
+      "irreversible": 0.13
+    },
+    {
+      "kind": "fill",
+      "label": "Name",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": "Jev Biology Chapter 3",
+      "outcome": "page changed",
+      "confidence": 0.99,
+      "irreversible": 0.16
+    },
+    {
+      "kind": "click",
+      "label": "Create",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.96,
+      "irreversible": 0.15
+    }
+  ],
+  "heals": [
+    {
+      "at_step": 1,
+      "resumed_at": 2,
+      "reason": "recorded step does not match this page",
+      "jev_actions": 1
+    }
+  ]
+}

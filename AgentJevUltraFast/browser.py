@@ -325,6 +325,9 @@ class Browser:
         installs it again; the recorder itself is idempotent per document.
         """
         try:
+            # Without the Page domain enabled the script is registered but never injected
+            # (measured: window.__jevErrors undefined after a navigation).
+            self.call("Page.enable")
             self.call("Page.addScriptToEvaluateOnNewDocument", source=ERROR_RECORDER)
             self.call("Runtime.evaluate", expression=ERROR_RECORDER)
         except Exception:

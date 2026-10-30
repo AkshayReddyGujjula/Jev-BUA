@@ -615,7 +615,7 @@ def tool_browser_checks(args):
             "checks": args["checks"],
         }), encoding="utf-8")
         proc = subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "run_checks.py"), str(spec_path),
+            [sys.executable, "-m", "AgentJevUltraFast.checks", str(spec_path),
              "--workers", str(min(int(args.get("workers", 4)), 10)), "--out", str(out)],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )

@@ -829,7 +829,7 @@ def test_mcp_browser_do_exposes_mode_and_collect_steps():
 def test_benchmark_scripts_force_modes_off():
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     for name in ("measure_flights.py", "record_flights.py", "verify_stall.py",
-                 "benchmark_flights.py", "run_checks.py"):
+                 "benchmark_flights.py", "../AgentJevUltraFast/checks.py"):
         text = (scripts / name).read_text(encoding="utf-8")
         assert 'JEV_MODES"] = "off"' in text, name
 

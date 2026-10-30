@@ -31,6 +31,13 @@ Goal: cheapest browser agent that keeps quality and speed; first real use is rep
   re-records, skips gates; text_contains is any-of; JS dialogs unhandled; MCP browser_checks 120 s cap;
   reviewer on by default (up to 12 calls/run) and not in cost reports.
 
+## OSS deep-dive (clones in scratchpad\oss; browser-use/stagehand MIT, playwright Apache, workflow-use/skyvern AGPL = ideas only)
+Adopt next: record richer anchors (testid, id unless generated, name, placeholder, href path, container
+heading/landmark, ordinal+count among same-label) and a tiered unique-match cascade (testid/id ->
+role+name -> narrow by container/ordinal -> placeholder/name/href -> fuzzy unique best); log the tier;
+idempotent toggle skip; quarantine plan after refuted; `skip`/quarantined test flag; plan trusted only
+after 2 identical verified recordings (maybe); miss reasons in report; Playwright planner spec shape.
+
 ## Done so far
 - chrome.py dedicated Chrome + tests; expect auto-wait (JEV_EXPECT_WAIT_S=3), text_contains_all,
   no_page_errors (page error recorder installed per document).

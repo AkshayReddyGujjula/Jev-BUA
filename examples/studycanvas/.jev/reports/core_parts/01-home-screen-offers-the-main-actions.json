@@ -1,0 +1,259 @@
+{
+  "name": "Home screen offers the main actions",
+  "url": "http://localhost:5173/workspace?storage=idb",
+  "goal": "Enter the access code and continue.",
+  "bu_name": "jev-check-01-chrome9333",
+  "pid": 10744,
+  "status": "done",
+  "outcome": "verified",
+  "verified": true,
+  "checks": [
+    {
+      "check": "text_contains",
+      "pass": true,
+      "note": "matched ['New space', 'New Space'] of ['New space', 'New Space']"
+    },
+    {
+      "check": "text_contains_all",
+      "pass": true,
+      "note": "missing [] of ['New canvas']"
+    },
+    {
+      "check": "no_page_errors",
+      "pass": true,
+      "note": "0 error(s): []"
+    }
+  ],
+  "wall_s": 12.41,
+  "actions": 9,
+  "decisions": 3,
+  "final_url": "http://localhost:5173/workspace?storage=idb",
+  "title": "StudyCanvas: Study on an infinite canvas",
+  "text_calls": [
+    {
+      "model": "replay",
+      "latency_ms": 0,
+      "usage": {},
+      "field": "Access code",
+      "value": "[redacted]"
+    },
+    {
+      "model": "replay",
+      "latency_ms": 0,
+      "usage": {},
+      "field": "Your name",
+      "value": "[redacted]"
+    }
+  ],
+  "trail": [
+    {
+      "action": "Access code",
+      "outcome": "page changed",
+      "error": null
+    },
+    {
+      "action": "Continue",
+      "outcome": "page changed",
+      "error": null
+    },
+    {
+      "action": "Your name",
+      "outcome": "page changed",
+      "error": null
+    },
+    {
+      "action": "Continue",
+      "outcome": "page content changed",
+      "error": null
+    },
+    {
+      "action": "Skip",
+      "outcome": "page changed",
+      "error": null
+    },
+    {
+      "action": "Skip",
+      "outcome": "page changed",
+      "error": null
+    },
+    {
+      "action": "Skip",
+      "outcome": "page changed",
+      "error": null
+    },
+    {
+      "action": "Balanced",
+      "outcome": "page changed",
+      "error": null
+    },
+    {
+      "action": "Start the tutorial",
+      "outcome": "page content changed",
+      "error": null
+    }
+  ],
+  "error": null,
+  "stall": null,
+  "steps": [
+    {
+      "goal": "Enter the access code and continue.",
+      "status": "done",
+      "outcome": "verified",
+      "verified": true,
+      "checks": [
+        {
+          "check": "text_absent",
+          "pass": true,
+          "note": "unexpectedly present: []"
+        }
+      ],
+      "decisions": 1,
+      "cost": {
+        "calls": {
+          "jev": 0,
+          "jev_hedges": 0,
+          "jev_cached": 1,
+          "text": 0,
+          "review": 0,
+          "supervisor": 0
+        },
+        "jev_input_tokens": 0,
+        "jev_input_usd_estimate": 0.0,
+        "text_input_tokens": 0,
+        "side_usd_reported": 0,
+        "usd_estimate": 0.0,
+        "cache_hits": 1,
+        "cache_misses": 0,
+        "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+      },
+      "replay": {
+        "available": true,
+        "used": 2,
+        "completed": true,
+        "stopped": null,
+        "heals": [],
+        "finished_by_readback": false,
+        "recorded": null
+      }
+    },
+    {
+      "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish.",
+      "status": "done",
+      "outcome": "verified",
+      "verified": true,
+      "checks": [
+        {
+          "check": "text_absent",
+          "pass": true,
+          "note": "unexpectedly present: []"
+        }
+      ],
+      "decisions": 1,
+      "cost": {
+        "calls": {
+          "jev": 0,
+          "jev_hedges": 0,
+          "jev_cached": 1,
+          "text": 0,
+          "review": 0,
+          "supervisor": 0
+        },
+        "jev_input_tokens": 0,
+        "jev_input_usd_estimate": 0.0,
+        "text_input_tokens": 0,
+        "side_usd_reported": 0,
+        "usd_estimate": 0.0,
+        "cache_hits": 1,
+        "cache_misses": 0,
+        "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+      },
+      "replay": {
+        "available": true,
+        "used": 7,
+        "completed": true,
+        "stopped": null,
+        "heals": [],
+        "finished_by_readback": false,
+        "recorded": null
+      }
+    },
+    {
+      "goal": "Look at the home screen.",
+      "status": "done",
+      "outcome": "verified",
+      "verified": true,
+      "checks": [
+        {
+          "check": "text_contains",
+          "pass": true,
+          "note": "matched ['New space', 'New Space'] of ['New space', 'New Space']"
+        },
+        {
+          "check": "text_contains_all",
+          "pass": true,
+          "note": "missing [] of ['New canvas']"
+        },
+        {
+          "check": "no_page_errors",
+          "pass": true,
+          "note": "0 error(s): []"
+        }
+      ],
+      "decisions": 1,
+      "cost": {
+        "calls": {
+          "jev": 0,
+          "jev_hedges": 0,
+          "jev_cached": 1,
+          "text": 0,
+          "review": 0,
+          "supervisor": 0
+        },
+        "jev_input_tokens": 0,
+        "jev_input_usd_estimate": 0.0,
+        "text_input_tokens": 0,
+        "side_usd_reported": 0,
+        "usd_estimate": 0.0,
+        "cache_hits": 1,
+        "cache_misses": 0,
+        "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+      },
+      "replay": {
+        "available": false,
+        "used": 0,
+        "completed": false,
+        "stopped": null,
+        "heals": [],
+        "finished_by_readback": false,
+        "recorded": null
+      }
+    }
+  ],
+  "cost": {
+    "calls": {
+      "text": 0,
+      "review": 0,
+      "supervisor": 0,
+      "jev_cached": 3,
+      "jev": 0,
+      "jev_hedges": 0
+    },
+    "jev_input_tokens": 0,
+    "jev_input_usd_estimate": 0.0,
+    "text_input_tokens": 0,
+    "side_usd_reported": 0,
+    "usd_estimate": 0,
+    "cache_hits": 3,
+    "cache_misses": 0,
+    "note": "Jev: reported input tokens at $0.042/M (hedged duplicates excluded). Text, review and supervisor: the provider's own per-call figure where it gives one."
+  },
+  "replay": {
+    "steps_replayed": 9,
+    "heals": 0,
+    "zero_model_steps": 0
+  },
+  "readback_error": null,
+  "blocked_reason": null,
+  "supervision": [],
+  "skipped": 0
+}

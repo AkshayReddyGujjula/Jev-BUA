@@ -1940,7 +1940,7 @@ def test_reattach_rearms_the_render_keepalive(monkeypatch):
     monkeypatch.setattr(browser, "cdp", lambda method, **k: methods.append(method) or {"sessionId": "s2"})
     assert b.reattach() is True
     # The page-error recorder is re-installed on the new session before the keepalive.
-    assert methods == ["Target.attachToTarget", "Page.addScriptToEvaluateOnNewDocument",
+    assert methods == ["Target.attachToTarget", "Page.enable", "Page.addScriptToEvaluateOnNewDocument",
                        "Runtime.evaluate", "Page.startScreencast"]
 
 

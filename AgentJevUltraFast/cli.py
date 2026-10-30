@@ -211,6 +211,78 @@ def _json_arg(parser, raw, flag):
         parser.error(f"{flag} must be a JSON object: {error}")
 
 
+STARTER_SPEC = """\
+# {title}
+base_url: {url}
+isolate: storage
+
+## Home page loads
+1. Read the page.
+   - no page errors
+
+## Unknown page shows a not-found message
+path: /this-page-does-not-exist
+1. Read the page.
+   - see any: not found | 404
+"""
+
+
+def test_command(argv):
+    """`jev test SPEC`: run a Markdown or JSON test suite against a web app.
+
+    Defaults are the ones an unattended run needs: a dedicated automation Chrome (no approval
+    prompt, never the user's own tabs), and replay on, with plans kept next to the spec in
+    `.jev/` so a team can commit them and every later run repeats verified flows for free.
+    """
+    from .checks import main as checks_main
+
+    parser = argparse.ArgumentParser(prog="jev test", description=test_command.__doc__)
+    parser.add_argument("spec", help="a Markdown spec (.md) or a JSON check file")
+    parser.add_argument("--workers", type=int, default=4, help="parallel browsers (1-10)")
+    parser.add_argument("--chrome", choices=("dedicated", "user"), default="dedicated")
+    parser.add_argument("--no-replay", action="store_true", help="always decide with Jev; record nothing")
+    parser.add_argument("--fresh", action="store_true", help="forget recorded plans first, then re-record")
+    parser.add_argument("--skip-probe", action="store_true", help="do not check the app is up first")
+    args = parser.parse_args(argv)
+    spec = Path(args.spec).resolve()
+    if not spec.exists():
+        parser.error(f"no such file: {spec}")
+    state = spec.parent / ".jev"
+    replay_dir = state / "replay" / spec.stem
+    if args.fresh and replay_dir.exists():
+        for plan in replay_dir.glob("*.json"):
+            plan.unlink()
+    forwarded = [str(spec), "--workers", str(args.workers), "--chrome", args.chrome,
+                 "--state-dir", str(state), "--out", str(state / "reports" / f"{spec.stem}.json")]
+    if not args.no_replay:
+        forwarded += ["--replay", str(replay_dir)]
+    if args.skip_probe:
+        forwarded.append("--skip-probe")
+    return checks_main(forwarded)
+
+
+def init_command(argv):
+    """`jev init [--url URL] [--dir DIR]`: write a starter Markdown spec to edit."""
+    parser = argparse.ArgumentParser(prog="jev init", description=init_command.__doc__)
+    parser.add_argument("--url", default="http://localhost:3000", help="where the app runs locally")
+    parser.add_argument("--dir", default="jev-tests", help="folder for specs (default jev-tests)")
+    args = parser.parse_args(argv)
+    folder = Path(args.dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / "smoke.md"
+    if target.exists():
+        print(f"{target} already exists; leaving it alone.")
+        return 1
+    target.write_text(STARTER_SPEC.format(title=Path.cwd().name + " smoke", url=args.url.rstrip("/")),
+                      encoding="utf-8")
+    ignore = folder / ".jev" / ".gitignore"
+    ignore.parent.mkdir(parents=True, exist_ok=True)
+    # Plans are worth committing (free, deterministic reruns); raw evidence and reports are not.
+    ignore.write_text("evidence/\nreports/\n", encoding="utf-8")
+    print(f"wrote {target}\nrun it with:  jev test {target}")
+    return 0
+
+
 def main():
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -218,6 +290,9 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
+    if len(sys.argv) > 1 and sys.argv[1] in {"test", "init"}:
+        command = test_command if sys.argv[1] == "test" else init_command
+        sys.exit(command(sys.argv[2:]))
     parser = argparse.ArgumentParser(
         prog="jev", description="Your words go straight to Jev, in your real Chrome. No arguments: interactive.")
     parser.add_argument("words", nargs="*", help="The goal, verbatim (same as --goal).")

@@ -1,0 +1,102 @@
+import pytest
+
+from AgentJevUltraFast import spec
+from AgentJevUltraFast.assertions import normalize_expect
+
+SAMPLE = """\
+# Shop smoke
+base_url: http://localhost:3000
+isolate: storage
+commit_floor: 0.6
+values:
+  - Email: ada@example.com
+
+Free prose about the suite is ignored.
+
+## Search shows results
+path: /search
+values:
+  - Search: laptops
+
+1. Search for laptops.
+   - see: Results for
+   - see any: laptops | notebooks
+   - not see: No results
+   - url contains: q=laptops
+2. Open the first result.
+   - count: .price >= 1
+   - value: #qty contains 1
+   - no page errors
+
+## Unknown page
+path: /nope
+1. Read the page.
+   - see: "Page not found"
+"""
+
+
+def test_markdown_compiles_to_the_check_file_shape():
+    suite = spec.parse(SAMPLE)
+    assert suite["base_url"] == "http://localhost:3000"
+    assert suite["defaults"] == {"isolate": "storage", "commit_floor": 0.6,
+                                 "values": {"Email": "ada@example.com"}}
+    first, second = suite["checks"]
+    assert first["name"] == "Search shows results" and first["path"] == "/search"
+    assert first["values"] == {"Search": "laptops"}
+    assert [s["goal"] for s in first["steps"]] == ["Search for laptops.", "Open the first result."]
+    assert first["steps"][0]["expect"] == {
+        "text_contains_all": ["Results for"], "text_contains": ["laptops", "notebooks"],
+        "text_absent": ["No results"], "url_contains": "q=laptops"}
+    assert first["steps"][1]["expect"] == {
+        "selector_count": {"selector": ".price", "at_least": 1},
+        "value_contains": {"selector": "#qty", "text": "1"}, "no_page_errors": True}
+    assert second["steps"][0]["expect"] == {"text_contains_all": ["Page not found"]}
+    for test in suite["checks"]:
+        for step in test["steps"]:
+            assert normalize_expect(step["expect"])     # every compiled check is valid
+
+
+@pytest.mark.parametrize("bad, message", [
+    ("## T\n1. Go.\n   - smell: roses\n", "unknown check"),
+    ("## T\n1. Go.\n   - count: .x\n", "SELECTOR >= N"),
+    ("## T\nwarp: 9\n1. Go.\n", "unknown setting"),
+    ("## T\nJust prose, no steps.\n", "no numbered steps"),
+    ("# Only a title\n", "no tests"),
+])
+def test_a_malformed_spec_is_rejected_with_its_line(bad, message):
+    with pytest.raises(spec.SpecError, match=message):
+        spec.parse(bad)
+
+
+def test_a_step_without_checks_is_allowed_and_has_no_expectation():
+    suite = spec.parse("## T\n1. Open the menu.\n2. Pick Settings.\n   - see: Settings\n")
+    steps = suite["checks"][0]["steps"]
+    assert "expect" not in steps[0] and steps[1]["expect"] == {"text_contains_all": ["Settings"]}
+
+
+def test_before_each_steps_run_first_in_every_test():
+    suite = spec.parse("""\
+## Before each
+path: /login
+values:
+  - Email: ada@example.com
+1. Sign in.
+   - see: Dashboard
+
+## Create a project
+values:
+  - Name: Apollo
+1. Create a project.
+   - see: Apollo
+
+## Settings
+path: /settings
+1. Open settings.
+""")
+    create, settings = suite["checks"]
+    assert [s["goal"] for s in create["steps"]] == ["Sign in.", "Create a project."]
+    assert create["values"] == {"Email": "ada@example.com", "Name": "Apollo"}
+    assert create["path"] == "/login" and "path" not in create["steps"][1]
+    # Settings signs in on /login first, then opens its own page for its own first step.
+    assert settings["path"] == "/login" and settings["steps"][1]["path"] == "/settings"
+    assert len(suite["checks"]) == 2

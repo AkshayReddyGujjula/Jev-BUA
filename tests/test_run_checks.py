@@ -4,7 +4,7 @@ import json
 import subprocess
 
 import AgentJevUltraFast
-from scripts import run_checks
+from AgentJevUltraFast import checks as run_checks
 
 
 class FakeBrowser:

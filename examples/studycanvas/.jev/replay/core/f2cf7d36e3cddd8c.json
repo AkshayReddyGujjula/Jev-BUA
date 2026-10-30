@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "url": "http://localhost:5173/workspace/no-such-place-xyz?storage=idb",
+  "goal": "Click Go home.",
+  "goal_hash": "f2cf7d36e3cddd8c3444dfff2f636c2e7b1b2c8ead4c8c821eccd04726ffc772",
+  "recorded_at": 1793398402.2282164,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "click",
+      "label": "Go home",
+      "role": "link",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "navigated",
+      "confidence": 0.97,
+      "irreversible": 0.06
+    }
+  ]
+}
