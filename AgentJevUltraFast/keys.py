@@ -66,6 +66,9 @@ def goal_keys(goal):
     for spec in specs:
         spec = re.sub(r"\s*\+\s*", "+", spec.strip())
         event = combo(spec)
+        if event is None and len(spec) > 1 and spec[-1] in ".,!:?":
+            spec = spec[:-1]                  # sentence punctuation: "...with Ctrl+K."
+            event = combo(spec)
         if event is None or (event["key"], event["modifiers"]) in seen:
             continue
         seen.add((event["key"], event["modifiers"]))

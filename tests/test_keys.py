@@ -11,6 +11,9 @@ def test_quoted_and_combo_keys_from_the_goal():
     assert labels('On Home, press "?" to open the sheet, then try Ctrl+F and Esc.') == [("f", 2), ("?", 0)]
     assert labels("Search, then use ArrowDown twice and press Enter.") == [("Enter", 0), ("ArrowDown", 0)]
     assert labels("Press Cmd+Shift+K") == [("K", 12)]
+    # Sentence punctuation is not part of the key (measured: "with Ctrl+K." offered nothing).
+    assert labels("Open the command bar with Ctrl+K.") == [("k", 2)]
+    assert labels("Then press Tab.") == [("Tab", 0)]
 
 
 def test_ordinary_words_are_not_keys():
