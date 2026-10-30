@@ -110,7 +110,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("checklist", help="a JSON file with sections[].items[] (or items[])")
     parser.add_argument("--sections", default="", help="comma-separated section ids (default all)")
-    parser.add_argument("--setup", default="", help="a Markdown file holding a '## Before each' block")
+    parser.add_argument("--setup", default="", help="a Markdown file holding a "## Before all" or "## Before each" block")
     parser.add_argument("--path", default="", help="route every test starts on")
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--out", required=True, help="output folder for one .md per section")

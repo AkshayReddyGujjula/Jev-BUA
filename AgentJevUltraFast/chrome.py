@@ -107,8 +107,13 @@ def apply_env():
         # read BU_NAME, and a late switch once attached to the user's Chrome and waited forever
         # on its "Allow remote debugging?" prompt (observed 30 Oct 2026).
         os.environ["JEV_CHROME"] = "dedicated"
-    if not dedicated() or os.environ.get("BU_CDP_WS") or os.environ.get("BU_CDP_URL"):
+    if not dedicated() or os.environ.get("BU_CDP_WS"):
         return
+    if os.environ.get("BU_CDP_URL") not in (None, "", endpoint()):
+        return
+    # A BU_CDP_URL equal to our own endpoint was set here, in a parent process (`jev test`
+    # hands it to every worker): the worker's daemon still needs the suffix, or it reuses a
+    # same-named daemon attached to the user's Chrome.
     os.environ["BU_CDP_URL"] = endpoint()
     suffix = f"-chrome{port()}"
     name = os.environ.get("BU_NAME") or "default"

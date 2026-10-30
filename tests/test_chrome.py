@@ -41,6 +41,26 @@ def test_dedicated_mode_routes_to_its_own_daemon_and_port(monkeypatch):
     assert os.environ["BU_NAME"] == "jev-check-03-chrome9444"
 
 
+def test_a_worker_inheriting_our_endpoint_still_gets_its_own_daemon_name(monkeypatch):
+    # `jev test` passes its environment (BU_CDP_URL included) to each worker with a fresh
+    # BU_NAME. Without the suffix the worker reused a same-named daemon on the user's Chrome.
+    import os
+    monkeypatch.setenv("JEV_CHROME", "dedicated")
+    monkeypatch.setenv("BU_CDP_URL", "http://127.0.0.1:9333")
+    monkeypatch.setenv("BU_NAME", "jev-check-04")
+    chrome.apply_env()
+    assert os.environ["BU_NAME"] == "jev-check-04-chrome9333"
+
+
+def test_someone_elses_cdp_url_keeps_its_daemon_name(monkeypatch):
+    import os
+    monkeypatch.setenv("JEV_CHROME", "dedicated")
+    monkeypatch.setenv("BU_CDP_URL", "http://10.0.0.5:9222")
+    monkeypatch.setenv("BU_NAME", "mine")
+    chrome.apply_env()
+    assert os.environ["BU_NAME"] == "mine" and os.environ["BU_CDP_URL"] == "http://10.0.0.5:9222"
+
+
 def test_explicit_cdp_endpoint_wins(monkeypatch):
     import os
     monkeypatch.setenv("JEV_CHROME", "dedicated")
