@@ -6,6 +6,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from browser_harness.admin import ensure_daemon
 from browser_harness.helpers import activate_tab, cdp
@@ -53,6 +54,27 @@ SCAN_BARREN_LIMIT = int(os.environ.get("JEV_SCAN_BARREN_LIMIT", "3"))
 SCAN_MAX_S = float(os.environ.get("JEV_SCAN_MAX_SECONDS", "120"))
 # A screenshot is a luxury, never worth a 5 s IPC wait inside a run.
 SCREENSHOT_TIMEOUT = float(os.environ.get("JEV_SCREENSHOT_TIMEOUT", "3"))
+
+
+def isolate_mode():
+    """None, "context" (a fresh browser context per Browser) or "storage" (wipe the origin)."""
+    value = os.environ.get("JEV_ISOLATE", "0").strip().lower()
+    if value in {"1", "true", "yes", "on", "context"}:
+        return "context"
+    if value == "storage":
+        return "storage"
+    return None
+
+
+# How long a fresh navigation may take to render anything at all. A single-page app on a dev
+# server can show an empty body for many seconds while it loads its modules; deciding on that
+# page wastes model calls on a blank screen and trips the no-progress deadline. Plain reads only.
+CONTENT_WAIT_S = float(os.environ.get("JEV_CONTENT_WAIT_S", "15"))
+HAS_CONTENT = (
+    "(() => { const b = document.body; if (!b) return false;"
+    " if (b.innerText.trim().length) return true;"
+    " return !!b.querySelector('input,button,select,textarea,a[href],[role=button],canvas,img,video'); })()"
+)
 
 
 def render_keepalive_enabled():
@@ -114,6 +136,7 @@ class Browser:
         if chrome.dedicated():
             chrome.ensure_chrome()
         ensure_daemon()
+        self.context = None
         self.private_values = []
         self.follow_tabs = follow_tabs
         self.mode = os.environ.get("JEV_TAB_MODE", "foreground").strip().lower()
@@ -129,7 +152,15 @@ class Browser:
             self.target, self.session = found
         else:
             background = self.mode == "background"
-            self.target = cdp("Target.createTarget", url="about:blank", background=background)["targetId"]
+            create = {"url": "about:blank", "background": background}
+            if isolate_mode() == "context":
+                # A fresh incognito-like context: its own cookies, storage, IndexedDB and
+                # service workers, so one test can never see another's state or tab locks.
+                # Its HTTP cache starts cold too (measured: 16 s to first text on a Vite dev
+                # server, against ~2 s warm), which "storage" isolation avoids.
+                self.context = cdp("Target.createBrowserContext")["browserContextId"]
+                create["browserContextId"] = self.context
+            self.target = cdp("Target.createTarget", **create)["targetId"]
             self.session = cdp("Target.attachToTarget", targetId=self.target, flatten=True)["sessionId"]
             if not background:
                 activate_tab(self.target)
@@ -157,16 +188,36 @@ class Browser:
         """
         if not url:
             return
+        if isolate_mode() == "storage" and not getattr(self, "_storage_cleared", False):
+            # Cookies, local/session storage, IndexedDB, cache storage and service workers of
+            # the app's origin, wiped once before the first load; the HTTP cache stays warm.
+            origin = "{0.scheme}://{0.netloc}".format(urlsplit(url))
+            self.call("Storage.clearDataForOrigin", origin=origin, storageTypes="all")
+            self._storage_cleared = True
         self.call("Page.navigate", url=url)
         deadline = time.monotonic() + NAV_TIMEOUT
         while time.monotonic() < deadline:
             if self.evaluate("document.readyState") == "complete":
                 break
             time.sleep(0.02)
+        self._wait_for_content()
         self.last_url = url
         if not any(t["targetId"] == self.target for t in self._page_targets()):
             # Chrome 153 replaces the target on navigation: adopt the replacement before the first read.
             self.reattach()
+
+    def _wait_for_content(self, timeout=None):
+        """Wait (reads only) until the document shows text or a control. Never raises."""
+        deadline = time.monotonic() + (CONTENT_WAIT_S if timeout is None else timeout)
+        while True:
+            try:
+                if self.evaluate(HAS_CONTENT):
+                    return True
+            except Exception:
+                pass
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.1)
 
     def history_index(self):
         """This tab's navigation-history index. Read-only CDP; no page script runs."""
@@ -581,10 +632,18 @@ class Browser:
 
     def close(self):
         targets, self.owned_targets = self.owned_targets, []
+        context, self.context = getattr(self, "context", None), None
         if os.environ.get("JEV_KEEP_TAB") != "1":
             for target in targets:
                 try:
                     cdp("Target.closeTarget", targetId=target)
+                except Exception:
+                    pass
+            if context:
+                # Disposing the context closes anything the run opened in it and drops its
+                # storage, so a suite leaves no tabs or state behind.
+                try:
+                    cdp("Target.disposeBrowserContext", browserContextId=context)
                 except Exception:
                     pass
         self.target = None

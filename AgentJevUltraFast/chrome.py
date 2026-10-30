@@ -36,6 +36,28 @@ LAUNCH_FLAGS = (
 )
 
 
+ENV_FILES = (Path(__file__).resolve().parents[1] / ".env", Path.home() / ".jev-ultrafast" / ".env")
+
+
+def _load_env_files():
+    """Pull JEV_CHROME* settings from the .env files every entry point reads, before they do.
+
+    apply_env runs when the package is imported, which is earlier than the CLI, the MCP server
+    or the check runner load .env. Without this, JEV_CHROME=dedicated written in .env was
+    silently ignored and runs attached to the user's own Chrome. The process env still wins.
+    """
+    for path in ENV_FILES:
+        try:
+            lines = path.read_text(encoding="utf-8-sig").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            key, sep, value = line.strip().partition("=")
+            key = key.strip()
+            if sep and key.startswith("JEV_CHROME") and not key.startswith("#"):
+                os.environ.setdefault(key, value.strip().strip('"').strip("'"))
+
+
 def mode():
     value = os.environ.get("JEV_CHROME", "user").strip().lower()
     return "dedicated" if value in {"dedicated", "own", "separate"} else "user"
@@ -64,6 +86,7 @@ def apply_env():
     browser gets its own daemon name: a daemon already attached to the user's Chrome under the same
     name would otherwise be silently reused. An explicit BU_CDP_WS/BU_CDP_URL always wins.
     """
+    _load_env_files()
     if not dedicated() or os.environ.get("BU_CDP_WS") or os.environ.get("BU_CDP_URL"):
         return
     os.environ["BU_CDP_URL"] = endpoint()

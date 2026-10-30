@@ -8,6 +8,17 @@ def clean_env(monkeypatch):
     for name in ("JEV_CHROME", "JEV_CHROME_PORT", "JEV_CHROME_PATH", "JEV_CHROME_HEADLESS",
                  "BU_CDP_WS", "BU_CDP_URL", "BU_NAME"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(chrome, "ENV_FILES", ())
+
+
+def test_dedicated_mode_can_come_from_an_env_file(monkeypatch, tmp_path):
+    import os
+    env = tmp_path / ".env"
+    env.write_text("TEXT_MODEL=x\nJEV_CHROME=dedicated\nJEV_CHROME_PORT='9555'\n", encoding="utf-8")
+    monkeypatch.setattr(chrome, "ENV_FILES", (env,))
+    chrome.apply_env()
+    assert os.environ["BU_CDP_URL"] == "http://127.0.0.1:9555"
+    assert "TEXT_MODEL" not in os.environ or os.environ["TEXT_MODEL"] != "x"
 
 
 def test_user_mode_leaves_harness_env_alone():

@@ -1,0 +1,27 @@
+{
+  "base_url": "http://localhost:5173",
+  "defaults": { "max_seconds": 120, "tab": "background", "isolate": "storage", "commit_floor": 0.6 },
+  "checks": [
+    {
+      "name": "A1-S05-01 unknown URL shows the 404 page",
+      "path": "/workspace/no-such-place-xyz?storage=idb",
+      "steps": [
+        { "goal": "Read the page.",
+          "expect": { "text_contains_all": ["Page not found", "Go home"] } },
+        { "goal": "Click Go home.",
+          "expect": { "text_absent": ["Page not found"] } }
+      ]
+    },
+    {
+      "name": "A1-S02-04 access gate then onboarding reaches the home screen",
+      "path": "/workspace?storage=idb",
+      "values": { "Access code": "jev-local-test", "Your name": "Ada" },
+      "steps": [
+        { "goal": "Enter the access code and continue.",
+          "expect": { "text_absent": ["Enter your access code"] } },
+        { "goal": "Finish the onboarding questions: give the name, skip every optional question, and finish.",
+          "expect": { "text_absent": ["First, what should we call you?", "Enter your access code"] } }
+      ]
+    }
+  ]
+}

@@ -46,6 +46,7 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -74,10 +75,49 @@ def load_env():
 from AgentJevUltraFast.assertions import evaluate_expectations, normalize_expect  # noqa: E402,F401
 
 
+def local_host(url):
+    """True for an app on a local development host, the disposable environment a test suite
+    owns. There, a recorded commit-like click (Save, Delete, Submit) replays like any other
+    step, as a scripted test would; anywhere else it gets a fresh gated Jev decision."""
+    host = (urlsplit(url).hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "::1"} or host.endswith((".localhost", ".test"))
+
+
+def check_steps(job):
+    """A check's steps: an explicit `steps` list, or the check itself as its only step."""
+    if job.get("steps"):
+        return job["steps"]
+    return [{"goal": job["goal"], "values": job.get("values"), "expect": job.get("expect")}]
+
+
+def add_cost(total, part):
+    """Sum two cost summaries (cost.summarize shape); None stays None only if both are None."""
+    if not total:
+        return dict(part)
+    out = dict(total)
+    out["calls"] = {k: total["calls"].get(k, 0) + part["calls"].get(k, 0)
+                    for k in set(total["calls"]) | set(part["calls"])}
+    for key in ("jev_input_tokens", "jev_input_usd_estimate", "text_input_tokens"):
+        a, b = total.get(key), part.get(key)
+        out[key] = None if a is None or b is None else round(a + b, 8)
+    for key in ("side_usd_reported", "usd_estimate", "cache_hits", "cache_misses"):
+        out[key] = round((total.get(key) or 0) + (part.get(key) or 0), 8)
+    return out
+
+
 def run_worker(job, out_path):
-    """One check, in this process. Its BU_NAME was set by the parent before launch."""
+    """One check, in this process. Its BU_NAME was set by the parent before launch.
+
+    A check is one or more steps run in order in ONE tab (and, with `isolate`, one fresh
+    browser context), so a later step sees the state an earlier one left: sign in, then
+    create, then delete. Each step is its own Agent run with its own goal and verdict; the
+    check stops at the first step that fails, and passes only when every step with an
+    expectation was verified.
+    """
     load_env()
-    from AgentJevUltraFast import Agent
+    from AgentJevUltraFast import Agent, Browser
+    from AgentJevUltraFast.cost import summarize as cost_summary
+    from AgentJevUltraFast.privacy import redact
 
     os.environ["JEV_TAB_MODE"] = job.get("tab", "background")
     os.environ.pop("JEV_KEEP_TAB", None)
@@ -86,40 +126,69 @@ def run_worker(job, out_path):
     os.environ["JEV_FOLLOW_TABS"] = "0"
     # A check run is a measurement: no mode auto-creation unless the check names one.
     os.environ["JEV_MODES"] = "off"
+    isolate = job.get("isolate")
+    os.environ["JEV_ISOLATE"] = ("storage" if isolate == "storage" else "context") if isolate else "0"
+    if job.get("review") is False:
+        os.environ["JEV_REVIEW"] = "off"
 
     started = time.perf_counter()
+    steps = check_steps(job)
     result = {
-        "name": job["name"], "url": job["url"], "goal": job["goal"],
+        "name": job["name"], "url": job["url"], "goal": steps[0]["goal"],
         "bu_name": os.environ.get("BU_NAME"), "pid": os.getpid(),
         "status": None, "outcome": None, "verified": None, "checks": [], "wall_s": None,
         "actions": 0, "decisions": 0, "final_url": None, "title": None,
-        "text_calls": [], "trail": [], "error": None, "stall": None,
+        "text_calls": [], "trail": [], "error": None, "stall": None, "steps": [],
+        "cost": None, "replay": None,
     }
+    deadline = time.monotonic() + job.get("max_seconds", 60)
+    browser = None
     try:
-        with Agent(job["url"], job["goal"], values=job.get("values"), expect=job.get("expect"),
-                   mode=job.get("mode"), collect_steps=job.get("collect_steps")) as agent:
-            deadline = time.monotonic() + job.get("max_seconds", 60)
-            for _ in agent.run():
-                if time.monotonic() > deadline:
-                    result["error"] = f"exceeded the {job.get('max_seconds', 60)}s budget"
-                    # Finalizes the run, which performs the one independent readback.
-                    agent.stop_budget(f"{job.get('max_seconds', 60)}s check budget")
-                    break
-            state = agent.snapshot()
+        browser = Browser(job["url"])
+        for index, step in enumerate(steps):
+            if index and step.get("path"):
+                path = step["path"]
+                browser.navigate(path if path.startswith("http") else job["base_url"] + path)
+            url = job["url"] if index == 0 else browser.evaluate("location.href")
+            values = {**(job.get("values") or {}), **(step.get("values") or {})} or None
+            expect = step.get("expect")
+            with Agent(url, step["goal"], values=values, expect=expect, browser=browser,
+                       mode=job.get("mode"), collect_steps=job.get("collect_steps"),
+                       replay_dir=job.get("replay_dir"),
+                       evidence_dir=job.get("evidence_dir"),
+                       commit_floor=job.get("commit_floor"),
+                       replay_commits=job.get("replay_commits", local_host(job["url"])),
+                       stop_on_expect=job.get("stop_on_expect", True)) as agent:
+                for _ in agent.run():
+                    if time.monotonic() > deadline:
+                        result["error"] = f"exceeded the {job.get('max_seconds', 60)}s budget"
+                        # Finalizes the run, which performs the one independent readback.
+                        agent.stop_budget(f"{job.get('max_seconds', 60)}s check budget")
+                        break
+                state = agent.snapshot()
             # The verdict is the agent's own final readback (one atomic read of the live
             # page, the same one written to evidence) resolved through outcomes.resolve, so a
             # check is judged exactly like browser_do and run_task.
             outcome = state.get("outcome")
+            verified = {"verified": True, "refuted": False}.get(outcome) if expect else None
+            cost = cost_summary(state)
+            replay_state = state.get("replay") or {}
+            result["steps"].append({
+                "goal": step["goal"], "status": state["status"], "outcome": outcome,
+                "verified": verified, "checks": state.get("checks") or [],
+                "decisions": len(state["decisions"]), "cost": cost,
+                "replay": {k: replay_state.get(k) for k in
+                           ("available", "used", "completed", "stopped", "heals",
+                            "finished_by_readback", "recorded")},
+            })
+            result["cost"] = add_cost(result["cost"], cost)
             result["outcome"] = outcome
-            result["verified"] = (
-                {"verified": True, "refuted": False}.get(outcome) if job.get("expect") else None
-            )
             result["checks"] = state.get("checks") or []
             result["readback_error"] = state.get("readback_error")
             location = state.get("readback") or {}
             if not location:
                 try:
-                    location = agent.browser.evaluate(
+                    location = browser.evaluate(
                         "({url: location.href, title: document.title})"
                     ) or {}
                 except Exception:
@@ -127,17 +196,38 @@ def run_worker(job, out_path):
             result["status"] = state["status"]
             result["stall"] = state.get("stall")
             result["blocked_reason"] = state.get("blocked_reason")
-            result["supervision"] = state.get("supervision") or []
-            result["actions"] = sum(1 for h in state["history"] if not h.get("skipped"))
-            result["skipped"] = sum(1 for h in state["history"] if h.get("skipped"))
-            result["decisions"] = len(state["decisions"])
-            result["text_calls"] = state["text_calls"]
+            result["supervision"] = (result.get("supervision") or []) + (state.get("supervision") or [])
+            result["actions"] += sum(1 for h in state["history"] if not h.get("skipped"))
+            result["skipped"] = result.get("skipped", 0) + sum(1 for h in state["history"] if h.get("skipped"))
+            result["decisions"] += len(state["decisions"])
+            result["text_calls"] += state["text_calls"]
             result["final_url"] = location.get("url") or state["page"].get("url")
             result["title"] = location.get("title") or state["page"].get("title")
-            result["trail"] = [
+            result["trail"] = (result["trail"] + [
                 {"action": h.get("action"), "outcome": h.get("outcome"), "error": h.get("error")}
-                for h in state["history"][-12:]
-            ]
+                for h in state["history"]
+            ])[-16:]
+            if verified is False or (expect is None and state["status"] != "done") \
+                    or result["error"]:
+                result["failed_step"] = index + 1
+                # What the page actually showed, so whoever reads the report (often a coding
+                # agent) can tell an app bug from a wrong expectation without a re-run.
+                try:
+                    result["page_excerpt"] = redact(
+                        browser.evaluate("document.body ? document.body.innerText.slice(0, 800) : ''"),
+                        agent.private_values)
+                except Exception:
+                    pass
+                break
+        expected = [s for s in result["steps"] if s["verified"] is not None]
+        result["verified"] = (
+            all(s["verified"] for s in expected) and len(result["steps"]) == len(steps)
+        ) if expected else None
+        result["replay"] = {
+            "steps_replayed": sum((s["replay"].get("used") or 0) for s in result["steps"]),
+            "heals": sum(len(s["replay"].get("heals") or []) for s in result["steps"]),
+            "zero_model_steps": sum(1 for s in result["steps"] if s["decisions"] == 0),
+        }
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
         if "permission-blocked" in str(exc):
@@ -145,11 +235,22 @@ def run_worker(job, out_path):
             result["status"] = "blocked"
             result["blocked_reason"] = "chrome-approval"
             result["error"] = f"{APPROVAL_HINT} ({exc})"
+        elif "dedicated-chrome" in str(exc):
+            result["status"] = "blocked"
+            result["blocked_reason"] = "dedicated-chrome"
         else:
             frame = traceback.extract_tb(exc.__traceback__)[-1:]
             if frame:
                 result["error_at"] = f"{Path(frame[0].filename).name}:{frame[0].lineno}"
         result["status"] = result["status"] or "error"
+        result["verified"] = False if any(check_steps(job)[i].get("expect")
+                                          for i in range(len(check_steps(job)))) else None
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
     result["wall_s"] = round(time.perf_counter() - started, 2)
     Path(out_path).write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
     return result
@@ -186,6 +287,11 @@ def run_parent(args):
     checks = spec["checks"]
     workers = max(1, min(args.workers, MAX_WORKERS, len(checks)))
 
+    replay_dir = None
+    if args.replay:
+        replay_dir = str(Path(args.replay) if args.replay != "auto"
+                         else ROOT / "artifacts" / "replay" / Path(args.checks).stem)
+    evidence_dir = None if args.no_evidence else str(ROOT / "artifacts" / "evidence" / "checks")
     jobs = []
     for index, check in enumerate(checks):
         job = {**defaults, **check}
@@ -194,14 +300,36 @@ def run_parent(args):
             job["url"] = f"{base}{path}"
         else:
             job["url"] = path
+        job["base_url"] = base
+        job["replay_dir"] = replay_dir
+        job["evidence_dir"] = evidence_dir
         job["name"] = check.get("name") or f"check {index + 1}"
         # Fail the whole spec before launching anything: a malformed expectation must
         # never surface later as a pass.
         try:
-            job["expect"] = normalize_expect(job.get("expect")) or {}
+            if job.get("steps"):
+                if not isinstance(job["steps"], list) or not all(
+                        isinstance(s, dict) and isinstance(s.get("goal"), str) and s["goal"].strip()
+                        for s in job["steps"]):
+                    raise ValueError("steps must be a list of objects with a non-empty goal")
+                job["steps"] = [{**s, "expect": normalize_expect(s.get("expect")) or None}
+                                for s in job["steps"]]
+                job["goal"] = job["steps"][0]["goal"]
+            else:
+                if not isinstance(job.get("goal"), str) or not job["goal"].strip():
+                    raise ValueError("a check needs a goal (or steps)")
+                job["expect"] = normalize_expect(job.get("expect")) or {}
         except ValueError as error:
             raise SystemExit(f"{job['name']}: {error}") from error
         jobs.append(job)
+    from AgentJevUltraFast import chrome
+    if chrome.dedicated():
+        # Once, before any worker: ten workers racing to launch the same profile is how a
+        # second Chrome ends up without the debugging port.
+        try:
+            chrome.ensure_chrome()
+        except RuntimeError as error:
+            raise SystemExit(f"! {error}") from error
 
     outdir = Path(args.out).resolve().parent / (Path(args.out).stem + "_parts")
     outdir.mkdir(parents=True, exist_ok=True)
@@ -231,15 +359,17 @@ def run_parent(args):
                 **({"blocked_reason": "timeout"} if proc.returncode is None else {}),
             })
 
-    print(f"{'check':<44} {'agent':<9} {'assert':<7} {'wall':>7}  detail")
+    print(f"{'check':<44} {'agent':<9} {'assert':<7} {'wall':>7} {'calls':>5} {'usd':>9}  detail")
     print("-" * 118)
     for r in results:
         verdict = "PASS" if r.get("verified") else ("FAIL" if r.get("verified") is False else "n/a")
         notes = "; ".join(
             f"{c['check']}={'ok' if c['pass'] else 'NO'}" for c in (r.get("checks") or [])
         ) or (r.get("error") or "")[:40]
+        cost = r.get("cost") or {}
+        calls = sum((cost.get("calls") or {}).get(k, 0) for k in ("jev", "text", "review", "supervisor"))
         print(f"{(r.get('name') or '')[:42]:<44} {str(r.get('status')):<9} {verdict:<7} "
-              f"{r.get('wall_s', 0):>6}s  {notes[:52]}")
+              f"{r.get('wall_s', 0):>6}s {calls:>5} {cost.get('usd_estimate') or 0:>9.6f}  {notes[:40]}")
 
     passed = [r for r in results if r.get("verified")]
     failed = [r for r in results if not r.get("verified")]
@@ -253,13 +383,23 @@ def run_parent(args):
           f"serial-equivalent {total:.1f}s   wall {max((w for _, _, _, _, w in launched), default=0):.1f}s   "
           f"slowest check {slowest:.1f}s")
     for r in failed:
-        print(f"  FAILED {r.get('name')}: {r.get('error') or 'assertions not satisfied'}")
+        step = f" (step {r['failed_step']})" if r.get("failed_step") else ""
+        print(f"  FAILED {r.get('name')}{step}: {r.get('error') or 'assertions not satisfied'}")
+    usd = round(sum((r.get("cost") or {}).get("usd_estimate") or 0 for r in results), 6)
+    model_calls = sum(sum(((r.get("cost") or {}).get("calls") or {}).get(k, 0)
+                          for k in ("jev", "text", "review", "supervisor")) for r in results)
+    replayed = sum((r.get("replay") or {}).get("steps_replayed", 0) for r in results)
+    heals = sum((r.get("replay") or {}).get("heals", 0) for r in results)
+    print(f"cost ~${usd:.6f} for {model_calls} model calls"
+          + (f"; {replayed} steps replayed with no model call, {heals} healed" if replay_dir else ""))
 
     report = {
         "base_url": base, "workers": workers,
         "wall_s": max((w for _, _, _, _, w in launched), default=0),
         "serial_equivalent_s": round(total, 2),
         "passed": len(passed), "total": len(results), "stalled": len(stalls),
+        "usd_estimate": usd, "model_calls": model_calls,
+        "replay_dir": replay_dir, "steps_replayed": replayed, "heals": heals,
         "results": results,
     }
     Path(args.out).write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
@@ -302,6 +442,14 @@ def main():
                         help="start the local trap pages in-process and point checks at them "
                              "(self-test for this harness: proves isolatation and reporting "
                              "without needing a target app)")
+    parser.add_argument("--chrome", choices=("user", "dedicated"), default=None,
+                        help="dedicated: a separate automation Chrome (no approval prompt, "
+                             "never your own tabs); default from JEV_CHROME, else user")
+    parser.add_argument("--replay", nargs="?", const="auto", default=None, metavar="DIR",
+                        help="record verified runs and replay them with no model call "
+                             "(default dir artifacts/replay/<check file name>)")
+    parser.add_argument("--no-evidence", action="store_true",
+                        help="do not write JSONL evidence under artifacts/evidence/checks")
     parser.add_argument("--worker", action="store_true", help="internal: run one job in this process")
     parser.add_argument("--job", help="internal: the job as JSON")
     if "--worker" in sys.argv:
@@ -309,6 +457,8 @@ def main():
         run_worker(json.loads(args.job), args.out)
         return 0
     args = parser.parse_args()
+    if args.chrome:
+        os.environ["JEV_CHROME"] = args.chrome
     if args.serve_traps:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from trap_server import serve as serve_traps

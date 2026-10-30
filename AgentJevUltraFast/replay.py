@@ -144,6 +144,14 @@ def descriptor(action, decision, outcome, text, value_ref=None):
     return step
 
 
+def same_step(step, executed):
+    """True when an executed history entry performed this recorded step (kind and label)."""
+    return (
+        bool(step.get("kind")) and executed.get("kind") == step["kind"]
+        and normalize(executed.get("action")) == normalize(step.get("label"))
+    )
+
+
 def resync(steps, start, actions, limit=RESYNC_WINDOW):
     """The first recorded step at or after `start` that matches this page uniquely, or None."""
     for index in range(start, min(len(steps), start + limit)):

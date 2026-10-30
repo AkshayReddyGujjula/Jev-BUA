@@ -79,6 +79,22 @@ def test_cost_estimate_requires_reported_usage():
     assert report["jev_input_tokens"] == 1500
     assert report["jev_input_usd_estimate"] == 0.000063
     assert report["text_input_tokens"] == 200
-    assert report["text_usd_estimate"] is None
+    assert report["side_usd_reported"] == 0
+    assert report["calls"]["jev"] == 2 and report["calls"]["jev_cached"] == 1
     state["decisions"][0]["usage"] = {}
     assert summarize(state)["jev_input_usd_estimate"] is None
+
+
+def test_cost_counts_reviewer_calls_from_the_providers_own_figure():
+    state = {
+        "decisions": [{"usage": {"input_tokens": 1_000_000}, "hedged": True}],
+        "text_calls": [{"model": "supplied", "usage": {}}],
+        "reviews": [{"usage": {"prompt_tokens": 358, "opencode": {"list_cost": 7.05e-05}},
+                     "error": None},
+                    {"usage": {}, "error": "RuntimeError: HTTP 401"}],
+    }
+    report = summarize(state)
+    assert report["calls"] == {"jev": 1, "jev_hedges": 1, "jev_cached": 0, "text": 0,
+                               "review": 1, "supervisor": 0}
+    assert report["side_usd_reported"] == 7.05e-05
+    assert report["usd_estimate"] == round(0.042 + 7.05e-05, 8)

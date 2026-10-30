@@ -86,6 +86,8 @@ EXPECT_WAIT_S = max(0.0, float(os.environ.get("JEV_EXPECT_WAIT_S", "3")))
 # Replay commit-like clicks (Delete, Submit, Save changes) from a recorded plan instead of
 # asking Jev again. Off by default; for a disposable test environment whose owner trusts it.
 REPLAY_COMMITS = os.environ.get("JEV_REPLAY_COMMITS", "0").strip().lower() in {"1", "true", "yes", "on"}
+# How long a replayed step waits for its recorded element before handing the step to Jev.
+REPLAY_WAIT_S = max(0.0, float(os.environ.get("JEV_REPLAY_WAIT_S", "2")))
 # Backstop for the deadline: consecutive decisions with no progress at all. The clock can
 # be held open by a page that keeps changing; a decision count cannot.
 STALL_MAX_ROUNDS = int(os.environ.get("JEV_STALL_MAX_ROUNDS", "8"))
@@ -225,7 +227,8 @@ def choice_probability(decision, alt):
 class Agent:
     def __init__(self, url, goals, *, record_dir=None, screenshots=False, values=None, find=None,
                  expect=None, browser=None, evidence_dir=None, replay_dir=None, mode=None,
-                 collect_steps=None, steps=None):
+                 collect_steps=None, steps=None, commit_floor=None,
+                 replay_commits=None, stop_on_expect=False):
         task = goals.strip() if isinstance(goals, str) else "\n".join(goals).strip()
         if not task:
             raise ValueError("Supply a task")
@@ -258,6 +261,16 @@ class Agent:
             _number(spec.get("irreversible_floor"), None)
             if spec.get("irreversible_floor") is not None else None
         )
+        if self._irreversible_floor is None and commit_floor is not None:
+            # The same owner-authored trust, from a test suite instead of a mode: a check
+            # file run against a disposable local app. Clamped by the gate exactly the same.
+            self._irreversible_floor = _number(commit_floor, None)
+        # Whether a recorded commit-like click may replay without a fresh Jev decision: the
+        # caller's call (a test runner passes True for a local dev host), else JEV_REPLAY_COMMITS.
+        self.replay_commits = REPLAY_COMMITS if replay_commits is None else bool(replay_commits)
+        # End the run as soon as the caller's checks hold after a step (test-runner semantics:
+        # the checks define done), instead of waiting for Jev to choose DONE.
+        self.stop_on_expect = bool(stop_on_expect)
         self._max_steps = _budget(spec.get("max_steps"), None)
         self.use_cache = spec.get("cache") is not False
         collect = spec.get("collect") if isinstance(spec.get("collect"), dict) else {}
@@ -913,7 +926,9 @@ class Agent:
         replay_state = state.get("replay")
         if not replay_dir or replay_state is None:
             return
-        if state.get("status") != "done" or state.get("outcome") != "verified":
+        # The readback is the proof, not how the loop ended: a run that reached the checked
+        # state and then wandered (blocked, stalled) still recorded a flow that works.
+        if state.get("outcome") != "verified":
             return
         healed = bool(replay_state.get("heals") or replay_state.get("stopped")
                       or replay_state.get("healing"))
@@ -966,7 +981,12 @@ class Agent:
                 self._stop_replay(replay_state["used"], "page unreadable before the replayed step")
                 return False
         if healing:
-            found = replay.resync(steps, healing["from"], page["actions"])
+            start = healing["from"]
+            # A step Jev itself just performed is done: resyncing onto it would do it twice.
+            for done in state["history"][healing["history"]:]:
+                if start < len(steps) and replay.same_step(steps[start], done):
+                    start += 1
+            found = replay.resync(steps, start, page["actions"])
             if found is None:
                 return False
             replay_state.setdefault("heals", []).append({
@@ -985,9 +1005,22 @@ class Agent:
             return self._finish_replay_by_readback()
         step = steps[index]
         action = replay.match_step(step, page["actions"])
+        waited_until = time.monotonic() + REPLAY_WAIT_S
+        while action is None and time.monotonic() < waited_until:
+            # Auto-wait, reads only: the recorded element is often a transition away (a dialog
+            # animating in, the next question rendering). Healing here instead hands a step to
+            # Jev that needed no decision, and can make Jev and the plan both perform it.
+            time.sleep(0.15)
+            try:
+                page = state["browser"].observe(screenshot=self.screenshots, deadline=self.read_deadline())
+            except Exception:
+                break
+            state["page"] = page
+            self.note_progress(page)
+            action = replay.match_step(step, page["actions"])
         if action is None:
             return self._heal(index, "recorded step does not match this page")
-        if committal(action) and not REPLAY_COMMITS:
+        if committal(action) and not getattr(self, "replay_commits", REPLAY_COMMITS):
             # The gate's trust does not survive into replay: a commit-like element gets a
             # fresh gated decision even when the recorded run clicked it once.
             return self._heal(index, "commit-like step needs a fresh gated decision",
@@ -1079,11 +1112,21 @@ class Agent:
         page by the same auto-waiting readback that judges every run. Without one, or when
         the checks do not hold yet, Jev decides what is left as usual.
         """
+        return self._finish_on_readback(EXPECT_WAIT_S, via="replay")
+
+    def _finish_on_readback(self, wait_s, via="expect"):
+        """Finish the run as done when the caller's expectation holds on the live page now.
+
+        Plain page reads, never a model call. Used when a plan has run out, and - with
+        stop_on_expect - after every executed step, because a run whose checks already pass
+        has nothing left to do: letting Jev wander on costs decisions and can undo the state.
+        """
         state = self.state
         expect = getattr(self, "expect", None)
-        if not expect:
+        if not expect or state["status"] in TERMINAL_STATUS:
             return False
-        deadline = time.monotonic() + EXPECT_WAIT_S
+        deadline = time.monotonic() + wait_s
+        confirmations = 0
         while True:
             try:
                 facts = page_facts(state["browser"], selectors_for(expect), value_selectors_for(expect))
@@ -1091,18 +1134,25 @@ class Agent:
                 return False
             facts["harvest"] = {"items": (state.get("harvest") or {}).get("items", 0)}
             passed, _ = evaluate_expectations(expect, facts)
-            if passed:
+            # A page mid-navigation is blank, and a blank page satisfies every text_absent:
+            # only a page with content, read twice apart, counts as the checked state.
+            passed = passed and bool((facts.get("text") or "").strip())
+            confirmations = confirmations + 1 if passed else 0
+            if confirmations >= 2:
                 break
-            if time.monotonic() >= deadline:
+            if not passed and time.monotonic() >= deadline:
                 return False
-            time.sleep(0.25)
-        state["replay"]["finished_by_readback"] = True
+            time.sleep(0.3 if passed else 0.25)
+        if via == "replay":
+            state["replay"]["finished_by_readback"] = True
+        state["finished_by"] = f"{via} readback"
         state["decision"] = None
         state["status"] = "done"
         state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
         evidence = getattr(self, "evidence", None)
         if evidence is not None:
-            evidence.record("replay_finished", steps=state["replay"]["used"])
+            evidence.record("finished_on_readback", via=via,
+                            replayed=(state.get("replay") or {}).get("used"))
         self._finalize()
         return True
 
@@ -1644,7 +1694,10 @@ class Agent:
         if name == "tick":
             if getattr(self, "_strategy", "decide") == "collect":
                 return self._collect_tick()
+            executed = len(state["history"])
             if self._replay_step():
+                if len(state["history"]) > executed and getattr(self, "stop_on_expect", False):
+                    self._finish_on_readback(0)
                 return self.snapshot()
             try:
                 self.command("predict", {})
@@ -1655,6 +1708,8 @@ class Agent:
                 executed = len(state["history"])
                 result = self.command("act", {"fingerprint": state["page"]["fingerprint"]})
                 if len(state["history"]) > executed and state["status"] not in TERMINAL_STATUS:
+                    if getattr(self, "stop_on_expect", False) and self._finish_on_readback(0):
+                        return self.snapshot()
                     self._review_submit()
                 return result
             except CoveredTarget:
