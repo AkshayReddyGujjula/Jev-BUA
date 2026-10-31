@@ -153,3 +153,11 @@ def test_not_blank_is_a_check_and_a_blank_page_fails_it():
     assert expect == {"not_blank": True}
     assert evaluate_expectations(expect, {"text": "   "})[0] is False
     assert evaluate_expectations(expect, {"text": "Welcome"})[0] is True
+
+
+def test_prose_with_a_colon_is_prose_but_a_mistyped_setting_is_an_error():
+    import pytest
+    suite = spec.parse("A fourth app: the company site.\nbase_url: http://x.test\n\n## T\n1. Go.\n   - see: X\n")
+    assert suite["base_url"] == "http://x.test"
+    with pytest.raises(spec.SpecError, match="unknown setting"):
+        spec.parse("bse_url: http://x.test\n\n## T\n1. Go.\n   - see: X\n")

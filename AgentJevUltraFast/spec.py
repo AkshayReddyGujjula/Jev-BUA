@@ -172,6 +172,8 @@ def parse(text, name="spec"):
                     raise SpecError(f"{where}: list values on their own '- Label: text' lines")
                 continue
             allowed = TEST_KEYS if test is not None else SUITE_KEYS
+            if key not in allowed and " " in setting[1].strip() and key not in SUITE_KEYS | TEST_KEYS:
+                continue                      # "The fourth app: ..." is prose, not a setting
             if key not in allowed:
                 raise SpecError(f"{where}: unknown setting {key!r}")
             try:
