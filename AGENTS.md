@@ -41,6 +41,8 @@ This repo is the browser engine other agents drive. Three ways in, pick by what 
   calls, heals one step at a time, and reports cost per test. Replay plans live in `<spec dir>/.jev/replay`
   and are meant to be committed; `.jev/evidence` and `.jev/reports` are ignored.
   `scripts/import_checklist.py` drafts specs from a JSON checklist (review the drafts).
+  `jev crawl <url>` / MCP `browser_crawl` sweeps every same-origin page for JS errors and broken pages
+  with no model calls (GET only; sign-out/delete links are never followed).
 - **CLI, parallel app testing:** write a check file and run
   `uv run --env-file .env python scripts/run_checks.py checks.json --workers 6`
   (`scripts/run_checks.py` is a shim for `AgentJevUltraFast/checks.py`; pass `--chrome dedicated`

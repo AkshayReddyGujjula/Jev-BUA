@@ -30,7 +30,7 @@ built on the existing Jev loop (one cheap decision per step, no screenshots).
 | Robustness | content wait on navigation (SPA dev servers render after ~2-16 s); alert/confirm/prompt answered in tests (accept on local hosts); "Leave site?" accepted on the test's own navigation; page-error recorder; placeholder/value-aware checks; one retry of a page read that misses its deadline (never of a click) | `browser.py`, `assertions.py`, `agent.py` |
 | Keyboard | a key the step names ("press ?", Ctrl+K, ArrowDown, "the Tab key") becomes an action, parsed by code; words like Home/End/Delete alone are not keys | `keys.py` |
 | Many runs at once | concurrent `jev test` runs (several coding agents) each claim a slot, so they never share a browser connection or tab | `checks.py` |
-| MCP | `browser_test` (background run, returns run id) + `browser_test_status` (verdict, cost, failing checks, page excerpt, Before all status); checked end to end over stdio | `jev_mcp_server.py` |
+| MCP | `browser_crawl` (zero-model broken-page sweep, 7 StudyCanvas pages in 4.6 s), `browser_test` (background run, returns run id) + `browser_test_status` (verdict, cost, failing checks, page excerpt, Before all status); checked end to end over stdio | `jev_mcp_server.py` |
 | Agent skill | teaches any coding agent the spec format and how to read results | `skills/jev-test/SKILL.md` |
 | Checklist importer | drafts specs from a JSON checklist (your StudyCanvas pre-production checklist) | `scripts/import_checklist.py` |
 | Go-to-market | competitors, positioning, pricing, naming ("Rehearse, powered by Jev"), launch plan; landing page draft | `docs/go-to-market.md`, `docs/site/index.html` |

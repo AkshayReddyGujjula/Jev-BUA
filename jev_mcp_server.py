@@ -365,6 +365,23 @@ TOOLS.extend([
             "required": ["run_id"],
         },
     },
+    {
+        "name": "browser_crawl",
+        "description": (
+            "Find broken pages with no model calls: open every same-origin page the app links to "
+            "(plain navigation, never a click, sign-out/delete links skipped), breadth first from "
+            "url, and report each page's JavaScript errors, blank pages and error pages. Runs in "
+            "the dedicated automation Chrome; a good first look at an app before writing tests."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The running app's start page."},
+                "max_pages": {"type": "integer", "default": 15, "minimum": 1, "maximum": 25},
+            },
+            "required": ["url"],
+        },
+    },
 ])
 
 # These are hints for MCP hosts, not an authorization mechanism. Even a state
@@ -829,6 +846,37 @@ def tool_browser_test(args):
             "hint": "poll browser_test_status every 15-30 s"}
 
 
+CRAWL_TIMEOUT_S = 100       # under the MCP call cap; 25 pages take ~20 s on a local dev server
+
+
+def tool_browser_crawl(args):
+    import subprocess
+    import uuid
+
+    url = str(args.get("url") or "")
+    if not url.startswith(("http://", "https://")):
+        return {"error": "url must be an http(s) URL"}
+    pages = max(1, min(25, int(args.get("max_pages") or 15)))
+    TEST_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    out = TEST_RUNS_DIR / f"crawl-{uuid.uuid4().hex[:8]}.json"
+    command = [sys.executable, "-m", "AgentJevUltraFast.cli", "crawl", url, "--max-pages", str(pages),
+               "--out", str(out)]
+    try:
+        flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+        subprocess.run(command, cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=CRAWL_TIMEOUT_S, stdin=subprocess.DEVNULL, **flags)
+    except subprocess.TimeoutExpired:
+        return {"error": f"crawl did not finish in {CRAWL_TIMEOUT_S}s"}
+    if not out.exists():
+        return {"error": "crawl produced no report (is the app running at that url?)"}
+    report = json.loads(out.read_text(encoding="utf-8"))
+    out.unlink(missing_ok=True)
+    return {"pages": len(report["pages"]), "problems": report["problems"], "model_calls": 0,
+            "unvisited": len(report.get("unvisited") or []),
+            "problem_pages": [{k: page.get(k) for k in ("path", "status", "note", "found_on")}
+                              for page in report["pages"] if page["status"] not in {"ok", "left-origin"}]}
+
+
 def tool_browser_test_status(args):
     run = _TEST_RUNS.get(args.get("run_id"))
     if run is None:
@@ -870,6 +918,7 @@ def tool_browser_test_status(args):
 
 HANDLERS = {"browser_do": tool_browser_do, "browser_assert": tool_browser_assert,
             "browser_test": tool_browser_test, "browser_test_status": tool_browser_test_status,
+            "browser_crawl": tool_browser_crawl,
             "browser_checks": tool_browser_checks, "browser_state": tool_browser_state,
             "browser_act": tool_browser_act, "browser_task": tool_browser_task,
             "browser_task_resume": tool_browser_task_resume,

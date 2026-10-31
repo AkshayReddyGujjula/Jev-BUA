@@ -57,3 +57,27 @@ def test_a_malformed_spec_is_refused_before_anything_starts(monkeypatch, tmp_pat
     monkeypatch.setattr("subprocess.Popen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran")))
     result = server.tool_browser_test({"spec_markdown": "## T\n1. Go.\n   - smell: roses\n"})
     assert "unknown check" in result["error"]
+
+
+def test_browser_crawl_reports_only_problem_pages(monkeypatch, tmp_path):
+    import subprocess
+
+    import jev_mcp_server as server
+
+    monkeypatch.setattr(server, "TEST_RUNS_DIR", tmp_path)
+
+    def fake_run(command, **kwargs):
+        out = command[command.index("--out") + 1]
+        assert command[3:5] == ["crawl", "http://localhost:3000/"] and command[6] == "25"
+        json.dump({"pages": [{"path": "/", "status": "ok"},
+                             {"path": "/old", "status": "error-page", "note": "says '404'", "found_on": "/"},
+                             {"path": "/sso", "status": "left-origin"}],
+                   "problems": 1, "unvisited": []}, open(out, "w", encoding="utf-8"))
+        return subprocess.CompletedProcess(command, 1, "", "")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    result = server.tool_browser_crawl({"url": "http://localhost:3000/", "max_pages": 99})
+    assert result["pages"] == 3 and result["problems"] == 1 and result["model_calls"] == 0
+    assert result["problem_pages"] == [{"path": "/old", "status": "error-page", "note": "says '404'",
+                                        "found_on": "/"}]
+    assert server.tool_browser_crawl({"url": "file:///etc/passwd"})["error"]
