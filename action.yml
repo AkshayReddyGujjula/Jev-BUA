@@ -2,6 +2,7 @@ name: Jev test
 description: >-
   Run plain-English browser tests (Markdown specs) against your app with Jev. Committed replay plans
   (.jev/replay) rerun with no model calls; checks read off the page decide pass or fail.
+  The app must already be running and reachable at the spec's base_url (start it in an earlier step).
   UNTESTED DRAFT (written 30 Oct 2026 without a CI run).
 inputs:
   spec:
@@ -41,9 +42,13 @@ runs:
         JEV_CHROME_ARGS: --no-sandbox
         JEV_CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         JEV_MODES: "off"
+        # Inputs reach the shell as variables, never pasted into the script (Actions injection).
+        JEV_SPEC: ${{ inputs.spec }}
+        JEV_WORKERS: ${{ inputs.workers }}
+        JEV_REF: ${{ github.action_ref || 'main' }}
       run: >-
-        uvx --from "git+https://github.com/browser-use/jev-ultrafast@${{ github.action_ref || 'main' }}"
-        jev test "${{ inputs.spec }}" --workers "${{ inputs.workers }}"
+        uvx --from "git+https://github.com/browser-use/jev-ultrafast@$JEV_REF"
+        jev test "$JEV_SPEC" --workers "$JEV_WORKERS"
     - if: always()
       uses: actions/upload-artifact@v4
       with:
