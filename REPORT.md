@@ -11,6 +11,7 @@ built on the existing Jev loop (one cheap decision per step, no screenshots).
 | Piece | What it does | Where |
 |---|---|---|
 | Markdown specs | `## Test`, `path:`, numbered steps (goals), check bullets (`see:`, `not see:`, `see any:`, `url contains:`, `count:`, `value:`, `no page errors`), `## Before each`, `## Before all` (once per run, like Playwright's global setup), `- open: /path`, `values:`, `check_wait:` (how long checks keep re-reading, for slow async work) | `AgentJevUltraFast/spec.py` |
+| `jev crawl` | opens every same-origin page an app links to (GET only, risky links skipped) and reports JS errors, blank pages and error pages; 0 model calls (StudyCanvas: 7 pages in 5 s) | `crawl.py` |
 | Check suggestions | a step written without checks reports `see:` / `not see:` candidates from what it changed on screen (no model call) | `checks.py` |
 | `jev test` | runs a spec or JSON check file; dedicated Chrome, replay on, cost per test; `--repeat N` for flake rate; `--fresh` to re-record | `AgentJevUltraFast/cli.py`, `checks.py` |
 | `jev init` / `jev draft` | starter spec; or one page read + one ~$0.0003 DeepSeek call → a draft suite with weak/predicted checks marked | `cli.py`, `draft.py` |
@@ -38,7 +39,7 @@ Gemini call writes. Final code, `## Before all` (sign in once per run). Costs in
 | `--repeat 3`, run 1 | 5/5 | 19 | $0.0046 |
 | run 2 | 5/5 | 9 | $0.0017 |
 | run 3 | 5/5 | **0** | **$0.0000** |
-| after two replay fixes (00:20), `--repeat 3` | 5/5, 5/5, 5/5 | **0, 0, 0** | **$0** |
+| after two replay fixes (00:15), `--repeat 3` | 5/5, 5/5, 5/5 | **0, 0, 0** | **$0** |
 
 The two replay fixes came from reading why runs 1-2 still needed calls: plans were keyed by the URL,
 so a page reached as `/canvas/<new uuid>` never found its plan (ids now become `:id`); and a toolbar

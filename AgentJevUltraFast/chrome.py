@@ -59,11 +59,11 @@ def _load_env_files():
                 os.environ.setdefault(key, value.strip().strip('"').strip("'"))
 
 
-UNATTENDED_COMMANDS = {"test", "draft"}
+UNATTENDED_COMMANDS = {"test", "draft", "crawl"}
 
 
 def unattended_command(argv=None):
-    """True when this process is `jev test|draft` (console script or `-m AgentJevUltraFast.cli`)."""
+    """True when this process is `jev test|draft|crawl` (console script or `-m AgentJevUltraFast.cli`)."""
     argv = sys.argv if argv is None else argv
     if len(argv) < 2 or argv[1] not in UNATTENDED_COMMANDS:
         return False

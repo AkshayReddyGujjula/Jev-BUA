@@ -50,6 +50,7 @@ jev init --url http://localhost:3000     # writes jev-tests/smoke.md
 jev draft http://localhost:3000 --about "a recipe planner"   # or: one page read + one cheap call
 jev test jev-tests/smoke.md              # runs it; plans land in jev-tests/.jev/replay
 jev test jev-tests/smoke.md --repeat 3   # pass rate per test (flaky / always failing) and cost per run
+jev crawl http://localhost:3000          # every linked page: JS errors, blank or error pages; 0 model calls
 ```
 
 `jev draft` marks every check it could not see on the start page as *predicted* and every check that

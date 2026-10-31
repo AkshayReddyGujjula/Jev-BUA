@@ -57,6 +57,9 @@ Rules that make tests cheap and trustworthy:
 - The app must already be running. A dedicated automation Chrome is used (no approval prompt, the
   user's own tabs untouched). Replay plans are saved in `jev-tests/.jev/replay/` - commit them.
 
+- Before writing tests for an app you do not know, `jev crawl <url>` opens every same-origin page it
+  links to (GET only) and lists JavaScript errors, blank pages and error pages, with no model calls.
+
 ## 3. Read the result
 
 - `verified: true` only when the page passed every check. `budget_exhausted`/`blocked` with

@@ -326,6 +326,10 @@ def main():
         from .draft import main as draft_main
 
         sys.exit(draft_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "crawl":
+        from .crawl import main as crawl_main
+
+        sys.exit(crawl_main(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] in {"test", "init"}:
         command = test_command if sys.argv[1] == "test" else init_command
         sys.exit(command(sys.argv[2:]))
