@@ -161,3 +161,8 @@ def test_prose_with_a_colon_is_prose_but_a_mistyped_setting_is_an_error():
     assert suite["base_url"] == "http://x.test"
     with pytest.raises(spec.SpecError, match="unknown setting"):
         spec.parse("bse_url: http://x.test\n\n## T\n1. Go.\n   - see: X\n")
+
+
+def test_a_setting_written_with_extra_spaces_is_still_a_setting():
+    suite = spec.parse("commit  floor: 0.6\n\n## T\n1. Go.\n   - see: X\n")
+    assert suite["defaults"]["commit_floor"] == 0.6

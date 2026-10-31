@@ -26,6 +26,17 @@ ERRORS = "window.__jevErrors ? window.__jevErrors.slice(0, 10) : null"
 TEXT = "document.body ? document.body.innerText : ''"
 
 
+def same_origin(origin):
+    """scheme://host[:port] in lower case, without the default port (location.origin omits it)."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit((origin or "").lower())
+    port = parts.port
+    if port is None or (parts.scheme, port) in {("http", 80), ("https", 443)}:
+        return f"{parts.scheme}://{parts.hostname or ''}"
+    return f"{parts.scheme}://{parts.hostname}:{port}"
+
+
 def verdict(text, errors, title=""):
     """(status, note) for one page: the first problem a user would notice, or ok."""
     head = " ".join((text or "").split())[:400]
@@ -47,7 +58,7 @@ def crawl(url, max_pages=MAX_PAGES):
     from . import Browser
 
     parts = urlsplit(url)
-    origin = f"{parts.scheme}://{parts.netloc}"
+    origin = same_origin(f"{parts.scheme}://{parts.netloc}")
     start = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
     queue, seen, pages = [(start, None)], {start}, []
     browser = Browser(url)
@@ -60,10 +71,15 @@ def crawl(url, max_pages=MAX_PAGES):
                 if pages:                                   # the first page is already open
                     browser.navigate(origin + path)
                 landed = browser.evaluate("location.origin") or ""
-                if landed != origin:
+                if same_origin(landed) != origin:
                     # A redirect to a sign-in provider or another site: not this app's page, not
                     # its problem, and its links are not this app's links.
                     record.update(status="left-origin", note=f"redirected to {landed}"[:200], errors=[])
+                    if not pages:
+                        # The start page itself went elsewhere: nothing of this app was checked,
+                        # which must never read as a clean pass.
+                        record.update(status="start-redirected",
+                                      note=f"the start page redirected to {landed}; crawl that URL instead"[:200])
                     links = []
                 else:
                     text = browser.evaluate(TEXT) or ""

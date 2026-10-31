@@ -335,7 +335,10 @@ def page_title(url, timeout=5):
     except Exception:
         return ""
     match = re.search(r"<title[^>]*>(.*?)</title>", head, re.IGNORECASE | re.DOTALL)
-    title = html.unescape(" ".join(match.group(1).split())) if match else ""
+    # Unescape first: "&#10;" must not turn back into a newline that writes Markdown into the spec.
+    title = " ".join(html.unescape(match.group(1)).split()) if match else ""
+    if any(ord(ch) < 32 or ch in "\u2028\u2029" for ch in title):
+        return ""
     return title[:80] if 3 <= len(title) else ""
 
 

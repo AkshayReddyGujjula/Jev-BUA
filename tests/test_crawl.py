@@ -23,3 +23,10 @@ def test_risky_links_are_never_followed():
     from AgentJevUltraFast.draft import linked_paths
     paths = ["/users/sign_out", "/log_out", "/logoff", "/account/deactivate", "/exit", "/docs", "/exits-and-entries"]
     assert linked_paths(paths, limit=10) == ["/docs", "/exits-and-entries"]
+
+
+def test_origins_compare_without_default_ports_or_case():
+    from AgentJevUltraFast.crawl import same_origin
+    assert same_origin("http://LocalHost:80") == same_origin("http://localhost") == "http://localhost"
+    assert same_origin("https://app.test:443") == "https://app.test"
+    assert same_origin("http://localhost:5173") != same_origin("http://127.0.0.1:5173")

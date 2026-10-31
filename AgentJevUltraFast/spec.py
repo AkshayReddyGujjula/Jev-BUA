@@ -163,7 +163,7 @@ def parse(text, name="spec"):
             continue
         setting = SETTING.match(stripped)
         if setting and step is None:
-            key = setting[1].strip().lower().replace(" ", "_")
+            key = re.sub(r"\s+", "_", setting[1].strip().lower())
             raw = setting[2]
             scope = test if test is not None else suite
             if key == "values":
