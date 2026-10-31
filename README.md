@@ -85,7 +85,7 @@ Full results in [REPORT.md](REPORT.md).
 
 - **Checks:** `see:`, `see any: A | B`, `not see:`, `url contains:`, `url matches:`, `title contains:`,
   `count: SELECTOR >= N`, `value: SELECTOR contains X`, `no page errors` (uncaught exceptions,
-  unhandled rejections and `console.error`). They re-read the page for up to 3 s, like
+  unhandled rejections and `console.error`), `not blank` (something rendered). They re-read the page for up to 3 s, like
   auto-waiting test assertions. A step with a positive check ends the moment it holds.
 - **Replay:** steps are recorded by meaning (kind, accessible name, role, plus test id, name,
   placeholder, link path and enclosing dialog/section) and must match exactly one element. A step that

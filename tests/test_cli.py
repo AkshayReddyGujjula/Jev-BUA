@@ -60,9 +60,13 @@ def test_jev_init_writes_a_runnable_starter_spec(tmp_path, monkeypatch):
     from AgentJevUltraFast import cli, spec
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "page_title", lambda url: "Acme Shop")       # no network in tests
     assert cli.init_command(["--url", "http://localhost:4000/"]) == 0
     suite = spec.load(tmp_path / "jev-tests" / "smoke.md")
     assert suite["base_url"] == "http://localhost:4000" and len(suite["checks"]) == 2
+    # Something must render: a blank page or a dead dev server never passes the starter test.
+    assert suite["checks"][0]["steps"][0]["expect"] == {
+        "not_blank": True, "no_page_errors": True, "title_contains": "Acme Shop"}
     assert (tmp_path / "jev-tests" / ".jev" / ".gitignore").read_text(encoding="utf-8") == "evidence/\nreports/\n"
     assert cli.init_command([]) == 1          # never overwrites an existing spec
 

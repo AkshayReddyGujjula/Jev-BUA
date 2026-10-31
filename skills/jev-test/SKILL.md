@@ -35,7 +35,7 @@ Rules that make tests cheap and trustworthy:
 - **Every step that matters gets a positive check** (`see:`, `url contains:`, `count:`). A step with
   only `not see:` cannot tell when it has arrived, so it runs until Jev says done or its budget ends.
 - Checks: `see: X` (all must appear), `see any: A | B`, `not see: X`, `url contains: X`,
-  `url matches: REGEX`, `title contains: X`, `count: CSS >= N`, `value: CSS contains X`, `no page errors`.
+  `url matches: REGEX`, `title contains: X`, `count: CSS >= N`, `value: CSS contains X`, `no page errors`, `not blank`.
 - Put literal inputs under `values:` as `- Field label: text`; the label is matched to the field.
   Use local test credentials only; values are never written to replay plans.
 - Settings (suite or test level): `base_url`, `path`, `isolate: storage|context`, `max_seconds`,

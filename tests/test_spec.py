@@ -145,3 +145,11 @@ def test_suggestions_are_written_as_comments_under_their_step():
     assert ("1. Open Spaces.\n   <!-- suggested: - see: New space -->\n"
             "   <!-- suggested: - not see: No spaces yet -->\n2.") in out
     assert spec.parse(out)["checks"] == spec.parse(text)["checks"]       # comments never become checks
+
+
+def test_not_blank_is_a_check_and_a_blank_page_fails_it():
+    from AgentJevUltraFast.assertions import evaluate_expectations
+    expect = spec.parse("## T\n1. Read the page.\n   - not blank\n")["checks"][0]["steps"][0]["expect"]
+    assert expect == {"not_blank": True}
+    assert evaluate_expectations(expect, {"text": "   "})[0] is False
+    assert evaluate_expectations(expect, {"text": "Welcome"})[0] is True

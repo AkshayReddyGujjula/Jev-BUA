@@ -218,7 +218,8 @@ isolate: storage
 
 ## Home page loads
 1. Read the page.
-   - no page errors
+   - not blank
+   - no page errors{title_check}
 
 ## Unknown page shows a not-found message
 path: /this-page-does-not-exist
@@ -320,6 +321,24 @@ def write_suggestions(spec, report_path):
     return target
 
 
+def page_title(url, timeout=5):
+    """The start page's <title> from one plain GET (no browser, no model), or "" when unreachable."""
+    import html
+    import re
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            if response.status >= 400:
+                return ""
+            head = response.read(200_000).decode("utf-8", "replace")
+    except Exception:
+        return ""
+    match = re.search(r"<title[^>]*>(.*?)</title>", head, re.IGNORECASE | re.DOTALL)
+    title = html.unescape(" ".join(match.group(1).split())) if match else ""
+    return title[:80] if 3 <= len(title) else ""
+
+
 def init_command(argv):
     """`jev init [--url URL] [--dir DIR]`: write a starter Markdown spec to edit."""
     parser = argparse.ArgumentParser(prog="jev init", description=init_command.__doc__)
@@ -332,8 +351,10 @@ def init_command(argv):
     if target.exists():
         print(f"{target} already exists; leaving it alone.")
         return 1
-    target.write_text(STARTER_SPEC.format(title=Path.cwd().name + " smoke", url=args.url.rstrip("/")),
-                      encoding="utf-8")
+    title = page_title(args.url)
+    title_check = f"\n   - title contains: {title}" if title else ""
+    target.write_text(STARTER_SPEC.format(title=Path.cwd().name + " smoke", url=args.url.rstrip("/"),
+                                          title_check=title_check), encoding="utf-8")
     ignore = folder / ".jev" / ".gitignore"
     ignore.parent.mkdir(parents=True, exist_ok=True)
     # Plans are worth committing (free, deterministic reruns); raw evidence and reports are not.

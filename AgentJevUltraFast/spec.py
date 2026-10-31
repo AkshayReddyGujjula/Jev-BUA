@@ -25,7 +25,7 @@ none) are put in front of every test, e.g. signing in.
 
 Checks (all must hold): `see: X` (text present), `see any: A | B`, `not see: X`,
 `url contains: X`, `url matches: REGEX`, `title contains: X`, `count: SELECTOR >= N`,
-`value: SELECTOR contains X`, `no page errors`.
+`value: SELECTOR contains X`, `no page errors`, `not blank`.
 
 The steps are goals, never scripts: Jev decides how to do each one on the live page, and only
 the checks decide pass or fail. A spec compiles to the same check file `jev test` runs from JSON,
@@ -78,6 +78,9 @@ def _check(expect, text, where):
     lowered = body.lower()
     if lowered in {"no page errors", "no errors", "no console errors"}:
         expect["no_page_errors"] = True
+        return
+    if lowered in {"not blank", "page not blank", "page has content"}:
+        expect["not_blank"] = True
         return
     key, sep, value = body.partition(":")
     if not sep or not value.strip():

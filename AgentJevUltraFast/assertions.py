@@ -16,7 +16,7 @@ TEXT_LIST_KEYS = ("text_contains", "text_contains_all", "text_absent")
 STRING_KEYS = ("url_contains", "url_matches", "title_contains")
 EXPECT_KEYS = frozenset(
     TEXT_LIST_KEYS + STRING_KEYS
-    + ("selector_count", "value_contains", "harvest_at_least", "no_page_errors")
+    + ("selector_count", "value_contains", "harvest_at_least", "no_page_errors", "not_blank")
 )
 
 # Installed before any page script on every document the run's tab loads, so uncaught
@@ -123,6 +123,10 @@ def normalize_expect(expect):
         if expect["no_page_errors"] is not True:
             raise ValueError("expect.no_page_errors must be true")
         out["no_page_errors"] = True
+    if "not_blank" in expect:
+        if expect["not_blank"] is not True:
+            raise ValueError("expect.not_blank must be true")
+        out["not_blank"] = True
     return out
 
 
@@ -191,6 +195,11 @@ def evaluate_expectations(expect, page_state):
             record("no_page_errors", False, "page error recorder unavailable")
         else:
             record("no_page_errors", not errors, f"{len(errors)} error(s): {errors[:3]}")
+    if "not_blank" in expect:
+        # The smoke check every app needs: something rendered. A crashed SPA, an empty 404 or a
+        # dev server serving nothing all read as no visible text.
+        shown = len((page_state.get("text") or "").strip())
+        record("not_blank", shown > 0, f"{shown} characters of visible text")
     if not detail:
         # Unreachable after normalize_expect, and kept so zero checks can never verify.
         return None, []
