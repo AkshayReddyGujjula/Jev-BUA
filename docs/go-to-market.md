@@ -36,7 +36,7 @@ a penny for a whole suite and about $0 on every rerun.
 1. **Verdicts are facts, not opinions.** Every check (`see:`, `not see:`, `url contains:`, `no page
    errors`) is read off the real page; `verified` only when a readback passed.
 2. **Cheap enough to run on every change.** StudyCanvas, 5 tests each with an access gate and a
-   5-question onboarding: first run $0.0085 (61 model calls), third run $0.00028 (3 calls), 5/5.
+   5-question onboarding: first run $0.012 (55 model calls, 39 of them signing in), third run $0 (0 calls), 5/5.
 3. **Made for your coding agent.** MCP (`browser_test`), CLI, specs in the repo, replay plans in
    `.jev/` committed so CI reruns cost almost nothing; a broken step heals with one decision.
 

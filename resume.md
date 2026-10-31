@@ -73,6 +73,12 @@ after 2 identical verified recordings (maybe); miss reasons in report; Playwrigh
   ($0.0037 tests + $0.0082 Before all). CLEAN ROUND running: scratchpad\final-runs2.ps1 (pid 46248) ->
   final-runs2.log: core --repeat 3, 5 aligned checklist sections --fresh, decision-lab fresh+replay.
   Unaligned checklist numbers (before tutorial fix): S05 0/2, S06 0/3, S08 1/3.
+- 00:05 Clean round DONE: core repeat 5/5 x3 (19 -> 9 -> 0 calls), aligned checklist 5/23 (7 without
+  checks; S06 keyboard ran before key support), Decision Lab 3/3 (positive check: 33 fresh / 10 replay).
+  Sonnet review: 6 findings, all fixed (01bee4c). Added: goal-named keys (keys.py, /keys trap 2/2),
+  run slots for concurrent jev test, one read retry on IPC timeout, unchecked-stalled-step fails.
+  REPORT.md results FILLED. NEXT ideas: re-run A1-S06 with keys; fix drafts' failing checks? (draft
+  quality, not Jev); final REPORT polish at 02:30, then CronDelete 538f333e.
 - Remaining ideas (older): REPORT.md (morning summary), `jev test --repeat N` flake rate, landing page draft,
   maybe Linux CI action.yml.
 - OLD NEXT: MCP browser_test tool (async, beat 120 s cap); second project (Nebius Decision Lab ?mock=1,

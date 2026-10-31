@@ -69,15 +69,16 @@ the step's own words; Jev never invents a key. Several `jev test` runs (or codin
 once on one machine: each takes its own set of browser connections. A JSON test checklist
 can be drafted the same way with `scripts/import_checklist.py`.
 
-Measured on a real app ([StudyCanvas](examples/studycanvas/core.md), Vite + React on localhost; every
-test first passes an access gate and a five-question onboarding):
+Measured on a real app ([StudyCanvas](examples/studycanvas/core.md), Vite + React on localhost; the
+suite first passes an access gate, a five-question onboarding and a tutorial, once per run):
 
-| Run | Verified | Model calls | Model cost | Steps replayed |
-|---|---|---|---|---|
-| first (nothing recorded) | 5/5 | 61 | $0.0085 | 32 |
-| third (replay) | 5/5 | 3 | $0.00028 | 52 |
+| Run | Verified | Model calls | Model cost |
+|---|---|---|---|
+| first (nothing recorded) | 5/5 | 55 (39 of them signing in) | $0.0119 |
+| third (replay) | 5/5 | 0 | $0.0000 |
 
-A second, unrelated app ([Decision Lab](examples/decision-lab/smoke.md)) passes 3/3 with the same runner.
+A second, unrelated app ([Decision Lab](examples/decision-lab/smoke.md)) passes 3/3 with the same runner
+($0.0069 first run, $0.0021 on replay).
 Full results in [REPORT.md](REPORT.md).
 
 - **Checks:** `see:`, `see any: A | B`, `not see:`, `url contains:`, `url matches:`, `title contains:`,
