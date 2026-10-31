@@ -71,9 +71,11 @@ runs, CI orchestration, dashboard.
 | Team | $99/mo | 50,000 runs, 10 parallel, flake/heal analytics, 5 seats |
 | Scale | from $499/mo | SSO, private runner, SLA |
 
-Unit economics (measured model cost): first authoring run ~$0.0017/test, replay ~$0.00006/test;
-hosted Chrome ~13 s/test is roughly $0.0002-0.0005 of compute (estimate). Gross margin >90% at these
-tiers. **Key risk:** Jev is TypeSafe's model — get a written volume/reseller agreement first.
+Unit economics (measured model cost, final runs on 30-31 Oct): first authoring run $0.0007-0.004
+per test (StudyCanvas $0.0024/test including its sign-in; 23 unreviewed checklist drafts $0.004/test;
+a game's age gate $0.0007/test), replay $0-0.0007/test (most suites 0 model calls by the third run).
+Hosted Chrome at 3-6 s per test after a one-time sign-in is roughly $0.0001-0.0003 of compute
+(estimate). Gross margin >90% at these tiers. **Key risk:** Jev is TypeSafe's model — get a written volume/reseller agreement first.
 
 ## 5. Naming (not trademark-searched)
 

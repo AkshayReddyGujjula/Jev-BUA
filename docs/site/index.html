@@ -109,12 +109,12 @@ cost ~$0.000077 for 1 model call;
   <p class="fine">Illustrative output in the real format. Measured numbers are below.</p>
 
   <h2 id="numbers">Measured on a real app</h2>
-  <p>StudyCanvas (Vite + React, localhost). Every test first passes an access gate and a five-question onboarding.</p>
+  <p>StudyCanvas (Vite + React, localhost). The suite signs in once, through an access gate, a five-question onboarding and a tutorial.</p>
   <div class="num-grid">
     <div class="num"><b>5/5</b><span>tests verified, first run and replay</span></div>
     <div class="num"><b>$0.012</b><span>first run, 55 model calls, nothing recorded</span></div>
     <div class="num"><b>$0</b><span>third run, 0 model calls</span></div>
-    <div class="num"><b>~13 s</b><span>per test, including sign-in and onboarding</span></div>
+    <div class="num"><b>3 apps</b><span>passing with the same runner, unchanged</span></div>
   </div>
 
   <h2 id="how">How it works</h2>
@@ -125,7 +125,7 @@ cost ~$0.000077 for 1 model call;
   </div>
 
   <h2>Built for your coding agent</h2>
-  <p>One MCP server, one CLI. Your agent writes a spec, calls <code>browser_test</code>, and gets back pass/fail, cost, the failing check and what the page showed. Specs and replay plans live in your repo, so CI reruns cost nothing.</p>
+  <p>One MCP server, one CLI. Your agent writes a spec, calls <code>browser_test</code>, and gets back pass/fail, cost, the failing check and what the page showed. Specs and replay plans live in your repo, so CI reruns cost nothing. Several agents can test at once: each run gets its own browser connections, in a separate automation Chrome that never touches your tabs.</p>
   <pre class="install">claude mcp add jev -- jev-mcp</pre>
 
   <h2>Why not just…</h2>
