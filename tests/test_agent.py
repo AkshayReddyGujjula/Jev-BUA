@@ -2560,3 +2560,18 @@ def test_a_read_that_times_out_is_retried_once_then_stalls(runner, monkeypatch):
     assert runner.state["status"] == "predicted" and browser.observe.called
     with pytest.raises(TimeoutError):               # a second one is a stall (run() ends it)
         runner.command("predict")
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("http://localhost:5173/workspace?storage=idb", "/workspace?storage=idb"),
+    ("http://localhost:5173/workspace/canvas/6f06736a-13df-4905-875a-928c35746bf5", "/workspace/canvas/:id"),
+    ("http://127.0.0.1:3000/orders/1234/edit", "/orders/:id/edit"),
+    ("http://x.test/doc/a1b2c3d4e5f6a7b8", "/doc/:id"),
+    ("http://x.test/item?id=98765&tab=reviews", "/item?id=:id&tab=reviews"),
+    ("http://x.test/settings/notifications", "/settings/notifications"),       # words stay words
+    ("http://x.test/no-such-place-xyz", "/no-such-place-xyz"),
+    ("http://x.test/", "/"),
+])
+def test_replay_routes_treat_record_ids_as_one_page(url, expected):
+    from AgentJevUltraFast import replay
+    assert replay.route(url) == expected

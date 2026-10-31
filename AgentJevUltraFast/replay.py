@@ -15,7 +15,7 @@ Safety rules:
 - a step that no longer matches uniquely on the live page hands that step to Jev (a heal);
   replay resumes once a later recorded step matches again, at most MAX_HEALS times a run
 - a replayed step with no visible effect stops the replay (the page changed)
-- a plan only serves the route (path + query, not host or port) and goal it was recorded from
+- a plan only serves the route (path + query, record ids as :id, not host or port) and goal it was recorded from
 - a supplied value is recorded by reference (`value_ref`), never by value, and is resolved from
   the current run's values; without one the step goes back to Jev
 - nothing here retries a mutation
@@ -24,6 +24,7 @@ Safety rules:
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -37,10 +38,33 @@ MAX_HEALS = int(os.environ.get("JEV_REPLAY_MAX_HEALS", "3"))
 RESYNC_WINDOW = 3
 
 
+ID_SEGMENT = re.compile(
+    r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"   # uuid
+    r"|[0-9a-f]{16,}"                                                   # long hex (hashes, ids)
+    r"|\d+"                                                             # numeric ids
+    r"|(?=[a-z0-9_-]{12,}$)(?=(?:[^0-9]*[0-9]){2})[a-z0-9_-]+)$",       # long tokens with digits
+    re.IGNORECASE,
+)
+
+
+def _generic(value):
+    return ":id" if ID_SEGMENT.match(value) else value
+
+
 def route(url):
-    """The part of a URL a plan is keyed on: the same app on another port is the same flow."""
+    """The part of a URL a plan is keyed on: the same app on another port is the same flow.
+
+    Record ids in the path or query become `:id`: a page reached as /canvas/<uuid> is the same
+    page next run under a new uuid (measured: a tutorial canvas re-decided every run because its
+    plan was filed under the last run's id). Steps are matched by meaning, never by URL.
+    """
     parts = urlsplit(url or "")
-    return (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    path = "/".join(_generic(segment) if segment else segment for segment in (parts.path or "/").split("/"))
+    query = "&".join(
+        (f"{key}={_generic(value)}" if sep else key)
+        for key, sep, value in (pair.partition("=") for pair in parts.query.split("&") if pair)
+    )
+    return path + (f"?{query}" if query else "")
 
 
 def goal_hash(url, goal):
