@@ -143,7 +143,9 @@ run of 23 tests costs under 10 cents.
   started myself, to clear its in-memory limiter; nothing else in StudyCanvas was touched.
 - **Each StudyCanvas suite run makes one Gemini call on the app's own key**: onboarding's last
   button now starts a tutorial that writes a lecture (~9 s). That is why the setup has
-  `check_wait: 30`.
+  `check_wait: 30`. The app also rate-limits that endpoint to **8 lectures an hour** (local-dev),
+  which tonight's repeated runs exceeded twice: the onboarding then waits, Jev takes over after the
+  30 s readback and finishes it, and the run still verifies, but slower and with ~7 model calls.
 - **Another session was editing StudyCanvas tonight.** Its saves caused hot-reload storms that
   hung my Vite on :5173, so I ran Vite with a config of my own outside the repo (HMR and file
   watching off: `scratchpad\vite.frozen.config.ts`). Runs between 23:00 and 23:30 that failed for
@@ -152,8 +154,9 @@ run of 23 tests costs under 10 cents.
   the decision cache and failed a test with zero model calls (refusals are no longer cached); and
   `jev test` workers inherited the dedicated Chrome endpoint without its own daemon name, so one
   could have reused a same-named daemon attached to your normal Chrome.
-- **Two code reviews tonight.** An Opus review (16 findings, all high/medium fixed, b53fa85) and a
-  Sonnet review of the later work (6 findings, all fixed, 01bee4c): among them, `isolate: none`
+- **Three code reviews tonight.** An Opus review (16 findings, all high/medium fixed, b53fa85), a
+  Sonnet review (6 findings, all fixed, 01bee4c) and a second Sonnet review of keys, slots, crawl and
+  replay matching (9 findings, all fixed, dc79de8). Among them: `isolate: none`
   under `## Before all` silently signed every test out, and a Before all without a check blocked
   the whole suite with no explanation (now a parse error). Running the rounds also showed that an
   unchecked step that stalls could still let its test pass if it was the last step; fixed.
