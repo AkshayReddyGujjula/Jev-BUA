@@ -87,6 +87,12 @@ after 2 identical verified recordings (maybe); miss reasons in report; Playwrigh
   0 calls; StudyCanvas 7 pages ok, 404 detected). Weekly usage 79% at 00:17 (get_usage tool works).
   Sonnet review #2 running on 01bee4c..HEAD. NEXT: apply its findings; final REPORT polish at ~02:15;
   02:30 commit + CronDelete 538f333e.
+- 00:44 Since: review #2 (9 findings) all fixed (dc79de8); StudyCanvas tutorial endpoint is rate-limited
+  8/hour (don't run SC suites more tonight); action.yml injection fix; --write-suggestions (+ example);
+  importer skips modifier clicks. REPORT polished (summary paragraph at top). 489+ tests pass.
+  FINAL STEPS (after 02:30): run full checks (ruff, pytest, node x2, uv build), update REPORT test count,
+  stop my servers? (SC :8000/:5173, DL :5180, trap :8791 - leave running, note in REPORT), commit,
+  CronDelete 538f333e.
 - Remaining ideas (older): REPORT.md (morning summary), `jev test --repeat N` flake rate, landing page draft,
   maybe Linux CI action.yml.
 - OLD NEXT: MCP browser_test tool (async, beat 120 s cap); second project (Nebius Decision Lab ?mock=1,
