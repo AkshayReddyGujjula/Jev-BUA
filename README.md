@@ -78,7 +78,7 @@ suite first passes an access gate, a five-question onboarding and a tutorial, on
 | third (replay) | 5/5 | 0 | $0.0000 |
 
 A second, unrelated app ([Decision Lab](examples/decision-lab/smoke.md)) passes 3/3 with the same runner
-($0.0069 first run, $0.0021 on replay).
+($0.0069 first run, $0.0021 on replay). A third (a browser game's age gate) passes 3/3 for $0.002, then 0 model calls on replay.
 Full results in [REPORT.md](REPORT.md).
 
 - **Checks:** `see:`, `see any: A | B`, `not see:`, `url contains:`, `url matches:`, `title contains:`,

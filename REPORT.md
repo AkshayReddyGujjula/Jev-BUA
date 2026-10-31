@@ -62,6 +62,19 @@ question" test had only a negative check, so nothing told it that it had arrived
 
 Specs whose steps have only negative checks now print a warning saying exactly this.
 
+### Moneywell Town (third app, `examples/moneywell/age-gate.md`, new)
+A browser game from `Desktop\Hackathons\WIF Hackathon\wif-team17`, run read-only (its git status
+stayed clean). Three tests of its 15+ age gate, written by hand from `src/data/ageCheck.ts` in a few
+minutes: an adult reaches the title screen, a child is refused, a two-digit year gets the hint.
+Fresh: 3/3, 12 calls, $0.0020, 5 s wall in parallel. Replay: 3/3, **0 calls**. The three tests share
+one recorded plan and each replays its own birthday (values are stored by reference, never typed
+into the plan).
+
+`jev draft` on its landing page (`drafted.md` beside it) was poor: the landing page embeds the game,
+so nearly every check it proposed was already on screen before its step and is marked *weak*. The
+drafter now also reads up to 4 same-origin pages the start page links to (GET only), which helps
+multi-page apps but not this one-page site. Drafting good checks remains the weakest part.
+
 ### Keyboard shortcuts (`examples/traps/keys.md`, new)
 A page whose shortcuts have no button and no `aria-keyshortcuts`: `Press "?"` and `Ctrl+K` both
 pass (2/2, 1 model call). Before tonight Jev could only press Escape, Enter and page-declared keys.
