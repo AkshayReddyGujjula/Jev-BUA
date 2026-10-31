@@ -88,6 +88,9 @@ Proofwalk, Smokejump, Tripcheck. Avoid: Plaintest, Retest, SpecFlow (existing pr
 - **Landing page:** hero "Your app, tested in plain English. Verified on the real page. Reruns cost
   $0." Proof numbers (above), a real-speed demo (agent writes `smoke.md`, calls `browser_test`, Chrome
   clicks through, cost meter; rerun stays at ~$0.0000), comparison strip, `uvx` CTA.
+- **First-run hook:** `uvx <name> crawl http://localhost:3000` needs no spec, no key and no model:
+  it opens every page the app links to and lists JS errors and broken pages in seconds. A free
+  "found a bug in 5 seconds" moment, then `draft` and `test` take over.
 - **Channels:** MCP registries + Claude Code plugin listing first; Show HN ("Plain-English E2E tests
   where the verdict is never an LLM opinion"); X GIF thread; Reddit (r/ClaudeAI, r/cursor,
   r/webdev); Product Hunt after the GitHub Action exists.
