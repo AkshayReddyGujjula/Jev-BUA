@@ -2322,6 +2322,10 @@ def test_ambient_text_does_not_stale_a_page_level_action():
     ("fill in the form with name 'Ada Lovelace'", ["Ada Lovelace"]),
     ("open studycanvas, go inside the canvas and type the word hello", ["hello"]),
     ("Open MKBHD's iPhone 17 review", []),
+    # A placeholder asks for any value, never its own words.
+    ("Type a word in the filter and check the list narrows.", []),
+    ("Enter an invalid email address and submit.", []),
+    ("Search for some text, then type the word hello", ["hello"]),
 ])
 def test_goal_literals_are_found_by_code(goal, expected):
     from AgentJevUltraFast.model import goal_literals

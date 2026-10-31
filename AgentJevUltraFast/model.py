@@ -317,6 +317,14 @@ LITERAL_STOP = re.compile(
     r"[,;.!?\"“]|\s(?:and|then|in the|into|on|to|so|before|after|once|from|via)\b", re.IGNORECASE
 )
 LEAD_IN = re.compile(r"^(?:the\s+)?(?:word|words|text|phrase|term|query|message)\s+", re.IGNORECASE)
+# "Type a word in the filter" asks for any word, not the text "a word" (measured: a StudyCanvas
+# test typed "a word" and read back 'No shortcut matches "a word"').
+PLACEHOLDER = re.compile(
+    r"^(?:a|an|any|some|one|another|a\s+few|a\s+short|a\s+valid|an\s+invalid|a\s+new|the\s+same)\s+"
+    r"(?:\w+\s+)?(?:words?|text|names?|values?|terms?|query|queries|phrases?|titles?|numbers?|letters?|"
+    r"emails?|email\s+address|search(?:\s+term)?)$",
+    re.IGNORECASE,
+)
 MAX_LITERALS = 6
 MAX_LITERAL_PAIRS = 48
 
@@ -332,6 +340,8 @@ def goal_literals(goal):
         phrase = LEAD_IN.sub("", phrase)
         if QUOTED.search(phrase) or phrase[:1] == "'" or any(q in phrase for q in '"“”'):
             continue                                  # a quoted value was taken above
+        if PLACEHOLDER.match(phrase):
+            continue                                  # "type a word": compose one, never "a word"
         if 0 < len(phrase.split()) <= 8:
             found.append(phrase)
     unique = []
