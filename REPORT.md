@@ -8,8 +8,8 @@ drive (CLI, MCP, skill). On StudyCanvas the whole suite (sign-in, onboarding, tu
 costs about a cent the first time and **$0 with 0 model calls on every rerun**. It passes on three other
 unrelated apps unchanged, never touches your own Chrome, and never lets a model decide pass/fail.
 Your pre-production checklist drafts automatically into 23 runnable tests for under 10 cents, but
-only 5 pass unedited: the drafts need a human (or agent) pass, and that is the weakest part. Three
-code reviews' findings are fixed; 491 tests, lint, node checks and `uv build` pass.
+only 5 pass unedited: the drafts need a human (or agent) pass, and that is the weakest part. Four
+code reviews' findings are fixed; 496 tests, lint, node checks and `uv build` pass.
 
 ## What you have now
 
@@ -171,9 +171,10 @@ run of 23 tests costs under 10 cents.
   the decision cache and failed a test with zero model calls (refusals are no longer cached); and
   `jev test` workers inherited the dedicated Chrome endpoint without its own daemon name, so one
   could have reused a same-named daemon attached to your normal Chrome.
-- **Three code reviews tonight.** An Opus review (16 findings, all high/medium fixed, b53fa85), a
-  Sonnet review (6 findings, all fixed, 01bee4c) and a second Sonnet review of keys, slots, crawl and
-  replay matching (9 findings, all fixed, dc79de8). Among them: `isolate: none`
+- **Four code reviews tonight.** An Opus review (16 findings, all high/medium fixed, b53fa85), a
+  Sonnet review (6 findings, all fixed, 01bee4c), a second Sonnet review of keys, slots, crawl and
+  replay matching (9 findings, all fixed, dc79de8) and a last one of the final features (3 findings,
+  all fixed, 746cf50). Among them: `isolate: none`
   under `## Before all` silently signed every test out, and a Before all without a check blocked
   the whole suite with no explanation (now a parse error). Running the rounds also showed that an
   unchecked step that stalls could still let its test pass if it was the last step; fixed.
