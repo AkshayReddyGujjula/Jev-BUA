@@ -2600,3 +2600,23 @@ def test_same_labelled_twins_replay_by_position_only_when_the_count_is_unchanged
     assert replay.locate(step, three) == (None, "ambiguous")        # the page changed: never guess
     single = replay.descriptor(twins[1], {"operation": "CLICK"}, "page changed", None, actions=twins)
     assert "ordinal" not in single
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("http://x.test/page/2", "/page/2"),
+    ("http://x.test/wizard?step=2", "/wizard?step=2"),
+    ("http://x.test/blog/top-10-tips-2024", "/blog/top-10-tips-2024"),
+    ("http://x.test/s/V1StGXR8Z5jdHi6B", "/s/:id"),
+])
+def test_replay_routes_keep_small_numbers_and_slugs(url, expected):
+    from AgentJevUltraFast import replay
+    assert replay.route(url) == expected
+
+
+def test_a_twin_that_contradicts_a_recorded_anchor_is_a_miss():
+    from AgentJevUltraFast import replay
+    before = [{"id": "e1", "kind": "click", "label": "Open", "role": "link", "anchor": {"href": "/a"}},
+              {"id": "e2", "kind": "click", "label": "Open", "role": "link", "anchor": {"href": "/b"}}]
+    step = replay.descriptor(before[1], {"operation": "CLICK"}, "navigated", None, actions=before)
+    after = [before[0], {"id": "e2", "kind": "click", "label": "Open", "role": "link", "anchor": {"href": "/c"}}]
+    assert replay.locate(step, after)[0] is None          # B is gone; C is not "the second Open"

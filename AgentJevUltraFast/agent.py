@@ -1092,6 +1092,8 @@ class Agent:
             return self._heal(index, "recorded step does not match this page")
         relabelled = tier in {"testid", "id"} and replay.normalize(action.get("label")) != replay.normalize(
             step.get("label"))
+        # A twin found by position alone is a weaker match than a unique one: never a blind commit.
+        relabelled = relabelled or tier == "ordinal"
         if committal(action) and (relabelled or not getattr(self, "replay_commits", REPLAY_COMMITS)):
             # The gate's trust does not survive into replay: a commit-like element gets a
             # fresh gated decision even when the recorded run clicked it once - always when it
@@ -2665,6 +2667,9 @@ class Agent:
 
     def close(self):
         self._review_close()
+        if getattr(self, "browser", None) is not None:
+            # A warm, shared browser must not keep offering this run's goal keys to the next caller.
+            self.browser.goal_keys = None
         if getattr(self, "_owns_browser", True):
             # An injected browser belongs to the caller (the MCP warm session) and stays open.
             self.browser.close()

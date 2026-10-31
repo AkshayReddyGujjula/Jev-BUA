@@ -11,3 +11,15 @@ def test_page_verdicts():
     assert verdict("Pricing\nPlans for teams", []) == ("ok", "")
     # a word inside another word is not an error page
     assert verdict("Notfoundry design studio", [])[0] == "ok"
+
+
+def test_numbers_in_ordinary_copy_are_not_error_pages():
+    assert verdict("Pricing\nJoin 500+ teams. Order #404 shipped.", [])[0] == "ok"
+    assert verdict("404\nThis page does not exist", [])[0] == "error-page"
+    assert verdict("Oops\nTry again", [], title="500 Internal error")[0] == "error-page"
+
+
+def test_risky_links_are_never_followed():
+    from AgentJevUltraFast.draft import linked_paths
+    paths = ["/users/sign_out", "/log_out", "/logoff", "/account/deactivate", "/exit", "/docs", "/exits-and-entries"]
+    assert linked_paths(paths, limit=10) == ["/docs", "/exits-and-entries"]

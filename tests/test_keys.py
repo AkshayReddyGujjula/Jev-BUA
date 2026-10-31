@@ -34,3 +34,12 @@ def test_keys_the_page_already_offers_are_not_duplicated():
     merged = with_goal_keys(page, goal_keys("Press Escape, then press ?"))
     assert [a["key"] for a in merged["actions"]] == ["Escape", "?"]
     assert with_goal_keys(page, []) is page
+
+
+def test_bare_letters_digits_and_destructive_keys_need_quotes_or_the_word_key():
+    for goal in ("Press a button to continue.", "Press 5 times on the counter.", "Hit a key to start.",
+                 "Press Delete on the row you want gone."):
+        assert goal_keys(goal) == [], goal
+    assert labels('Press "a" to archive.') == [("a", 0)]
+    assert labels("Press the Delete key.") == [("Delete", 0)]
+    assert labels("Press ? for help.") == [("?", 0)]

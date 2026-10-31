@@ -17,22 +17,26 @@ from .draft import SAME_ORIGIN_LINKS, linked_paths
 
 MAX_PAGES = 25
 ERROR_PAGE = re.compile(
-    r"\b(?:404|500|502|503|page not found|not found|something went wrong|unexpected error|"
+    r"\b(?:page not found|not found|something went wrong|unexpected error|"
     r"application error|internal server error|cannot get /)\b", re.IGNORECASE)
+# A bare status code only counts where an error page puts it: the title or the first line.
+# "Join 500+ teams" or "Order #404" further down is ordinary copy.
+STATUS_CODE = re.compile(r"^\W*(?:404|500|502|503)\b")
 ERRORS = "window.__jevErrors ? window.__jevErrors.slice(0, 10) : null"
 TEXT = "document.body ? document.body.innerText : ''"
 
 
-def verdict(text, errors):
+def verdict(text, errors, title=""):
     """(status, note) for one page: the first problem a user would notice, or ok."""
     head = " ".join((text or "").split())[:400]
+    first = next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
     if not head:
         return "blank", "the page rendered no text"
     if errors:
         return "js-errors", f"{len(errors)} error(s): {errors[0][:160]}"
-    match = ERROR_PAGE.search(head)
+    match = ERROR_PAGE.search(head) or STATUS_CODE.search(title or "") or STATUS_CODE.search(first)
     if match:
-        return "error-page", f"says {match.group(0)!r}: {head[:120]}"
+        return "error-page", f"says {match.group(0).strip()!r}: {head[:120]}"
     return "ok", ""
 
 
@@ -55,12 +59,19 @@ def crawl(url, max_pages=MAX_PAGES):
             try:
                 if pages:                                   # the first page is already open
                     browser.navigate(origin + path)
-                text = browser.evaluate(TEXT) or ""
-                errors = browser.evaluate(ERRORS) or []
-                record["title"] = browser.evaluate("document.title") or ""
-                record["status"], record["note"] = verdict(text, errors)
-                record["errors"] = errors
-                links = browser.evaluate(SAME_ORIGIN_LINKS) or []
+                landed = browser.evaluate("location.origin") or ""
+                if landed != origin:
+                    # A redirect to a sign-in provider or another site: not this app's page, not
+                    # its problem, and its links are not this app's links.
+                    record.update(status="left-origin", note=f"redirected to {landed}"[:200], errors=[])
+                    links = []
+                else:
+                    text = browser.evaluate(TEXT) or ""
+                    errors = browser.evaluate(ERRORS) or []
+                    record["title"] = browser.evaluate("document.title") or ""
+                    record["status"], record["note"] = verdict(text, errors, record["title"])
+                    record["errors"] = errors
+                    links = browser.evaluate(SAME_ORIGIN_LINKS) or []
             except Exception as error:
                 record["status"], record["note"], links = "unreachable", f"{type(error).__name__}: {error}"[:200], []
             record["load_s"] = round(time.perf_counter() - started, 2)
@@ -72,7 +83,7 @@ def crawl(url, max_pages=MAX_PAGES):
     finally:
         browser.close()
     return {"start": url, "pages": pages, "unvisited": [p for p, _ in queue],
-            "problems": sum(1 for p in pages if p["status"] != "ok")}
+            "problems": sum(1 for p in pages if p["status"] not in {"ok", "left-origin"})}
 
 
 def main(argv):
@@ -87,9 +98,11 @@ def main(argv):
     args = parser.parse_args(argv)
     load_env()
     os.environ.setdefault("JEV_CHROME", "dedicated")
+    # An alert() on load would freeze the page and every later read; a crawl answers it.
+    os.environ.setdefault("JEV_DIALOGS", "dismiss")
     report = crawl(args.url, max(1, args.max_pages))
     for page in report["pages"]:
-        mark = "ok  " if page["status"] == "ok" else "FAIL"
+        mark = "ok  " if page["status"] in {"ok", "left-origin"} else "FAIL"
         print(f"{mark} {page['path'][:60]:<60} {page['status']:<12} {page.get('note', '')[:70]}")
     if report["unvisited"]:
         print(f"... {len(report['unvisited'])} more linked pages not visited (--max-pages)")

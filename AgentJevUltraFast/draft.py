@@ -35,9 +35,14 @@ Rules:
 MAX_CONTROLS = 80
 LINKED_PAGES = max(0, int(os.environ.get("JEV_DRAFT_PAGES", "4")))
 # A GET link can still change state in a careless app; these are never followed.
-RISKY_LINK = re.compile(r"log-?out|sign-?out|delete|remove|destroy|unsubscribe|reset|revoke|cancel", re.I)
+RISKY = (r"log[-_ ]?(?:out|off)|sign[-_ ]?(?:out|off)|delete|remove|destroy|unsubscribe|reset|revoke|cancel|"
+         r"disconnect|deactivate|end[-_ ]?session|^/exit\b")
+RISKY_LINK = re.compile(RISKY, re.I)
+# The link's own text is screened too: "/u/42/x" can still read "Sign out".
 SAME_ORIGIN_LINKS = """(() => [...document.querySelectorAll('a[href]')]
   .filter(a => !a.hasAttribute('download') && a.origin === location.origin)
+  .filter(a => !/log ?(out|off)|sign ?(out|off)|delete|remove|unsubscribe|deactivate|disconnect/i
+    .test((a.textContent || '') + ' ' + (a.getAttribute('aria-label') || '')))
   .map(a => a.pathname + a.search)
   .filter((p, i, all) => all.indexOf(p) === i && p !== location.pathname + location.search))()"""
 

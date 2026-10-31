@@ -27,8 +27,11 @@ COMBO = re.compile(rf"\b{MODS}(?:\s*\+\s*{MODS})*\s*\+\s*[^\s,;)\"”'`]+", re.I
 NAMED_WORD = re.compile(r"\b(?:arrow\s*(?:up|down|left|right)|page\s*(?:up|down))\b|"
                         r"\b(?:tab|space(?:bar)?|backspace|esc(?:ape)?|enter|return|home|end|delete)(?=\s+key\b)",
                         re.IGNORECASE)
-PRESS = re.compile(r"\b(?:press(?:es|ing)?|hit|type the key)\s+(?:the\s+)?[\"“'`]?([^\s\"”'`]{1,12}?)[\"”'`]?"
-                   r"(?=[\s,.;)]|$)", re.IGNORECASE)
+PRESS = re.compile(r"\b(?:press(?:es|ing)?|hit|type the key)\s+(?:the\s+)?([\"“'`]?)([^\s\"”'`]{1,12}?)[\"”'`]?"
+                   r"(?=[\s,.;)]|$)(\s+key\b)?", re.IGNORECASE)
+# "press a button", "press 5 times", "press Delete on the row": a bare letter or digit, or a key
+# that destroys text, counts only when quoted ("press "a"") or called a key ("the Delete key").
+NEEDS_QUOTE = re.compile(r"^(?:[a-z0-9]|delete|backspace)$", re.IGNORECASE)
 MAX_KEYS = 6
 
 
@@ -60,7 +63,9 @@ def goal_keys(goal):
     found = []
     text = goal or ""
     specs = [m.group(0) for m in COMBO.finditer(text)]
-    specs += [m.group(1) for m in PRESS.finditer(text)]
+    specs += [m.group(2) for m in PRESS.finditer(text)
+              if m.group(1) or (m.group(3) and m.group(2).lower() not in {"a", "an", "any"})
+              or not NEEDS_QUOTE.match(m.group(2))]
     specs += [m.group(0) for m in NAMED_WORD.finditer(text)]
     seen = set()
     for spec in specs:

@@ -41,27 +41,37 @@ RESYNC_WINDOW = 3
 ID_SEGMENT = re.compile(
     r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"   # uuid
     r"|[0-9a-f]{16,}"                                                   # long hex (hashes, ids)
-    r"|\d+"                                                             # numeric ids
-    r"|(?=[a-z0-9_-]{12,}$)(?=(?:[^0-9]*[0-9]){2})[a-z0-9_-]+)$",       # long tokens with digits
+    r"|\d{3,})$",                                                      # numeric ids, not steps/pages
     re.IGNORECASE,
 )
+TOKEN = re.compile(r"^[a-z0-9_-]{12,}$", re.IGNORECASE)
+WORD = re.compile(r"[a-z]{4,}", re.IGNORECASE)
+ID_KEY = re.compile(r"^(?:id|uuid|key|.*[_-]id|.*Id)$")
 
 
-def _generic(value):
-    return ":id" if ID_SEGMENT.match(value) else value
+def _is_id(value):
+    """A record id, not a word: /canvas/<uuid>, /orders/1234, a nanoid; never /page/2 or a slug."""
+    if ID_SEGMENT.match(value):
+        return True
+    if not TOKEN.match(value) or sum(ch.isdigit() for ch in value) < 2:
+        return False
+    # "top-10-tips-2024" is a slug: hyphenated words. "V1StGXR8_Z5jdHi6B" has no word in it.
+    return not ("-" in value and WORD.search(value))
 
 
 def route(url):
     """The part of a URL a plan is keyed on: the same app on another port is the same flow.
 
-    Record ids in the path or query become `:id`: a page reached as /canvas/<uuid> is the same
-    page next run under a new uuid (measured: a tutorial canvas re-decided every run because its
-    plan was filed under the last run's id). Steps are matched by meaning, never by URL.
+    Record ids in the path, and the values of id-like query keys, become `:id`: a page reached as
+    /canvas/<uuid> is the same page next run under a new uuid (measured: a tutorial canvas
+    re-decided every run because its plan was filed under the last run's id). Small numbers
+    (?step=2, /page/3) and slugs stay as they are: those are different pages.
     """
     parts = urlsplit(url or "")
-    path = "/".join(_generic(segment) if segment else segment for segment in (parts.path or "/").split("/"))
+    path = "/".join(":id" if segment and _is_id(segment) else segment
+                    for segment in (parts.path or "/").split("/"))
     query = "&".join(
-        (f"{key}={_generic(value)}" if sep else key)
+        (f"{key}={':id' if ID_KEY.match(key) and _is_id(value) else value}" if sep else key)
         for key, sep, value in (pair.partition("=") for pair in parts.query.split("&") if pair)
     )
     return path + (f"?{query}" if query else "")
@@ -187,7 +197,11 @@ def locate(step, actions):
             twins = [a for a in same_kind if normalize(a.get("label")) == wanted]
             position, count = ordinal
             if len(twins) == count and isinstance(position, int) and 0 <= position < count:
-                return twins[position], "ordinal"
+                twin = twins[position]
+                # The twin must not contradict anything else recorded about it: in [A, B] -> [A, C]
+                # the count holds, but C's href is not B's, so this is a miss, not "the 2nd one".
+                if all(_anchor(twin, key) == value for key, value in recorded.items() if value):
+                    return twin, "ordinal"
         if len(same) > 1:
             return None, "ambiguous"
     for key in ("name", "placeholder", "href"):

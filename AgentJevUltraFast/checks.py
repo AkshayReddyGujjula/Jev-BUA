@@ -165,6 +165,8 @@ def claim_slot(lock_dir=None):
                     holder = 0
                 if holder and pid_alive(holder):
                     break                                     # taken: try the next slot
+                if not holder and time.time() - path.stat().st_mtime < 5:
+                    break                                     # just created; its pid is coming
                 try:
                     path.unlink()                             # left by a run that died
                 except OSError:
