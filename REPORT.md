@@ -5,7 +5,7 @@ real apps on localhost; numbers come from the run reports in each example's `.je
 
 **In one paragraph:** Jev Ultrafast is now a plain-English web-app test runner your coding agent can
 drive (CLI, MCP, skill). On StudyCanvas the whole suite (sign-in, onboarding, tutorial, 5 tests)
-costs about a cent the first time and **$0 with 0 model calls on every rerun**. It passes on two other
+costs about a cent the first time and **$0 with 0 model calls on every rerun**. It passes on three other
 unrelated apps unchanged, never touches your own Chrome, and never lets a model decide pass/fail.
 Your pre-production checklist drafts automatically into 23 runnable tests for under 10 cents, but
 only 5 pass unedited: the drafts need a human (or agent) pass, and that is the weakest part. Three
@@ -89,6 +89,14 @@ into the plan).
 so nearly every check it proposed was already on screen before its step and is marked *weak*. The
 drafter now also reads up to 4 same-origin pages the start page links to (GET only), which helps
 multi-page apps but not this one-page site. Drafting good checks remains the weakest part.
+
+### Vasmio site and the zero-edit path (fourth app, `examples/vasmio/smoke.md`, new)
+The static Vasmio company site, with nothing written by hand: `jev init` read its title with one GET,
+`jev test` ran the starter in 6 s for $0.0005 (home page passes; the unknown-URL test fails because
+the site shows its full home page for any path, which may be only the dev server's fallback: worth
+checking on the real host), and `jev crawl` found one page with no problems (all its links are
+`#` anchors). The same starter on StudyCanvas passes 2/2 unedited, and on a blank page fails, as it
+should. The repo's git status stayed clean.
 
 ### Keyboard shortcuts (`examples/traps/keys.md`, new)
 A page whose shortcuts have no button and no `aria-keyshortcuts`: `Press "?"` and `Ctrl+K` both
