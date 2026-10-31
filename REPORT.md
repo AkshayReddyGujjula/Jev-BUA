@@ -9,7 +9,7 @@ costs about a cent the first time and **$0 with 0 model calls on every rerun**. 
 unrelated apps unchanged, never touches your own Chrome, and never lets a model decide pass/fail.
 Your pre-production checklist drafts automatically into 23 runnable tests for under 10 cents, but
 only 5 pass unedited: the drafts need a human (or agent) pass, and that is the weakest part. Three
-code reviews' findings are fixed; 488 tests, lint, node checks and `uv build` pass.
+code reviews' findings are fixed; 491 tests, lint, node checks and `uv build` pass.
 
 ## What you have now
 
