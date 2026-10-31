@@ -30,7 +30,9 @@ SKIP = re.compile(
     r"\b(upload|drag|drop a file|pdf|png|jpe?g|image|photo|microphone|voice|camera|safari|firefox|"
     r"mobile|phone|tablet|offline|print|clipboard|terminal|devtools|reload the browser|restart|"
     r"another browser|incognito|second tab|two tabs|folder picker|choose a folder|kv|quota|right-click|"
-    r"right click|context menu|hover|tooltip|drag)\b",
+    r"right click|context menu|hover|tooltip|drag|long[- ]press)\b"
+    r"|\b(?:ctrl|cmd|shift)\s*\+\s*click\b",           # modifier clicks: Jev clicks plainly
+
     re.IGNORECASE,
 )
 

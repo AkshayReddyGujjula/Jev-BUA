@@ -46,3 +46,9 @@ def test_a_bad_or_failed_answer_keeps_the_check_on_the_last_step():
 
 def test_a_non_dict_answer_keeps_the_check_on_the_last_step():
     assert importer.align(["A.", "B."], ["X"], call=lambda *a, **k: ({"after": ["X", 1]}, {})) == {"X": 2}
+
+
+def test_items_needing_a_modifier_click_are_skipped():
+    item = {"id": "x", "title": "Multi-select", "gemini": "none", "steps": ["Select two canvases (Ctrl+click)."]}
+    assert not importer.runnable(item)
+    assert importer.runnable({**item, "steps": ["Select a canvas."]})
