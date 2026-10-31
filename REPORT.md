@@ -1,6 +1,7 @@
 # Overnight report — 30/31 Oct 2026
 
-Branch `overnight/jev-qa` (local, not pushed). Everything below was run on this machine against
+Branch `overnight/jev-qa` (local, not pushed; 69 commits on top of `main`). Finalised 02:30 on 31 Oct:
+ruff, 496 tests, both node checks and `uv build` pass. Everything below was run on this machine against
 real apps on localhost; numbers come from the run reports in each example's `.jev/reports/`.
 
 **In one paragraph:** Jev Ultrafast is now a plain-English web-app test runner your coding agent can
