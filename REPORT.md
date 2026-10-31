@@ -177,6 +177,11 @@ run of 23 tests costs under 10 cents.
   and the LICENSE says "Copyright (c) 2026 Browser Use", MIT. MIT lets you sell a product built on
   it, but check with Browser Use who owns the product and name before launching under your own
   brand.
+- **Still running from my session** (stop them when you like; nothing depends on them): StudyCanvas
+  backend `uvicorn` on :8000 and my frozen Vite on :5173, Decision Lab's Vite on :5180, the trap server
+  on :8791 (`scripts/trap_server.py`), and the dedicated automation Chrome on :9333 (profile
+  `~/.jev-ultrafast/chrome-profile`). The other session's StudyCanvas servers (:8101-8114, :5201) were
+  never touched.
 - Costs tonight: well under $1 of Jev + DeepSeek in total (per-run figures above).
 
 ## How to try it (5 minutes)
