@@ -3,7 +3,7 @@
   "url": "http://localhost:5173/workspace?storage=idb",
   "goal": "Create a new canvas named Jev Biology Chapter 3.",
   "goal_hash": "0df4f9265bb4fac18345f486f53ec8917bcd7c3fca28c66c3b430dd5aaad3224",
-  "recorded_at": 1793403903.7710545,
+  "recorded_at": 1793405783.173724,
   "verified": true,
   "steps": [
     {
@@ -14,7 +14,11 @@
       "text": null,
       "outcome": "page content changed",
       "confidence": 1.0,
-      "irreversible": 0.11
+      "irreversible": 0.11,
+      "ordinal": [
+        0,
+        2
+      ]
     },
     {
       "kind": "fill",
