@@ -38,6 +38,12 @@ Gemini call writes. Final code, `## Before all` (sign in once per run). Costs in
 | `--repeat 3`, run 1 | 5/5 | 19 | $0.0046 |
 | run 2 | 5/5 | 9 | $0.0017 |
 | run 3 | 5/5 | **0** | **$0.0000** |
+| after two replay fixes (00:20), `--repeat 3` | 5/5, 5/5, 5/5 | **0, 0, 0** | **$0** |
+
+The two replay fixes came from reading why runs 1-2 still needed calls: plans were keyed by the URL,
+so a page reached as `/canvas/<new uuid>` never found its plan (ids now become `:id`); and a toolbar
+and an empty-state "New canvas" button were ambiguous, so that step healed every run (twins are now
+matched by recorded position when their count is unchanged).
 
 Earlier tonight, with `## Before each` (sign in before every test) and before the review fixes:
 
