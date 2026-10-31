@@ -162,6 +162,7 @@ def locate(step, actions):
     between two same-labelled controls is the silent wrong answer replay must never produce.
       testid / id -> the developer's own stable handle, trusted when unique
       label       -> kind + normalized accessible name, narrowed by role and anchors
+      ordinal     -> same-labelled twins, by recorded position, only when their count is unchanged
       anchor      -> the label drifted, but name / placeholder / href still name one element
     """
     kind = step.get("kind")
@@ -179,6 +180,14 @@ def locate(step, actions):
         same = _narrow([action for action in same_kind if normalize(action.get("label")) == wanted], step)
         if len(same) == 1:
             return same[0], "label"
+        ordinal = step.get("ordinal")
+        if len(same) > 1 and isinstance(ordinal, list) and len(ordinal) == 2:
+            # Same-labelled twins: trusted by position only when the page still has exactly as
+            # many as when it was recorded, in page order (Playwright's nth, but guarded).
+            twins = [a for a in same_kind if normalize(a.get("label")) == wanted]
+            position, count = ordinal
+            if len(twins) == count and isinstance(position, int) and 0 <= position < count:
+                return twins[position], "ordinal"
         if len(same) > 1:
             return None, "ambiguous"
     for key in ("name", "placeholder", "href"):
@@ -189,8 +198,12 @@ def locate(step, actions):
     return None, "not found"
 
 
-def descriptor(action, decision, outcome, text, value_ref=None):
-    """One recorded step from an executed action. Dead outcomes are never recorded."""
+def descriptor(action, decision, outcome, text, value_ref=None, actions=None):
+    """One recorded step from an executed action. Dead outcomes are never recorded.
+
+    With the page's `actions`, a control that shares its kind and label with others (a toolbar
+    "New canvas" and an empty state's "New canvas") also records its position among them.
+    """
     fills = action.get("kind") in {"fill", "seek"}
     step = {
         "kind": action.get("kind"),
@@ -206,6 +219,11 @@ def descriptor(action, decision, outcome, text, value_ref=None):
         step["value_ref"] = value_ref
     if action.get("anchor"):
         step["anchor"] = dict(action["anchor"])
+    if actions:
+        wanted = normalize(action.get("label"))
+        same = [a for a in actions if a.get("kind") == action.get("kind") and normalize(a.get("label")) == wanted]
+        if len(same) > 1 and any(a.get("id") == action.get("id") for a in same):
+            step["ordinal"] = [next(i for i, a in enumerate(same) if a.get("id") == action.get("id")), len(same)]
     return step
 
 

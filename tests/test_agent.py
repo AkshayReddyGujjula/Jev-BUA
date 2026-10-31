@@ -2575,3 +2575,28 @@ def test_a_read_that_times_out_is_retried_once_then_stalls(runner, monkeypatch):
 def test_replay_routes_treat_record_ids_as_one_page(url, expected):
     from AgentJevUltraFast import replay
     assert replay.route(url) == expected
+
+
+def test_a_replay_readback_that_times_out_hands_jev_a_fresh_stall_clock(runner, monkeypatch):
+    runner.expect = {"text_absent": ["Your study profile"]}
+    runner.expect_wait_s = 30
+    runner.state["progress_at"] = runner.state["progress_wall_at"] = 0.0     # long expired
+    clock = iter([100.0, 131.0, 131.0, 131.0])
+    monkeypatch.setattr(runner, "_finish_on_readback", lambda wait_s, via: False)
+    monkeypatch.setattr(loop.time, "monotonic", lambda: next(clock))
+    assert runner._finish_replay_by_readback() is False
+    assert runner.state["progress_at"] == 131.0 and runner.state["progress_wall_at"] == 131.0
+
+
+def test_same_labelled_twins_replay_by_position_only_when_the_count_is_unchanged():
+    from AgentJevUltraFast import replay
+    twins = [{"id": "e12", "kind": "click", "label": "New canvas", "role": "button"},
+             {"id": "e15", "kind": "click", "label": "Import canvas", "role": "button"},
+             {"id": "e18", "kind": "click", "label": "New canvas", "role": "button"}]
+    step = replay.descriptor(twins[2], {"operation": "CLICK"}, "page changed", None, actions=twins)
+    assert step["ordinal"] == [1, 2]
+    assert replay.locate(step, twins) == (twins[2], "ordinal")
+    three = twins + [{"id": "e30", "kind": "click", "label": "New canvas", "role": "button"}]
+    assert replay.locate(step, three) == (None, "ambiguous")        # the page changed: never guess
+    single = replay.descriptor(twins[1], {"operation": "CLICK"}, "page changed", None, actions=twins)
+    assert "ordinal" not in single

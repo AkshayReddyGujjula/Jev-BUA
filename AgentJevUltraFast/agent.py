@@ -1196,7 +1196,19 @@ class Agent:
         page by the same auto-waiting readback that judges every run. Without one, or when
         the checks do not hold yet, Jev decides what is left as usual.
         """
-        return self._finish_on_readback(getattr(self, "expect_wait_s", EXPECT_WAIT_S), via="replay")
+        wait_s = getattr(self, "expect_wait_s", EXPECT_WAIT_S)
+        started = time.monotonic()
+        if self._finish_on_readback(wait_s, via="replay"):
+            return True
+        if getattr(self, "expect", None) and time.monotonic() - started > 1.0:
+            # The wait was reads only, bounded by check_wait. Handing Jev a stall clock that
+            # expired during it summoned the supervisor at once, whose hint re-clicked the
+            # submit the plan had just made (measured: a slow tutorial write after 30 s).
+            self._mark_progress()
+            evidence = getattr(self, "evidence", None)
+            if evidence is not None:
+                evidence.record("replay_readback_timeout", waited_s=round(time.monotonic() - started, 1))
+        return False
 
     def _finish_on_readback(self, wait_s, via="expect"):
         """Finish the run as done when the caller's expectation holds on the live page now.
@@ -2543,6 +2555,7 @@ class Agent:
                         # A supplied literal is recorded by reference and re-read from the
                         # replaying run's own values, so it is never written to disk.
                         value_ref=action.get("label") if text_source == "supplied" else None,
+                        actions=page.get("actions"),
                     )
                 )
             if (
