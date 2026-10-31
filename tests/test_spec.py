@@ -135,3 +135,13 @@ def test_before_all_without_a_check_is_refused_at_parse_time():
     import pytest
     with pytest.raises(spec.SpecError, match="needs a check"):
         spec.parse("## Before all\n1. Sign in.\n\n## T\n1. Go.\n   - see: X\n")
+
+
+def test_suggestions_are_written_as_comments_under_their_step():
+    text = ("## Before each\npath: /login\n1. Sign in.\n   - see: Home\n\n"
+            "## Create a space\n1. Open Spaces.\n2. Create one named Alpha.\n   - see: Alpha\n")
+    # As run, the test's steps are [Sign in, Open Spaces, Create...]: step 2 is "Open Spaces".
+    out = spec.annotate(text, {"Create a space": {2: ["see: New space", "not see: No spaces yet"]}})
+    assert ("1. Open Spaces.\n   <!-- suggested: - see: New space -->\n"
+            "   <!-- suggested: - not see: No spaces yet -->\n2.") in out
+    assert spec.parse(out)["checks"] == spec.parse(text)["checks"]       # comments never become checks

@@ -243,6 +243,9 @@ def test_command(argv):
     parser.add_argument("--no-replay", action="store_true", help="always decide with Jev; record nothing")
     parser.add_argument("--fresh", action="store_true", help="forget recorded plans first, then re-record")
     parser.add_argument("--skip-probe", action="store_true", help="do not check the app is up first")
+    parser.add_argument("--write-suggestions", action="store_true",
+                        help="after the run, write <spec>.suggested.md: the spec with each check-less step's "
+                             "suggested checks added as comments to review")
     parser.add_argument("--repeat", type=int, default=1,
                         help="run the suite N times and report each test's pass rate (flakiness) and "
                              "the cost of every run")
@@ -262,7 +265,10 @@ def test_command(argv):
     if args.skip_probe:
         forwarded.append("--skip-probe")
     if args.repeat <= 1:
-        return checks_main(forwarded)
+        code = checks_main(forwarded)
+        if args.write_suggestions:
+            write_suggestions(spec, state / "reports" / f"{spec.stem}.json")
+        return code
     report_path = state / "reports" / f"{spec.stem}.json"
     runs, tests = [], {}
     for number in range(1, args.repeat + 1):
@@ -291,6 +297,27 @@ def test_command(argv):
         mark = "FLAKY" if name in flaky else ("FAIL" if name in failing else "ok")
         print(f"  {mark:<6} {entry['passed']}/{entry['runs']}  {name}")
     return 0 if not flaky and not failing else 1
+
+
+def write_suggestions(spec, report_path):
+    """<spec>.suggested.md beside the spec, when the run suggested any checks. Never edits the spec."""
+    from .spec import annotate
+
+    if spec.suffix.lower() not in {".md", ".markdown"} or not report_path.exists():
+        return None
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    found = {}
+    for result in report.get("results", []):
+        for number, step in enumerate(result.get("steps") or [], 1):
+            if step.get("suggested_checks"):
+                found.setdefault(result.get("name"), {})[number] = step["suggested_checks"]
+    if not found:
+        print("no suggestions: every step that ran had checks, or changed nothing on screen")
+        return None
+    target = spec.with_name(spec.stem + ".suggested.md")
+    target.write_text(annotate(spec.read_text(encoding="utf-8-sig"), found), encoding="utf-8")
+    print(f"suggested checks for {sum(len(v) for v in found.values())} step(s): {target} (review, then copy)")
+    return target
 
 
 def init_command(argv):

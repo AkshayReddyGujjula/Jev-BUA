@@ -56,7 +56,8 @@ jev crawl http://localhost:3000          # every linked page: JS errors, blank o
 `jev draft` marks every check it could not see on the start page as *predicted* and every check that
 was already true before its step as *weak*; review those before trusting a pass. A step written
 without checks still runs, reports `unknown` (never a pass), and prints suggested `see:` / `not see:`
-lines taken from what it changed on screen.
+lines taken from what it changed on screen; `jev test <spec> --write-suggestions` writes them
+into `<spec>.suggested.md` as comments under each step, ready to review and uncomment.
 
 `## Before each` runs at the start of every test. `## Before all` runs once per `jev test`, alone,
 and the tests start from the state it left (signed in, onboarded): use it when signing in is slow or

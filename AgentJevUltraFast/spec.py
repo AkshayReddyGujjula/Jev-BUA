@@ -231,3 +231,34 @@ def load(path):
 
     path = Path(path)
     return parse(path.read_text(encoding="utf-8-sig"), name=path.name)
+
+
+def annotate(text, suggestions):
+    """The spec with each step's suggested checks added under it as comments, for a human to adopt.
+
+    `suggestions` maps a test name to {step number as run: ["see: X", ...]}; with `## Before each`
+    the run's step numbers include the setup steps, so they are counted out here. Comments are
+    ignored by the parser: nothing suggested ever becomes a check until someone uncomments it.
+    """
+    setup_steps = 0
+    section = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            section = stripped[3:].strip().lower()
+        elif section in BEFORE_EACH and STEP.match(line):
+            setup_steps += 1
+    out, test, own = [], None, 0
+    for line in text.splitlines():
+        out.append(line)
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            name = stripped[3:].strip()
+            test = None if name.lower() in BEFORE_EACH | BEFORE_ALL else name
+            own = 0
+            continue
+        if test is not None and STEP.match(line):
+            own += 1
+            for suggestion in (suggestions.get(test) or {}).get(own + setup_steps, []):
+                out.append(f"   <!-- suggested: - {suggestion} -->")
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
