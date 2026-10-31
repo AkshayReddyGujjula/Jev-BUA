@@ -1,0 +1,71 @@
+{
+  "version": 2,
+  "url": "http://localhost:5190/game",
+  "goal": "Enter the birthday and get my pass.",
+  "goal_hash": "b63c5091ba1d25d2185372fd5e195d5e847489e83fb3214729b7bfcfe042146a",
+  "recorded_at": 1793405214.6971104,
+  "verified": true,
+  "steps": [
+    {
+      "kind": "fill",
+      "label": "DAY",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.87,
+      "irreversible": 0.71,
+      "value_ref": "DAY",
+      "anchor": {
+        "id": "birth-day",
+        "placeholder": "DD",
+        "container": "WELCOME,\nNEWCOMER!"
+      }
+    },
+    {
+      "kind": "fill",
+      "label": "MONTH",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.75,
+      "irreversible": 0.73,
+      "value_ref": "MONTH",
+      "anchor": {
+        "id": "birth-month",
+        "placeholder": "MM",
+        "container": "WELCOME,\nNEWCOMER!"
+      }
+    },
+    {
+      "kind": "fill",
+      "label": "YEAR",
+      "role": "textbox",
+      "operation": "TYPE_TEXT",
+      "text": null,
+      "outcome": "page changed",
+      "confidence": 0.92,
+      "irreversible": 0.72,
+      "value_ref": "YEAR",
+      "anchor": {
+        "id": "birth-year",
+        "placeholder": "YYYY",
+        "container": "WELCOME,\nNEWCOMER!"
+      }
+    },
+    {
+      "kind": "click",
+      "label": "GET MY PASS",
+      "role": "button",
+      "operation": "CLICK",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.97,
+      "irreversible": 0.68,
+      "anchor": {
+        "container": "WELCOME,\nNEWCOMER!"
+      }
+    }
+  ]
+}

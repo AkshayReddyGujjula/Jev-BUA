@@ -1,13 +1,16 @@
-"""`jev draft`: a starter test suite for a running app from one page read and one cheap call.
+"""`jev draft`: a starter test suite for a running app from a few page reads and one cheap call.
 
-The page is read once (its visible text and labelled controls), and the text model proposes a
-handful of user journeys as JSON. Code - not the model - writes the Markdown, so the output always
-parses. A check phrase the model could not have seen on the page is kept but marked for review: it
-describes a later screen the model only predicted. Nothing runs until `jev test` is called, and only
-the page's own readback ever decides a pass.
+The start page is read (its visible text and labelled controls), then up to JEV_DRAFT_PAGES pages it
+links to on the same origin, by plain navigation (a GET, never a click, and never a link that looks
+like it signs out or deletes). The text model proposes a handful of user journeys as JSON, so a check
+can quote what a later screen really says instead of guessing it. Code - not the model - writes the
+Markdown, so the output always parses. A check phrase the model could not have seen on any page it
+read is kept but marked for review: it describes a screen the model only predicted. Nothing runs
+until `jev test` is called, and only the page's own readback ever decides a pass.
 """
 
 import os
+import re
 from pathlib import Path
 
 from .model import text_call
@@ -20,13 +23,23 @@ Rules:
   invalid or empty input), search/filter, empty and error states, settings that persist.
 - A goal is ONE user intention in plain English using the controls' visible names, e.g. "Open Settings",
   "Sign up with the email not-an-email". Never selectors, code, coordinates or URLs of other sites.
-- 'see' lists short exact texts expected on the page after that step (1-3 per step). Prefer texts that
-  are already on the page or that the app clearly shows; keep each under 60 characters.
+- 'see' lists short exact texts expected on the page after that step (1-3 per step), under 60
+  characters each. A check must prove the step worked: use text that appears only AFTER the step,
+  such as a heading of the linked page it opens (copy it exactly from linked_pages) or a confirmation
+  the app clearly shows. Text already on the start page proves nothing unless the step left it and
+  came back.
 - 'not_see' lists texts that must not appear (error banners, the previous screen's heading). Optional.
 - Never delete, pay, send email, or change real data unless the control obviously belongs to a demo.
 - Literal input values go inside the goal in double quotes."""
 
 MAX_CONTROLS = 80
+LINKED_PAGES = max(0, int(os.environ.get("JEV_DRAFT_PAGES", "4")))
+# A GET link can still change state in a careless app; these are never followed.
+RISKY_LINK = re.compile(r"log-?out|sign-?out|delete|remove|destroy|unsubscribe|reset|revoke|cancel", re.I)
+SAME_ORIGIN_LINKS = """(() => [...document.querySelectorAll('a[href]')]
+  .filter(a => !a.hasAttribute('download') && a.origin === location.origin)
+  .map(a => a.pathname + a.search)
+  .filter((p, i, all) => all.indexOf(p) === i && p !== location.pathname + location.search))()"""
 
 
 def page_brief(page):
@@ -39,12 +52,24 @@ def page_brief(page):
             "text": (page.get("text") or "")[:4000], "controls": controls}
 
 
-def to_markdown(plan, base_url, path, page_text):
+def linked_paths(paths, limit=None):
+    """The same-origin paths worth reading: unique, no risky words, at most `limit`."""
+    limit = LINKED_PAGES if limit is None else limit
+    chosen = []
+    for path in paths or []:
+        if isinstance(path, str) and path.startswith("/") and not RISKY_LINK.search(path) and path not in chosen:
+            chosen.append(path)
+    return chosen[:limit]
+
+
+def to_markdown(plan, base_url, path, page_text, linked_text=""):
     visible = (page_text or "").lower()
+    elsewhere = (linked_text or "").lower()
     title = str(plan.get("title") or "Drafted suite").strip()[:80]
     lines = [f"# {title} (draft)", "",
-             "Drafted by `jev draft` from one read of the start page. 'predicted' checks quote "
-             "text the drafter expected on a later screen: confirm them on the first run. 'weak' "
+             "Drafted by `jev draft` from the start page and the pages it links to. 'predicted' "
+             "checks quote text the drafter did not see on any page it read: confirm them on the "
+             "first run. 'weak' "
              "checks were already true before the step: replace them with what the step should "
              "change.", "", f"base_url: {base_url}", ""]
     for test in (plan.get("tests") or [])[:8]:
@@ -59,8 +84,8 @@ def to_markdown(plan, base_url, path, page_text):
                     phrase = " ".join(str(phrase).split())[:80]
                     if not phrase:
                         continue
-                    if key == "see" and phrase.lower() not in visible:
-                        lines.append("   <!-- predicted: not on the start page -->")
+                    if key == "see" and phrase.lower() not in visible and phrase.lower() not in elsewhere:
+                        lines.append("   <!-- predicted: not on any page the drafter read -->")
                     elif key == "see":
                         # True before the step ran, so it cannot show the step did anything.
                         lines.append("   <!-- weak: already on the start page -->")
@@ -75,17 +100,31 @@ def draft(url, about="", out=None):
 
     from . import Browser
 
-    browser = Browser(url)
-    try:
-        page = browser.observe(screenshot=False)
-    finally:
-        browser.close()
-    context = {"app": about or None, **page_brief(page)}
-    plan, meta = text_call(SYSTEM, context, timeout=60, max_tokens=2500, ceiling=60)
     parts = urlsplit(url)
     base_url = f"{parts.scheme}://{parts.netloc}"
+    browser = Browser(url)
+    linked = []
+    try:
+        page = browser.observe(screenshot=False)
+        try:
+            paths = linked_paths(browser.evaluate(SAME_ORIGIN_LINKS))
+        except Exception:
+            paths = []
+        for target in paths:
+            try:
+                browser.navigate(base_url + target)
+                seen = page_brief(browser.observe(screenshot=False))
+            except Exception:
+                continue                          # an unreadable page is just not described
+            linked.append({"path": target, "title": seen["title"], "text": seen["text"][:1500],
+                           "controls": seen["controls"][:30]})
+    finally:
+        browser.close()
+    context = {"app": about or None, **page_brief(page), "linked_pages": linked}
+    plan, meta = text_call(SYSTEM, context, timeout=60, max_tokens=2500, ceiling=60)
     path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
-    markdown = to_markdown(plan, base_url, path, page.get("text"))
+    markdown = to_markdown(plan, base_url, path, page.get("text"),
+                           "\n".join(item["text"] for item in linked))
     target = Path(out or Path("jev-tests") / "drafted.md")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(markdown, encoding="utf-8")
