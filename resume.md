@@ -82,6 +82,11 @@ after 2 identical verified recordings (maybe); miss reasons in report; Playwrigh
 - 00:07 Since: A1-S06 re-run with keys 1/3 (only checked test passes); placeholder literals fix;
   jev draft reads linked pages; THIRD APP Moneywell (WIF wif-team17 :5190, stopped) age-gate 3/3 $0.002,
   replay 0 calls. REPORT/README updated. NEXT: landing page + GTM refresh; maybe `draft --verify`.
+- 00:22 Since: MCP stdio smoke OK (browser_test -> status, 2/2); replay :id routes + twin ordinals +
+  fresh stall clock after replay readback timeout -> core --repeat 3 = 0/0/0 calls; `jev crawl` (GET-only,
+  0 calls; StudyCanvas 7 pages ok, 404 detected). Weekly usage 79% at 00:17 (get_usage tool works).
+  Sonnet review #2 running on 01bee4c..HEAD. NEXT: apply its findings; final REPORT polish at ~02:15;
+  02:30 commit + CronDelete 538f333e.
 - Remaining ideas (older): REPORT.md (morning summary), `jev test --repeat N` flake rate, landing page draft,
   maybe Linux CI action.yml.
 - OLD NEXT: MCP browser_test tool (async, beat 120 s cap); second project (Nebius Decision Lab ?mock=1,
