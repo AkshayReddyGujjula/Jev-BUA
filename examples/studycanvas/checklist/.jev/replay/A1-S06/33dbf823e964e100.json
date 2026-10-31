@@ -3,36 +3,28 @@
   "url": "http://localhost:5173/workspace?storage=idb",
   "goal": "End the tutorial.",
   "goal_hash": "33dbf823e964e10060871f6a03465e695d737fab5d8d0e2f3eab3f239afa7562",
-  "recorded_at": 1793404066.7187352,
+  "recorded_at": 1793404868.0646122,
   "verified": true,
   "steps": [
     {
-      "kind": "fill",
-      "label": "Name",
-      "role": "textbox",
-      "operation": "TYPE_TEXT",
-      "text": "Java OOP",
-      "outcome": "page changed",
-      "confidence": 0.31,
-      "irreversible": 0.19,
-      "anchor": {
-        "id": "_r_14_-name",
-        "placeholder": "e.g. Biology Chapter 3",
-        "container": "New canvas"
-      }
-    },
-    {
       "kind": "click",
-      "label": "Create",
+      "label": "Dismiss",
       "role": "button",
       "operation": "CLICK",
       "text": null,
-      "outcome": "navigated",
-      "confidence": 0.84,
-      "irreversible": 0.28,
-      "anchor": {
-        "container": "New canvas"
-      }
+      "outcome": "page content changed",
+      "confidence": 0.74,
+      "irreversible": 0.13
+    },
+    {
+      "kind": "key",
+      "label": "Press Escape",
+      "role": null,
+      "operation": "KEY_ESCAPE",
+      "text": null,
+      "outcome": "page content changed",
+      "confidence": 0.26,
+      "irreversible": 0.16
     },
     {
       "kind": "click",
@@ -42,7 +34,7 @@
       "text": null,
       "outcome": "page content changed",
       "confidence": 1.0,
-      "irreversible": 0.12
+      "irreversible": 0.14
     },
     {
       "kind": "click",
@@ -51,8 +43,8 @@
       "operation": "CLICK",
       "text": null,
       "outcome": "page content changed",
-      "confidence": 0.6,
-      "irreversible": 0.14
+      "confidence": 0.93,
+      "irreversible": 0.12
     }
   ]
 }

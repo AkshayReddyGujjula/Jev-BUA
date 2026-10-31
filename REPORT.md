@@ -90,8 +90,8 @@ Read this as a measure of the drafts, not of the app:
   that leaves them ("read the 404 page, then click Go home" checked the 404 page on the home page).
   `--align` (one cheap DeepSeek call per item) now places each check on its step: the 404 test's
   checks then passed on the 404 page, and A1-S07's drafts read as a tester would write them.
-- A1-S06 is all keyboard shortcuts ("press ?", "Ctrl+F") and ran before key support. Re-run at
-  00:08 with it: 1/3, and the 1 is the only A1-S06 test that has checks (open a canvas, press "?",
+- A1-S06 is all keyboard shortcuts ("press ?", "Ctrl+F") and ran before key support. Re-run just
+  after midnight with it: 1/3, and the 1 is the only A1-S06 test that has checks (open a canvas, press "?",
   read the Canvas group), now passing; 70 calls, $0.012. The same re-run showed Jev typing the
   literal text "a word" for "type a word in the filter"; placeholders are now composed instead.
 - Several checks quote copy the app no longer shows (StudyCanvas was being edited tonight, see below).
