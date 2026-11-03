@@ -47,7 +47,7 @@ runs:
         JEV_WORKERS: ${{ inputs.workers }}
         JEV_REF: ${{ github.action_ref || 'main' }}
       run: >-
-        uvx --from "git+https://github.com/browser-use/jev-ultrafast@$JEV_REF"
+        uvx --from "git+https://github.com/AkshayReddyGujjula/Jev-BUA@$JEV_REF"
         jev test "$JEV_SPEC" --workers "$JEV_WORKERS"
     - if: always()
       uses: actions/upload-artifact@v4

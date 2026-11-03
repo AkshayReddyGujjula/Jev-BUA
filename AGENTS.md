@@ -1,4 +1,9 @@
-# AgentJevUltraFast
+# Jev-BUA
+
+This is Akshay Reddy Gujjula's independent personal project at
+https://github.com/AkshayReddyGujjula/Jev-BUA. `origin` is the only project remote.
+Keep the existing `AgentJevUltraFast` Python package and `jev` commands compatible.
+Preserve dependency disclosures, historical evidence, and original license notices.
 
 Read README.md before editing. Keep the loop small: page -> indexed elements -> operation + target -> execution.
 

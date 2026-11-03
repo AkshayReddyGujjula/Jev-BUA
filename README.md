@@ -1,10 +1,10 @@
-<img src="docs/banner.svg" alt="AgentJevUltraFast · Browser Use × TypeSafe" width="100%" />
+<img src="docs/banner.svg" alt="Jev-BUA · Choose. Click. Verify." width="100%" />
 
-# AgentJevUltraFast ⚡
+# Jev-BUA ⚡
 
-> [!IMPORTANT]
-> **The Browser Use Cloud waitlist is open.** Get early access to ultrafast browser agents in the cloud.
-> **[Join the waitlist →](https://browser-use.com/ultrafast?utm_source=github&utm_medium=readme&utm_campaign=jev-ultrafast)**
+An independent personal project maintained by [Akshay Reddy Gujjula](https://github.com/AkshayReddyGujjula).
+The repository is [AkshayReddyGujjula/Jev-BUA](https://github.com/AkshayReddyGujjula/Jev-BUA).
+The Python import package remains `AgentJevUltraFast`, and the command remains `jev`.
 
 **A browser agent with a dynamic, indexed action space.**
 
@@ -145,7 +145,8 @@ There are no site-specific action scripts or prepared field strings in the polic
 ## Try it
 
 ```bash
-git clone <this repo> jev-ultrafast && cd jev-ultrafast
+git clone https://github.com/AkshayReddyGujjula/Jev-BUA.git
+cd Jev-BUA
 uv tool install --editable .          # puts `jev` on your PATH
 cp .env.example .env                  # add TYPESAFE_API_KEY and TEXT_MODEL_API_KEY
 jev "open youtube, type in MKBHD and open his iPhone 17 review, then turn on captions"
@@ -365,4 +366,5 @@ Tests are offline. `uv run python scripts/check_guards.py` checks real controls 
 
 ---
 
-[Browser Use](https://github.com/browser-use/browser-use) · [Browser Harness](https://github.com/browser-use/browser-harness) · [TypeSafe speculative fan-out](https://docs.typesafe.ai/patterns/fan-out)
+Built with [Browser Harness](https://github.com/browser-use/browser-harness) and [TypeSafe's Jev](https://docs.typesafe.ai/patterns/fan-out). The optional cloud integration uses the Browser Use SDK.
+Original copyright notices are retained in [LICENSE](LICENSE).
