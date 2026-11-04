@@ -4,6 +4,10 @@ A long-lived server so the tool is registered once per agent session instead of 
 process start, Python import and daemon handshake per call. Speaks newline-delimited
 JSON-RPC 2.0 on stdin/stdout, which is what opencode, Command Code and Codex all launch.
 
+Optional: in this setup no agent registers this server by default. Agents reach Jev through the
+explicitly invoked `jev-bua` skill, which uses the CLI only. The recipes below are for anyone who
+wants to register it manually.
+
 Registered as `jev-browser`; tools appear as `jev-browser_<tool>` (opencode) or
 `mcp__jev-browser__<tool>` (Command Code).
 

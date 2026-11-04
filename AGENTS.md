@@ -26,27 +26,34 @@ Checks: uv run ruff check ., uv run pytest, node --check AgentJevUltraFast/stati
 
 ## Browser testing from any agent
 
-This repo is the browser engine other agents drive. Three ways in, pick by what you need:
+This repo is the browser engine other agents drive. No agent (Claude Code, Codex, opencode,
+Command Code, or Claude/Codex inside T3 Code) registers the `jev-browser` MCP server any more. An agent
+reaches Jev only when the user explicitly invokes the shared `jev-bua` skill (source copy in
+`skills/jev-bua/`; live copy `~/.claude/skills/jev-bua/`, mirrored to the other agents' skill folders),
+and the skill uses the CLI only: `jev --brief`, `jev test`, `jev crawl`, `jev init`, `jev draft` and
+`scripts/run_checks.py`. The old `jev-browser` skill is retired. Ways in:
 
-- **MCP (opencode, Command Code, Codex):** the `jev-browser` server is registered for each, with its
-  own `JEV_MCP_BU_NAME` so instances never share a daemon or tab. Tools: `browser_do` (one goal +
+- **MCP (optional, not registered by default):** `jev_mcp_server.py` / `jev-mcp` still exists for anyone
+  who wants to register it manually (give each instance its own `JEV_MCP_BU_NAME` so instances never
+  share a daemon or tab). Tools: `browser_do` (one goal +
   assertions), `browser_state` / `browser_act` (read the indexed elements, then execute one observed
   action with no model call), `browser_assert` (check a page, no model call), `browser_checks` (many
-  checks in parallel, one browser instance each), and `browser_task` / `browser_task_resume` /
+  checks in parallel, one browser instance each), `browser_test` / `browser_test_status`,
+  `browser_crawl`, and `browser_task` / `browser_task_resume` /
   `browser_task_cancel` (one task-owned visible tab with login and approval checkpoints).
   The original tools use a warm tab navigated fresh per call
   (`fresh: true` forces a new one); every run can write JSONL evidence under `artifacts/evidence/`
   (`JEV_EVIDENCE_DIR=0` disables it). Start the server directly with
-  `.venv\Scripts\python.exe jev_mcp_server.py` if an agent needs it explained.
+  `.venv\Scripts\python.exe jev_mcp_server.py` if needed.
 - **CLI, one task:** `jev --brief [--url <url>] [--tab background] [--values '<json>'] [--expect '<json>'] [--mode auto|<slug>] "<goal>"` (installed by `uv tool install --editable .`; `jev` alone is interactive; `run_task.py` remains as a shim). Without `--url` the start page comes from the goal (`AgentJevUltraFast/start.py`), never from a model.
 - **App test suites (preferred for testing):** a Markdown spec (`AgentJevUltraFast/spec.py` documents
-  the format; `skills/jev-test/SKILL.md` teaches it) run by `jev test <spec.md>` or the MCP tools
-  `browser_test` / `browser_test_status` (background run, no 120 s cap). It uses a dedicated
+  the format; `skills/jev-test/SKILL.md` teaches it) run by `jev test <spec.md>` (or, if the MCP server is
+  registered, `browser_test` / `browser_test_status`, a background run with no 120 s cap). It uses a dedicated
   automation Chrome (no approval prompt), records verified flows and replays them with no model
-  calls, heals one step at a time, and reports cost per test. Replay plans live in `<spec dir>/.jev/replay`
+  calls, heals one step at a time, and reports cost per test. Replay plans live in `<spec dir>/.jev/replay/<spec-stem>/`
   and are meant to be committed; `.jev/evidence` and `.jev/reports` are ignored.
   `scripts/import_checklist.py` drafts specs from a JSON checklist (review the drafts).
-  `jev crawl <url>` / MCP `browser_crawl` sweeps every same-origin page for JS errors and broken pages
+  `jev crawl <url>` (MCP `browser_crawl`) sweeps every same-origin page for JS errors and broken pages
   with no model calls (GET only; sign-out/delete links are never followed).
 - **CLI, parallel app testing:** write a check file and run
   `uv run --env-file .env python scripts/run_checks.py checks.json --workers 6`

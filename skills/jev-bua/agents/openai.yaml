@@ -1,0 +1,6 @@
+interface:
+  display_name: "Jev Browser Use Agent"
+  short_description: "Drive a real Chrome with Jev, only when explicitly invoked"
+  default_prompt: "Use $jev-bua to do the following in a real Chrome with the jev CLI."
+policy:
+  allow_implicit_invocation: false

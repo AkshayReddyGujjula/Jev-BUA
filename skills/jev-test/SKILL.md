@@ -52,11 +52,16 @@ Rules that make tests cheap and trustworthy:
 
 ## 2. Run it
 
-- MCP: `browser_test {spec_path: "<abs path>.md"}` returns a `run_id` immediately; poll
+- MCP (only if the optional server is registered): `browser_test {spec_path: "<abs path>.md"}` returns a `run_id` immediately; poll
   `browser_test_status {run_id}` every 15-30 s. Or pass `spec_markdown` inline (+ `base_url`).
 - CLI: `jev test jev-tests/checkout.md [--workers 4] [--fresh]`. Exit 0 only when every test verified.
+  Other flags: `--chrome dedicated|user` (default dedicated), `--repeat N` (run N times, report each
+  test's pass rate and cost), `--no-replay` (always decide with Jev, record nothing), `--skip-probe`
+  (do not check the app is up first), `--fresh` (forget recorded plans, re-record),
+  `--write-suggestions` (write `<spec>.suggested.md` with suggested checks as comments).
+  `jev init [--url URL] [--dir DIR]` writes a starter spec to edit.
 - The app must already be running. A dedicated automation Chrome is used (no approval prompt, the
-  user's own tabs untouched). Replay plans are saved in `jev-tests/.jev/replay/` - commit them.
+  user's own tabs untouched). Replay plans are saved in `<spec dir>/.jev/replay/<spec-stem>/` (e.g. `jev-tests/.jev/replay/checkout/`) - commit them.
 
 - Before writing tests for an app you do not know, `jev crawl <url>` opens every same-origin page it
   links to (GET only) and lists JavaScript errors, blank pages and error pages, with no model calls.

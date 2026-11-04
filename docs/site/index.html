@@ -125,8 +125,9 @@ cost ~$0.000077 for 1 model call;
   </div>
 
   <h2>Built for your coding agent</h2>
-  <p>One MCP server, one CLI. Your agent writes a spec, calls <code>browser_test</code>, and gets back pass/fail, cost, the failing check and what the page showed. Specs and replay plans live in your repo, so CI reruns cost nothing. Several agents can test at once: each run gets its own browser connections, in a separate automation Chrome that never touches your tabs.</p>
-  <pre class="install">claude mcp add jev -- jev-mcp</pre>
+  <p>One CLI and a shared agent skill. Your agent writes a spec, runs <code>jev test</code>, and gets back pass/fail, cost, the failing check and what the page showed. Specs and replay plans live in your repo, so CI reruns cost nothing. Several agents can test at once: each run gets its own browser connections, in a separate automation Chrome that never touches your tabs.</p>
+  <pre class="install">uv tool install --editable . &amp;&amp; jev test jev-tests/smoke.md</pre>
+  <p>Invoke the <code>jev-bua</code> skill in your agent and it drives the CLI. An MCP server (<code>jev-mcp</code>) is also included, optional and not registered by default.</p>
 
   <h2>Why not just…</h2>
   <table>
@@ -139,7 +140,7 @@ cost ~$0.000077 for 1 model call;
 
   <h2 id="pricing">Pricing</h2>
   <div class="tiers">
-    <div class="tier"><h3>Local</h3><b>$0</b><ul><li>Unlimited local and self-hosted runs</li><li>CLI, MCP server, replay, healing</li><li>Bring your own model keys</li></ul></div>
+    <div class="tier"><h3>Local</h3><b>$0</b><ul><li>Unlimited local and self-hosted runs</li><li>CLI, agent skill, replay, healing</li><li>Bring your own model keys</li></ul></div>
     <div class="tier"><h3>Pro</h3><b>$19<small>/mo</small></b><ul><li>5,000 hosted test runs</li><li>GitHub pull-request comments</li><li>30-day run history</li></ul></div>
     <div class="tier"><h3>Team</h3><b>$99<small>/mo</small></b><ul><li>50,000 runs, 10 in parallel</li><li>Flake and heal analytics</li><li>5 seats</li></ul></div>
   </div>

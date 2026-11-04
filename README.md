@@ -100,9 +100,10 @@ Full results in [REPORT.md](REPORT.md).
   HTTP cache warm (sequential; much faster on dev servers).
 - **Bounded:** each test has `max_seconds`, each step at most 25 actions (`max_steps`), and a step with
   only `not see:` checks gets a warning, because absence cannot tell a run it has arrived.
-- **From a coding agent:** the MCP tool `browser_test` takes a spec path or inline Markdown and returns
-  a run id at once; `browser_test_status` returns pass/fail, cost, the failing checks and an excerpt
-  of what the page showed.
+- **From a coding agent:** run `jev test <spec.md>` through the `jev-bua` skill. If you register the
+  optional MCP server instead, `browser_test` takes a spec path or inline Markdown and returns a run id
+  at once; `browser_test_status` returns pass/fail, cost, the failing checks and an excerpt of what the
+  page showed.
 
 ## The action space
 
@@ -172,10 +173,12 @@ $ jev "Open YouTube, type in MKBHD, go to click on its first iPhone 17 video, cl
 Jev decision took 250-580 ms: the rest is YouTube loading its pages. `unknown` because no
 `--expect` readback was given.)
 
-Coding agents call the same command. The `jev-browser` skill tells Claude Code, Codex, opencode
-and Command Code to run `jev --brief "<the user's words verbatim>"` instead of planning, and
-`!jev "..."` in those tools skips the model turn entirely. The MCP server (`jev-mcp`) remains for
-structured testing: parallel checks, assertions and delegated tasks.
+Coding agents call the same command, but only when you explicitly invoke the shared `jev-bua`
+skill (source in `skills/jev-bua/`; Claude Code, Codex, opencode and Claude/Codex inside T3 Code
+all read it from their skill folders). The skill drives the CLI only (`jev --brief`, `jev test`,
+`jev crawl`, `jev init`, `jev draft`, `scripts/run_checks.py`). No agent registers a Jev MCP server by
+default; the optional MCP server (`jev-mcp`) is described below for anyone who wants to register
+it manually.
 
 The web inspector is `jev-ui`: open **http://127.0.0.1:8766** and click **Start demo → Run automatically**. The inspector shows numbered elements, operation probabilities, target probabilities, and executed actions. **Choose next** pauses before execution.
 
@@ -273,9 +276,10 @@ A coding agent testing its own app can hand over the navigation and get facts pl
 
 The result carries `status`, the code-owned `outcome`, the check details, the final URL and title, and — with `screenshot: true` — the final page as a JPEG image content block (rendered even from a background tab; skipped when a private value is on the page). `plan` is optional orchestrator context for the supervisor if the run gets stuck; Jev still decides every step from the goal. `run_task.py --plan '[...]' --screenshot final.jpg` does the same from the CLI. Measured on the local fixture through the real MCP server: verified in 2.3 s of agent time, 5.0 s wall including browser setup.
 
-## Delegate a browser goal from another agent
+## Delegate a browser goal from another agent (optional MCP server)
 
-The MCP server offers `browser_task(goal, url, expect?, mode?)`. It returns a task ID
+The MCP server is optional and is not registered in any agent by default; register `jev-mcp` (or
+`python jev_mcp_server.py`) manually if you want these tools. It offers `browser_task(goal, url, expect?, mode?)`. It returns a task ID
 and a checkpoint when the browser needs a human login, one-time code, CAPTCHA,
 or approval for a consequential click. After the human finishes in the same
 Chrome tab, call `browser_task_resume(task_id, checkpoint)`. If the result
